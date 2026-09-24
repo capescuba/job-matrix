@@ -327,12 +327,14 @@ export function buildApp(
       .object({
         anthropicApiKey: z.string().max(500).nullable().optional(),
         aiModel: z.string().max(100).nullable().optional(),
+        aiResearchModel: z.string().max(100).nullable().optional(),
         aiEffort: z.enum(EFFORTS).nullable().optional(),
       })
       .parse(req.body);
     return updateSettings({
       ...(body.anthropicApiKey !== undefined && { ANTHROPIC_API_KEY: body.anthropicApiKey }),
       ...(body.aiModel !== undefined && { AI_MODEL: body.aiModel }),
+      ...(body.aiResearchModel !== undefined && { AI_RESEARCH_MODEL: body.aiResearchModel }),
       ...(body.aiEffort !== undefined && { AI_EFFORT: body.aiEffort }),
     });
   });

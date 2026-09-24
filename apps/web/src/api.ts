@@ -153,6 +153,8 @@ export const api = {
   updateSettings: (patch: {
     anthropicApiKey?: string | null;
     aiModel?: string | null;
+    /** null = same as the fit model. */
+    aiResearchModel?: string | null;
     aiEffort?: Settings['effort'] | null;
   }) => request<Settings>('PUT', '/api/settings', patch),
 };

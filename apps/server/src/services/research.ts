@@ -13,7 +13,7 @@ import { companies, companyResearch, jobs } from '../db/schema.ts';
 import { startRun } from './aiEvents.ts';
 import { NotFoundError } from './applications.ts';
 import { getProfile } from './resume.ts';
-import { currentEffort } from './settings.ts';
+import { currentEffort, getSettings } from './settings.ts';
 import { recordUsage } from './usage.ts';
 
 /** Searches allowed per brief — the main cost driver after tokens. */
@@ -144,7 +144,7 @@ async function researchCompany(
           .orderBy(desc(jobs.id))
           .get();
   const { provider } = opts;
-  const model = provider.defaultModel;
+  const model = getSettings().researchModel;
   const run = startRun(`Researching ${company.name}`, opts.applicationId ?? null, companyId);
   run.step(
     `Researching ${company.name} with web search`,

@@ -19,7 +19,7 @@ export function getProvider(): LLMProvider {
   const name = (process.env.AI_PROVIDER ?? 'anthropic').toLowerCase();
   switch (name) {
     case 'anthropic':
-      cached = new AnthropicProvider(process.env.AI_MODEL || 'claude-opus-5');
+      cached = new AnthropicProvider(process.env.AI_MODEL || 'claude-opus-5-5');
       return cached;
     default:
       throw new LLMError(`Unknown AI_PROVIDER "${name}". Supported: anthropic`);

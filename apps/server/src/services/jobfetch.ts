@@ -65,6 +65,9 @@ function relative(text: string | null | undefined, source: string): PostedInfo |
   return date ? { date, source, approx: true, raw: clean ?? null } : null;
 }
 
+/** Filler some sites put in address fields (e.g. GitHub's careers site: "UNAVAILABLE"). */
+const PLACEHOLDER = /^(unavailable|not available|n\/?a|none|null|unknown|tbd|-+)$/i;
+
 /** Feeds use 0 as "not provided" — treat anything non-positive as missing. */
 const positive = (n: number | null | undefined) => (typeof n === 'number' && n > 0 ? n : null);
 
@@ -446,7 +449,7 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
     if (!jp?.description) continue;
     const loc = Array.isArray(jp.jobLocation) ? jp.jobLocation[0] : jp.jobLocation;
     const place = [loc?.address?.addressLocality, loc?.address?.addressRegion]
-      .filter(Boolean)
+      .filter((p) => p && !PLACEHOLDER.test(p.trim()))
       .join(', ');
     const sal = jp.baseSalary?.value;
     const annual = !sal?.unitText || /year/i.test(sal.unitText);

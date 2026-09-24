@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   RELATIONSHIPS,
   REMOTE_TYPES,
@@ -14,7 +14,8 @@ import { api, type ApplicationDetail, type FitAssessment } from '../api.ts';
 import { StatusBadge, postedOf } from '../components/badges.tsx';
 import { ActivityLog } from '../components/ActivityLog.tsx';
 import { CompanyInsights } from '../components/CompanyInsights.tsx';
-import { FitPanel } from '../components/FitPanel.tsx';
+import { useDecisionData } from '../components/Decision.tsx';
+import { FitDetails, FitSummary, InterviewPrep } from '../components/FitPanel.tsx';
 import { Button, Card, ErrorText, Field, Input, Select, Textarea, cx } from '../components/ui.tsx';
 
 export default function ApplicationDetailPage() {
@@ -27,6 +28,14 @@ export default function ApplicationDetailPage() {
   if (error || !data) return <ErrorText error={error ?? 'Not found'} />;
   return <Detail data={data} />;
 }
+
+const TABS = [
+  { key: 'fit', label: 'Fit details' },
+  { key: 'prep', label: 'Interview prep' },
+  { key: 'company', label: 'Company' },
+  { key: 'job', label: 'Job description' },
+] as const;
+type Tab = (typeof TABS)[number]['key'];
 
 function useInvalidate(id: number) {
   const qc = useQueryClient();
@@ -41,6 +50,12 @@ function Detail({ data }: { data: ApplicationDetail }) {
   const posted = postedOf(job);
   const invalidate = useInvalidate(app.id);
   const navigate = useNavigate();
+  const { brief } = useDecisionData(app.id, company.id);
+  // The open tab is in the URL, so a link or refresh keeps it. No description yet → start there.
+  const [params, setParams] = useSearchParams();
+  const tab: Tab =
+    TABS.find((t) => t.key === params.get('tab'))?.key ?? (job.descriptionText ? 'fit' : 'job');
+  const setTab = (t: Tab) => setParams(t === 'fit' ? {} : { tab: t }, { replace: true });
 
   const patchApp = useMutation({
     mutationFn: (p: ApplicationPatch) => api.updateApplication(app.id, p),
@@ -103,7 +118,37 @@ function Detail({ data }: { data: ApplicationDetail }) {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
+      <FitSummary data={data} onShowDetails={() => setTab('fit')} />
+
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="min-w-0">
+          <div className="mb-3 flex flex-wrap gap-1 border-b border-border" role="tablist">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
+                className={cx(
+                  '-mb-px border-b-2 px-3 py-1.5 text-sm',
+                  tab === t.key
+                    ? 'border-accent font-medium text-ink'
+                    : 'border-transparent text-ink-2 hover:text-ink',
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {tab === 'fit' && <FitDetails fit={fits[0] as FitAssessment | undefined} />}
+          {tab === 'prep' && (
+            <InterviewPrep fit={fits[0] as FitAssessment | undefined} brief={brief} />
+          )}
+          {tab === 'company' && (
+            <CompanyInsights companyId={company.id} companyName={company.name} />
+          )}
+          {tab === 'job' && <JobCard data={data} onSaved={invalidate} />}
+        </div>
         <div className="space-y-4">
           <TrackingCard
             data={data}
@@ -111,17 +156,8 @@ function Detail({ data }: { data: ApplicationDetail }) {
             saving={patchApp.isPending}
             error={patchApp.error}
           />
-          <JobCard data={data} onSaved={invalidate} />
-          <ContactsCard data={data} onChanged={invalidate} />
-        </div>
-        <div className="space-y-4">
-          <FitPanel
-            applicationId={app.id}
-            fit={fits[0] as FitAssessment | undefined}
-            hasDescription={Boolean(job.descriptionText?.trim())}
-          />
-          <CompanyInsights companyId={company.id} companyName={company.name} />
           <ActivityLog data={data} onChanged={invalidate} />
+          <ContactsCard data={data} onChanged={invalidate} />
           <div className="text-right">
             <Button
               variant="danger"
@@ -182,7 +218,7 @@ function TrackingCard({
         </Button>
       }
     >
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3">
         <Field label="Status">
           <Select value={f.status} onChange={set('status')}>
             {STATUSES.map((s) => (
@@ -203,7 +239,7 @@ function TrackingCard({
         <Field label="By">
           <Input type="date" value={f.nextActionDate} onChange={set('nextActionDate')} />
         </Field>
-        <Field label="Notes" className="col-span-2 sm:col-span-4">
+        <Field label="Notes" className="col-span-2">
           <Textarea rows={3} value={f.notes} onChange={set('notes')} />
         </Field>
       </div>
@@ -453,7 +489,7 @@ function ContactsCard({ data, onChanged }: { data: ApplicationDetail; onChanged:
       </ul>
       {adding && (
         <form
-          className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4"
+          className="mt-2 grid grid-cols-2 gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             add.mutate();
@@ -468,7 +504,7 @@ function ContactsCard({ data, onChanged }: { data: ApplicationDetail; onChanged:
             ))}
           </Select>
           <Input placeholder="LinkedIn URL" value={f.linkedinUrl} onChange={set('linkedinUrl')} />
-          <div className="col-span-2 flex justify-end gap-2 sm:col-span-4">
+          <div className="col-span-2 flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setAdding(false)}>
               Cancel
             </Button>
