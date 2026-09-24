@@ -113,6 +113,23 @@ describe('fetchJobPosting', () => {
     });
   });
 
+  it('ignores placeholder address fields like "UNAVAILABLE"', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Staff TPM',
+      description: `<p>${LONG}</p>`,
+      jobLocation: { address: { addressLocality: 'UNAVAILABLE', addressRegion: 'UNAVAILABLE' } },
+      jobLocationType: 'TELECOMMUTE',
+    };
+    const { f } = fakeFetch({
+      'https://githubinc.jibeapply.com/': {
+        body: `<html><script type="application/ld+json">${JSON.stringify(ld)}</script></html>`,
+      },
+    });
+    const job = await fetchJobPosting('https://githubinc.jibeapply.com/jobs/5744', f);
+    expect(job).toMatchObject({ location: null, remoteType: 'Remote' });
+  });
+
   it('falls back to the page when a specific API fails', async () => {
     const { f } = fakeFetch({
       'https://boards-api.greenhouse.io/': { status: 404, body: '' },
