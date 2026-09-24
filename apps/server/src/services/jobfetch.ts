@@ -415,12 +415,18 @@ function findJobPosting(node: unknown): LdJobPosting | null {
 /** Any page: schema.org JobPosting JSON-LD first, else the readable text of <main>. */
 async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
   const html = await getText(f, u.toString());
-  const pageText = htmlToText(html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? html);
-  const closedPhrase = pageText.match(CLOSED_TEXT)?.[0];
-  for (const m of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+  const ldBlocks = [
+    ...html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi),
+  ].map((m) => m[1]);
+  // Drop code before looking for the body: scripts can hold text that's never shown — e.g. a
+  // site's "this job may be no longer available" error message, or the literal text "<body".
+  const visible = html.replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1\s*>/gi, ' ');
+  const body = visible.match(/<body[\s\S]*<\/body>/i)?.[0] ?? visible;
+  const closedPhrase = htmlToText(body).match(CLOSED_TEXT)?.[0];
+  for (const block of ldBlocks) {
     let data: unknown;
     try {
-      data = JSON.parse(m[1].trim());
+      data = JSON.parse(block.trim());
     } catch {
       continue;
     }
@@ -440,17 +446,19 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
       salaryMax: annual ? (sal?.maxValue ?? null) : null,
       descriptionText: htmlToText(jp.description),
       posted: exact(jp.datePosted, 'Page structured data (schema.org datePosted)'),
-      closedHint:
-        jp.validThrough && Date.parse(jp.validThrough) < Date.now()
+      // The posting's own "valid through" date is the most direct evidence: a future one means
+      // open, whatever the page text says; only without one do page phrases count.
+      closedHint: !jp.validThrough
+        ? closedPhrase
+          ? `Page says "${closedPhrase}"`
+          : null
+        : Date.parse(jp.validThrough) < Date.now()
           ? `Listing expired ${toDate(jp.validThrough)}`
-          : closedPhrase
-            ? `Page says "${closedPhrase}"`
-            : null,
+          : null,
       via: 'Page structured data',
     });
   }
-  const main =
-    html.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? '';
+  const main = visible.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? body;
   const text = htmlToText(main.replace(/<(nav|header|footer|form|button)[\s\S]*?<\/\1>/gi, ' '));
   if (
     text.length < 800 ||

@@ -294,3 +294,52 @@ describe('describePosted', () => {
     ).toMatch(/^Source not recorded/);
   });
 });
+
+describe('closed-posting detection ignores text the page never shows', () => {
+  // Modelled on careers.docusign.com: a head script carries the site's error messages (and the
+  // literal text "<body"), which used to leak into the page text and mark open jobs closed.
+  const siteMessages = `<script>window.i18n = {"ERROR":{"NO_JOBS_404":"We’re sorry, but it looks like this job may be no longer available or does not exist."},"TPL":"<body class='x'>"};</script>`;
+
+  it('does not flag a job closed because of hidden script strings', async () => {
+    const html = `<html><head>${siteMessages}</head><body><main><h1>TPM</h1><p>${LONG}${LONG}</p></main></body></html>`;
+    const { f } = fakeFetch({ 'https://careers.example.com/': { body: html } });
+    expect((await checkPosting('https://careers.example.com/jobs/1', f)).postingStatus).toBe(
+      'open',
+    );
+  });
+
+  it('trusts a future validThrough in structured data', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Sr. TPM',
+      description: `<p>${LONG}</p>`,
+      datePosted: '2026-08-13T16:31:00+0000',
+      validThrough: '2099-08-13T16:31:59.000Z',
+    };
+    const html = `<html><head>${siteMessages}<script type="application/ld+json">${JSON.stringify(ld)}</script></head><body><p>${LONG}</p></body></html>`;
+    const { f } = fakeFetch({ 'https://careers.example.com/': { body: html } });
+    const r = await checkPosting('https://careers.example.com/jobs/2', f);
+    expect(r).toMatchObject({ postingStatus: 'open', posted: { date: '2026-08-13' } });
+  });
+
+  it('still flags an expired validThrough, and visible closed text when there is no date', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'TPM',
+      description: `<p>${LONG}</p>`,
+      validThrough: '2020-01-01',
+    };
+    const { f } = fakeFetch({
+      'https://careers.example.com/a': {
+        body: `<script type="application/ld+json">${JSON.stringify(ld)}</script>`,
+      },
+      'https://careers.example.com/b': {
+        body: `<body><main><p>This position has been filled. ${LONG}${LONG}</p></main></body>`,
+      },
+    });
+    expect((await checkPosting('https://careers.example.com/a', f)).postingNote).toMatch(
+      /Listing expired 2020-01-01/,
+    );
+    expect((await checkPosting('https://careers.example.com/b', f)).postingStatus).toBe('closed');
+  });
+});
