@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import {
+  NOT_APPLIED_STATUSES,
   guessSource,
   quickAddSchema,
   type ActivityInput,
@@ -43,7 +44,7 @@ export function planStatusChange(
   now = new Date(),
 ): { changed: boolean; appliedAt: string | null } {
   if (current.status === next) return { changed: false, appliedAt: current.appliedAt };
-  const needsApplied = next !== 'Saved' && next !== 'Withdrawn' && !current.appliedAt;
+  const needsApplied = !NOT_APPLIED_STATUSES.includes(next) && !current.appliedAt;
   return { changed: true, appliedAt: needsApplied ? today(now) : current.appliedAt };
 }
 
@@ -79,8 +80,7 @@ export function createApplication(db: Db, raw: QuickAddInput, now = new Date()) 
       .returning({ id: jobs.id })
       .get();
     const appliedAt =
-      input.appliedAt ||
-      (input.status !== 'Saved' && input.status !== 'Withdrawn' ? today(now) : null);
+      input.appliedAt || (NOT_APPLIED_STATUSES.includes(input.status) ? null : today(now));
     const app = tx
       .insert(applications)
       .values({ jobId: job.id, status: input.status, appliedAt, notes: input.notes || null })
@@ -133,6 +133,12 @@ export interface ApplicationRow {
   postingStatus: 'open' | 'closed' | null;
   postingNote: string | null;
   contactCount: number;
+  applicantCount: number | null;
+  descriptionSource: string | null;
+  /** First ~600 chars of the description, for inbox cards. */
+  descriptionPreview: string | null;
+  fitSummary: string | null;
+  fitWhyNotHigher: string | null;
 }
 
 type RawRow = Omit<ApplicationRow, 'fitGateReasons' | 'outreachRecommended' | 'postedApprox'> & {
@@ -158,6 +164,10 @@ export function listApplications(db: Db): ApplicationRow[] {
            j.posted_approx AS postedApprox, j.posted_raw AS postedRaw,
            j.posting_status AS postingStatus, j.posting_note AS postingNote,
            (SELECT count(*) FROM contacts ct WHERE ct.company_id = c.id) AS contactCount,
+           j.applicant_count AS applicantCount, j.description_source AS descriptionSource,
+           substr(j.description_text, 1, 600) AS descriptionPreview,
+           json_extract(f.result, '$.summary') AS fitSummary,
+           json_extract(f.result, '$.whyNotHigher') AS fitWhyNotHigher,
            COALESCE((SELECT max(at) FROM activities WHERE application_id = a.id), a.applied_at) AS lastActivityAt
     FROM applications a
     JOIN jobs j ON j.id = a.job_id
@@ -249,7 +259,9 @@ export function updateApplication(
 }
 
 export function updateJob(db: Db, id: number, patch: JobPatch) {
-  const values: Partial<typeof jobs.$inferInsert> = { ...patch };
+  const { companyName, ...rest } = patch;
+  const values: Partial<typeof jobs.$inferInsert> = { ...rest };
+  if (companyName) values.companyId = findOrCreateCompany(db, companyName);
   if (patch.postingStatus !== undefined) values.postingCheckedAt = new Date().toISOString();
   if (patch.postedAt !== undefined) {
     const current = db.select({ postedAt: jobs.postedAt }).from(jobs).where(eq(jobs.id, id)).get();

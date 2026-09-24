@@ -7,6 +7,7 @@ import type {
   JobPatch,
   ProfilePatch,
   QuickAddInput,
+  Status,
 } from '@jm/shared';
 import type {
   ApplicationRow,
@@ -19,6 +20,7 @@ import type {
 } from '../../server/src/services/jobfetch.ts';
 import type { FitBatchStatus } from '../../server/src/services/fit.ts';
 import type { getProfile } from '../../server/src/services/resume.ts';
+import type { CaptureResult } from '../../server/src/services/screening.ts';
 import type { getSettings } from '../../server/src/services/settings.ts';
 import type { getStats } from '../../server/src/services/stats.ts';
 import type { getCall, getUsageSummary } from '../../server/src/services/usage.ts';
@@ -83,7 +85,13 @@ export const api = {
       `/api/applications/${id}/fit${force ? '?force=1' : ''}`,
     ),
   /** Starts background scoring of every unscored job (or joins the running batch). */
-  startScoreAll: () => request<FitBatchStatus>('POST', '/api/fit/batch'),
+  startScoreAll: (status?: Status) =>
+    request<FitBatchStatus>(
+      'POST',
+      `/api/fit/batch${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+    ),
+  /** Add a job to the Screening inbox from its URL (server-side fetch). */
+  screenUrl: (url: string) => request<CaptureResult>('POST', '/api/screen/url', { url }),
   scoreAllStatus: () => request<FitBatchStatus | null>('GET', '/api/fit/batch'),
   /** Fetch a posting's details from its URL without saving (for forms). */
   fetchJob: (url: string) => request<FetchedJob>('POST', '/api/fetch-job', { url }),

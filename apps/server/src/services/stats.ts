@@ -2,6 +2,7 @@ import {
   CLOSED_STATUSES,
   RESPONSE_ACTIVITY_KINDS,
   RESPONSE_STATUSES,
+  SCREENING_STATUSES,
   STATUSES,
   type ActivityKind,
   type Status,
@@ -46,9 +47,11 @@ export function getStats(db: Db, now = new Date()) {
   }
 
   const byStatus = Object.fromEntries(STATUSES.map((s) => [s, 0])) as Record<Status, number>;
+  // Screening/Passed jobs were never applied to; keep them out of the pipeline numbers.
+  const pipelineApps = apps.filter((a) => !SCREENING_STATUSES.includes(a.status));
   for (const a of apps) byStatus[a.status] = (byStatus[a.status] ?? 0) + 1;
 
-  const applied = apps.filter((a) => a.appliedAt);
+  const applied = pipelineApps.filter((a) => a.appliedAt);
   const responded = applied.filter((a) => firstResponse.has(a.id));
   const responseDays = responded
     .map((a) => firstResponse.get(a.id)!)
@@ -71,13 +74,15 @@ export function getStats(db: Db, now = new Date()) {
 
   // Average fit score by outcome bucket — do high-fit jobs convert?
   const bucket = (s: Status) =>
-    s === 'Saved'
-      ? 'Not applied'
-      : s === 'Applied' || s === 'Ghosted'
-        ? 'No response'
-        : s === 'Rejected' || s === 'Withdrawn'
-          ? 'Rejected / withdrawn'
-          : 'Interviewing / offer';
+    s === 'Passed'
+      ? 'Passed at screening'
+      : s === 'Saved' || s === 'Screening'
+        ? 'Not applied'
+        : s === 'Applied' || s === 'Ghosted'
+          ? 'No response'
+          : s === 'Rejected' || s === 'Withdrawn'
+            ? 'Rejected / withdrawn'
+            : 'Interviewing / offer';
   const fitGroups = new Map<string, number[]>();
   for (const a of apps) {
     if (a.fitScore == null) continue;
@@ -97,8 +102,17 @@ export function getStats(db: Db, now = new Date()) {
 
   const soon = today(new Date(now.getTime() + 7 * DAY));
   return {
-    total: apps.length,
-    active: apps.filter((a) => a.status !== 'Saved' && !CLOSED_STATUSES.includes(a.status)).length,
+    total: pipelineApps.length,
+    active: pipelineApps.filter((a) => a.status !== 'Saved' && !CLOSED_STATUSES.includes(a.status))
+      .length,
+    screening: byStatus.Screening,
+    passedThisWeek: db.$client
+      .prepare(
+        `SELECT count(DISTINCT application_id) FROM status_events
+         WHERE to_status = 'Passed' AND at >= ?`,
+      )
+      .pluck()
+      .get(new Date(now.getTime() - 7 * DAY).toISOString()) as number,
     applied: applied.length,
     byStatus,
     responseRate: applied.length ? responded.length / applied.length : null,

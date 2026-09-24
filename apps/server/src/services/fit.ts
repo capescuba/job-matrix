@@ -9,6 +9,7 @@ import {
   type FitPartKey,
   splitLines,
   type FitResult,
+  type Status,
   type Gate,
   type GateReason,
 } from '@jm/shared';
@@ -435,16 +436,17 @@ export async function assessFit(
 
 const tokensApprox = (s: string) => Math.round(s.length / 4);
 
-/** Application ids whose job has a description but no current-version assessment. */
-export function unscoredApplicationIds(db: Db): number[] {
+/** Application ids whose job has a description but no assessment yet (optionally one status). */
+export function unscoredApplicationIds(db: Db, status?: Status): number[] {
   return db.$client
     .prepare(
       `SELECT a.id FROM applications a JOIN jobs j ON j.id = a.job_id
        WHERE length(coalesce(j.description_text, '')) > 0
-         AND NOT EXISTS (SELECT 1 FROM fit_assessments f WHERE f.job_id = j.id)`,
+         AND NOT EXISTS (SELECT 1 FROM fit_assessments f WHERE f.job_id = j.id)
+         AND (? IS NULL OR a.status = ?)`,
     )
     .pluck()
-    .all() as number[];
+    .all(status ?? null, status ?? null) as number[];
 }
 
 /**
@@ -524,10 +526,10 @@ export const fitBatchStatus = () => batch;
  */
 export function startFitBatch(
   db: Db,
-  opts: { concurrency?: number; provider?: LLMProvider } = {},
+  opts: { concurrency?: number; provider?: LLMProvider; status?: Status } = {},
 ): FitBatchStatus {
   if (batch?.running) return batch;
-  const ids = unscoredApplicationIds(db);
+  const ids = unscoredApplicationIds(db, opts.status);
   const state: FitBatchStatus = {
     running: ids.length > 0,
     total: ids.length,

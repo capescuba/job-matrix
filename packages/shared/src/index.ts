@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 export const STATUSES = [
+  /** Captured, not yet decided on — lives in the Screening inbox. */
+  'Screening',
   'Saved',
   'Applied',
   'Recruiter Screen',
@@ -10,11 +12,25 @@ export const STATUSES = [
   'Rejected',
   'Withdrawn',
   'Ghosted',
+  /** Screened and decided against. */
+  'Passed',
 ] as const;
 export type Status = (typeof STATUSES)[number];
 
 /** Terminal states — the application is closed. */
-export const CLOSED_STATUSES: readonly Status[] = ['Offer', 'Rejected', 'Withdrawn', 'Ghosted'];
+export const CLOSED_STATUSES: readonly Status[] = [
+  'Offer',
+  'Rejected',
+  'Withdrawn',
+  'Ghosted',
+  'Passed',
+];
+
+/** Statuses that mean you never applied: no applied date, kept out of pipeline stats. */
+export const NOT_APPLIED_STATUSES: readonly Status[] = ['Screening', 'Saved', 'Withdrawn', 'Passed'];
+
+/** Owned by the Screening page; hidden from the Applications list and Kanban by default. */
+export const SCREENING_STATUSES: readonly Status[] = ['Screening', 'Passed'];
 
 /** Statuses that mean the employer actually responded (used for response-rate stats). */
 export const RESPONSE_STATUSES: readonly Status[] = [
@@ -98,6 +114,8 @@ export const jobPatchSchema = z.object({
   salaryMax: z.number().int().nullable().optional(),
   descriptionText: z.string().nullable().optional(),
   postedAt: z.string().nullable().optional(),
+  /** Move the job to this company (created if new) — e.g. fixing a captured "Unknown". */
+  companyName: z.string().trim().min(1).optional(),
   /** Manual override, e.g. when one site says filled and another says open. */
   postingStatus: z.enum(['open', 'closed']).nullable().optional(),
   postingNote: z.string().nullable().optional(),
@@ -251,6 +269,55 @@ export interface GateReason {
   status: 'fails' | 'unclear';
   note: string;
 }
+
+// ---------- screening capture ----------
+
+const optText = z.string().trim().max(200_000).nullable().optional();
+
+/** What the Chrome extension (or "Screen a URL") sends to capture a job. */
+export const captureSchema = z.object({
+  url: z.string().trim().url(),
+  pageTitle: optText,
+  /** Text the user highlighted — overrides everything else as the description. */
+  selectionText: optText,
+  /** Readable text of the whole page (fallback description). */
+  pageText: optText,
+  /** Raw schema.org JSON-LD blocks found on the page. */
+  jsonLd: z.array(z.string().max(200_000)).max(20).nullable().optional(),
+  /** Fields read by a site template (selectors). */
+  fields: z
+    .object({
+      title: optText,
+      company: optText,
+      location: optText,
+      salaryText: optText,
+      descriptionText: optText,
+    })
+    .nullable()
+    .optional(),
+  /** Name of the site template used, e.g. "LinkedIn (signed in)". */
+  templateName: optText,
+  /** Signed-in LinkedIn details. */
+  linkedin: z
+    .object({
+      applicantsText: optText,
+      insights: z.array(z.string().max(500)).max(20).nullable().optional(),
+      hiringTeam: z
+        .array(
+          z.object({
+            name: z.string().trim().min(1).max(200),
+            title: optText,
+            profileUrl: optText,
+          }),
+        )
+        .max(20)
+        .nullable()
+        .optional(),
+    })
+    .nullable()
+    .optional(),
+});
+export type CaptureInput = z.input<typeof captureSchema>;
 
 // ---------- posted dates ----------
 

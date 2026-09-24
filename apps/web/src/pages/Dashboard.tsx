@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { STATUSES } from '@jm/shared';
+import { SCREENING_STATUSES, STATUSES } from '@jm/shared';
 import { api, type Stats } from '../api.ts';
 import { useState } from 'react';
 import { Card, ErrorText, cx } from '../components/ui.tsx';
@@ -16,7 +16,11 @@ export default function DashboardPage() {
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Dashboard</h1>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Tile label="Applied" value={data.applied} sub={`${data.total} tracked`} />
+        <Tile
+          label="Applied"
+          value={data.applied}
+          sub={`${data.total} tracked · ${data.screening} in screening`}
+        />
         <Tile label="Active pipeline" value={data.active} sub="applied, not closed" />
         <Tile
           label="Response rate"
@@ -36,7 +40,10 @@ export default function DashboardPage() {
         </Card>
         <Card title="Pipeline">
           <HBars
-            rows={STATUSES.map((s) => ({ label: s, value: data.byStatus[s] }))}
+            rows={STATUSES.filter((s) => !SCREENING_STATUSES.includes(s)).map((s) => ({
+              label: s,
+              value: data.byStatus[s],
+            }))}
             format={(v) => String(v)}
           />
         </Card>

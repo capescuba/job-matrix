@@ -9,6 +9,7 @@ import type { ApplicationRow } from '../api.ts';
 import { cx } from './ui.tsx';
 
 const statusTone: Record<Status, string> = {
+  Screening: 'text-warn border-warn/40',
   Saved: 'text-ink-2 border-border',
   Applied: 'text-accent border-accent/40',
   'Recruiter Screen': 'text-accent border-accent/40',
@@ -18,6 +19,7 @@ const statusTone: Record<Status, string> = {
   Rejected: 'text-bad border-bad/40',
   Withdrawn: 'text-ink-3 border-border',
   Ghosted: 'text-ink-3 border-border',
+  Passed: 'text-ink-3 border-border',
 };
 
 export function StatusBadge({ status }: { status: Status }) {

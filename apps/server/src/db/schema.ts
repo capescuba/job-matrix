@@ -35,6 +35,10 @@ export const jobs = sqliteTable(
     salaryMax: integer('salary_max'),
     descriptionText: text('description_text'),
     descriptionHash: text('description_hash'),
+    /** Where the description came from, e.g. "Your selection", "LinkedIn template", "Greenhouse API". */
+    descriptionSource: text('description_source'),
+    /** Signed-in LinkedIn extras: "people you know", alumni, etc. (string[]) */
+    linkedinInsights: text('linkedin_insights', { mode: 'json' }),
     postedAt: text('posted_at'),
     /** Where postedAt came from, e.g. "Ashby publishedAt"; null for dates saved before tracking. */
     postedSource: text('posted_source'),
