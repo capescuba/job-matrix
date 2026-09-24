@@ -7,11 +7,13 @@ import { FIT_SYSTEM_PROMPT, unscoredApplicationIds } from './fit.ts';
 import { getDefaultResume, getProfile } from './resume.ts';
 import { getSettings } from './settings.ts';
 
-export type Feature = 'fit';
+export type Feature = 'fit' | 'research';
 
 /** Output tokens (incl. thinking) a fit assessment typically uses, for forecasts before any history exists. */
 const FIT_OUTPUT_TOKENS_GUESS = 4_000;
 const CHARS_PER_TOKEN = 4;
+/** Research cost before history exists — measured: DocuSign on Opus 5, 6 searches, ~108k tokens in = $0.78. */
+const RESEARCH_ESTIMATE_USD = 0.8;
 
 /** Logs one AI call (with its full trace when available). Returns the row id. */
 export function recordUsage(
@@ -181,9 +183,16 @@ function forecastFitBatch(
     });
     basis = 'estimate';
   }
+  const research = rows.filter(
+    (r) => r.feature === 'research' && r.model === model && r.costUsd != null,
+  );
+  const researchPerCallUsd = research.length
+    ? research.reduce((s, r) => s + r.costUsd!, 0) / research.length
+    : RESEARCH_ESTIMATE_USD;
   return {
     model,
     modelLabel: pricingFor(model)?.label ?? model,
+    researchPerCallUsd,
     pending: ids.length,
     perCallUsd,
     totalUsd: perCallUsd == null ? null : perCallUsd * ids.length,

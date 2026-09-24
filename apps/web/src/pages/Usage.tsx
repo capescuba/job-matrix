@@ -15,7 +15,7 @@ const tokens = (n: number) =>
     : n >= 1_000
       ? `${(n / 1_000).toFixed(1)}k`
       : String(n);
-const FEATURE_LABELS: Record<string, string> = { fit: 'Fit scoring' };
+const FEATURE_LABELS: Record<string, string> = { fit: 'Fit scoring', research: 'Company research' };
 
 export default function UsagePage() {
   const { data, error, isLoading } = useQuery({ queryKey: ['usage'], queryFn: api.usage });

@@ -209,6 +209,23 @@ export const aiUsage = sqliteTable(
   (t) => [index('ai_usage_at').on(t.at)],
 );
 
+/** Cited company briefs from web research; the latest row per company is the current one. */
+export const companyResearch = sqliteTable(
+  'company_research',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    companyId: integer('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    model: text('model').notNull(),
+    usageId: integer('usage_id'),
+    ticker: text('ticker'),
+    result: text('result', { mode: 'json' }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('company_research_company').on(t.companyId)],
+);
+
 /** Gaps from each assessment, stored separately so recurring themes can be counted. */
 export const fitGaps = sqliteTable(
   'fit_gaps',

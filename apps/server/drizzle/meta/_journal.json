@@ -50,6 +50,13 @@
       "when": 1790286376180,
       "tag": "0006_screening",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790289031147,
+      "tag": "0007_company_research",
+      "breakpoints": true
     }
   ]
 }

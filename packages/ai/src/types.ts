@@ -5,6 +5,8 @@ export type LLMEvent =
   | { type: 'request'; model: string; effort: Effort | null }
   | { type: 'thinking'; text: string }
   | { type: 'output'; text: string }
+  | { type: 'search'; query: string }
+  | { type: 'searchResults'; count: number }
   | { type: 'usage'; usage: TokenUsage };
 
 export interface StructuredRequest<S extends z.ZodType> {
@@ -17,6 +19,14 @@ export interface StructuredRequest<S extends z.ZodType> {
   effort?: Effort;
   /** Called with thinking/output deltas as they stream in. */
   onEvent?: (e: LLMEvent) => void;
+  /** Let the model search the web (a server-side tool, billed per search). */
+  webSearch?: { maxUses: number };
+  /**
+   * false = describe the schema in the prompt instead of enforcing it while decoding — for
+   * schemas too large for the API's structured-output grammar. The reply is validated, and
+   * repaired once with a small follow-up call if it doesn't match.
+   */
+  constrained?: boolean;
 }
 
 export const EFFORTS = ['low', 'medium', 'high'] as const;
@@ -27,6 +37,8 @@ export interface TokenUsage {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Web searches the model ran (billed per search). */
+  webSearches?: number;
 }
 
 /** What was actually sent and received — kept for the request inspector. */

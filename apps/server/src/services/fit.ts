@@ -526,7 +526,13 @@ export const fitBatchStatus = () => batch;
  */
 export function startFitBatch(
   db: Db,
-  opts: { concurrency?: number; provider?: LLMProvider; status?: Status } = {},
+  opts: {
+    concurrency?: number;
+    provider?: LLMProvider;
+    status?: Status;
+    /** What to run per application; defaults to the fit score alone. */
+    task?: (applicationId: number) => Promise<unknown>;
+  } = {},
 ): FitBatchStatus {
   if (batch?.running) return batch;
   const ids = unscoredApplicationIds(db, opts.status);
@@ -545,7 +551,7 @@ export function startFitBatch(
     while (next < ids.length) {
       const id = ids[next++];
       try {
-        await assessFit(db, id, { provider: opts.provider });
+        await (opts.task ? opts.task(id) : assessFit(db, id, { provider: opts.provider }));
         state.scored++;
       } catch (e) {
         state.failed.push({ applicationId: id, error: (e as Error).message });

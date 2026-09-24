@@ -139,6 +139,8 @@ export interface ApplicationRow {
   descriptionPreview: string | null;
   fitSummary: string | null;
   fitWhyNotHigher: string | null;
+  /** When the company's latest research brief was made (null = never). */
+  researchAt: string | null;
 }
 
 type RawRow = Omit<ApplicationRow, 'fitGateReasons' | 'outreachRecommended' | 'postedApprox'> & {
@@ -168,6 +170,7 @@ export function listApplications(db: Db): ApplicationRow[] {
            substr(j.description_text, 1, 600) AS descriptionPreview,
            json_extract(f.result, '$.summary') AS fitSummary,
            json_extract(f.result, '$.whyNotHigher') AS fitWhyNotHigher,
+           (SELECT max(created_at) FROM company_research cr WHERE cr.company_id = c.id) AS researchAt,
            COALESCE((SELECT max(at) FROM activities WHERE application_id = a.id), a.applied_at) AS lastActivityAt
     FROM applications a
     JOIN jobs j ON j.id = a.job_id

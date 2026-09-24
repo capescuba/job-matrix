@@ -13,6 +13,7 @@ import {
 import { api, type ApplicationDetail, type FitAssessment } from '../api.ts';
 import { StatusBadge, postedOf } from '../components/badges.tsx';
 import { ActivityLog } from '../components/ActivityLog.tsx';
+import { CompanyInsights } from '../components/CompanyInsights.tsx';
 import { FitPanel } from '../components/FitPanel.tsx';
 import { Button, Card, ErrorText, Field, Input, Select, Textarea, cx } from '../components/ui.tsx';
 
@@ -119,6 +120,7 @@ function Detail({ data }: { data: ApplicationDetail }) {
             fit={fits[0] as FitAssessment | undefined}
             hasDescription={Boolean(job.descriptionText?.trim())}
           />
+          <CompanyInsights companyId={company.id} companyName={company.name} />
           <ActivityLog data={data} onChanged={invalidate} />
           <div className="text-right">
             <Button

@@ -6,6 +6,8 @@ export interface AiRun {
   id: string;
   label: string;
   applicationId: number | null;
+  /** Set for company-level runs (research). */
+  companyId: number | null;
   startedAt: number;
   steps: { at: number; text: string; detail?: string }[];
   thinking: string;
@@ -33,6 +35,7 @@ function apply(e: RunEventEnvelope) {
       id: e.runId,
       label: e.label,
       applicationId: e.applicationId,
+      companyId: e.companyId,
       startedAt: e.at,
       steps: [],
       thinking: '',
@@ -122,8 +125,35 @@ const OUTPUT_KEYS = [
  * Real progress, from what's actually streamed: sending → thinking → each section of the answer
  * as the model writes it. Returns 0–1 and a label.
  */
+const RESEARCH_KEYS = [
+  'flags',
+  'snapshot',
+  'momentum',
+  'news',
+  'culture',
+  'interview',
+  'comp',
+  'financials',
+  'questionsToAsk',
+  'sources',
+];
+
 export function runProgress(run: AiRun): { value: number; label: string } {
   if (run.result) return { value: 1, label: run.result.ok ? 'Done' : 'Failed' };
+  if (run.companyId != null) {
+    // Research: searching (up to ~8) then writing the brief section by section.
+    const searches = run.steps.filter((s) => s.text.startsWith('Searching')).length;
+    const json = run.output.slice(run.output.indexOf('{') + 1);
+    if (run.output.includes('{')) {
+      const written = RESEARCH_KEYS.filter((k) => json.includes(`"${k}"`)).length;
+      const current = RESEARCH_KEYS[Math.max(0, written - 1)];
+      return { value: 0.5 + 0.45 * (written / RESEARCH_KEYS.length), label: `Writing: ${current}` };
+    }
+    return {
+      value: 0.05 + 0.4 * Math.min(1, searches / 8),
+      label: searches ? `Searching (${searches} so far)` : 'Starting',
+    };
+  }
   if (run.output) {
     const written = OUTPUT_KEYS.filter((k) => run.output.includes(`"${k}"`)).length;
     const current = OUTPUT_KEYS[Math.max(0, written - 1)];

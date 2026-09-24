@@ -1,11 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { RESEARCH_MAX_AGE_DAYS } from '@jm/shared';
 import { api, type ApplicationRow } from '../api.ts';
 import { useAiRuns } from '../aiActivity.ts';
 import { FitBadge, FlagChips, jobFlags } from '../components/badges.tsx';
+import { CompanyInsights } from '../components/CompanyInsights.tsx';
 import { LiveRun } from '../components/LiveRun.tsx';
 import { Button, ErrorText, Input, cx } from '../components/ui.tsx';
+
+/** Research younger than RESEARCH_MAX_AGE_DAYS is reused, so Score won't pay for it again. */
+const researchFresh = (at: string | null) =>
+  !!at && Date.now() - Date.parse(at) < RESEARCH_MAX_AGE_DAYS * 86_400_000;
 
 /**
  * The Screening inbox: jobs captured (by the extension or "Screen a URL") waiting for a decision.
@@ -39,7 +45,7 @@ export default function ScreeningPage() {
   const unscored = inbox.filter((r) => r.hasDescription && r.fitScore == null);
 
   const scoreAll = useMutation({
-    mutationFn: () => api.startScoreAll('Screening'),
+    mutationFn: () => api.startScoreAllWithResearch('Screening'),
     onSuccess: (s) => qc.setQueryData(['fitBatch'], s),
   });
   const { data: batch } = useQuery({
@@ -85,8 +91,16 @@ export default function ScreeningPage() {
                 onClick={async () => {
                   const u = await qc.fetchQuery({ queryKey: ['usage'], queryFn: api.usage });
                   const each = u.forecast.perCallUsd;
+                  // Research runs once per company that has no fresh brief.
+                  const toResearch = new Set(
+                    unscored.filter((r) => !researchFresh(r.researchAt)).map((r) => r.companyId),
+                  ).size;
+                  const total =
+                    (each ?? 0) * unscored.length + u.forecast.researchPerCallUsd * toResearch;
                   const cost =
-                    each != null ? ` for about $${(each * unscored.length).toFixed(2)}` : '';
+                    each != null
+                      ? ` for about $${total.toFixed(2)} (fit $${(each * unscored.length).toFixed(2)}${toResearch ? ` + research on ${toResearch} ${toResearch === 1 ? 'company' : 'companies'}` : ''})`
+                      : '';
                   if (
                     confirm(
                       `Score ${unscored.length} inbox jobs with ${u.forecast.modelLabel}${cost}?`,
@@ -181,9 +195,13 @@ function ScreeningCard({
   const [passing, setPassing] = useState(false);
   const [reason, setReason] = useState('');
   const [mountedAt] = useState(Date.now);
-  const run = useAiRuns().find(
-    (x) => x.applicationId === r.id && (!x.finishedAt || x.startedAt >= mountedAt - 1000),
+  const runs = useAiRuns().filter(
+    (x) =>
+      x.applicationId === r.id &&
+      x.companyId == null &&
+      (!x.finishedAt || x.startedAt >= mountedAt - 1000),
   );
+  const qc = useQueryClient();
 
   useEffect(() => {
     if (!focused) return;
@@ -194,8 +212,16 @@ function ScreeningCard({
   }, [focused]);
 
   const score = useMutation({
-    mutationFn: () => api.scoreFit(r.id, r.fitScore != null),
-    onSettled: onChanged,
+    mutationFn: () => api.analyze(r.id, r.fitScore != null),
+    onSettled: () => {
+      onChanged();
+      qc.invalidateQueries({ queryKey: ['research', r.companyId] });
+      qc.invalidateQueries({ queryKey: ['usage'] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteApplication(r.id),
+    onSuccess: onChanged,
   });
   const move = useMutation({
     mutationFn: (status: 'Saved' | 'Applied' | 'Screening') =>
@@ -212,7 +238,7 @@ function ScreeningCard({
       }),
     onSuccess: onChanged,
   });
-  const scoring = score.isPending || (run && !run.finishedAt);
+  const scoring = score.isPending || runs.some((x) => !x.finishedAt);
 
   return (
     <div
@@ -287,7 +313,26 @@ function ScreeningCard({
           )}
         </div>
       )}
-      {run && <div className="mt-3">{<LiveRun run={run} />}</div>}
+      {runs.length > 0 && (
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          {runs.map((x) => (
+            <LiveRun key={x.id} run={x} showLabel />
+          ))}
+        </div>
+      )}
+      {(score.data?.fitError || score.data?.researchError) && (
+        <p className="mt-2 text-sm text-warn">
+          {score.data.fitError && `Fit score failed: ${score.data.fitError}. `}
+          {score.data.researchError && `Company research failed: ${score.data.researchError}`}
+        </p>
+      )}
+      <div className="mt-3">
+        <CompanyInsights
+          key={r.researchAt ?? 'none'}
+          companyId={r.companyId}
+          companyName={r.company}
+        />
+      </div>
 
       <div className="mt-3 text-sm">
         {r.descriptionPreview ? (
@@ -326,7 +371,9 @@ function ScreeningCard({
               onClick={() => score.mutate()}
               title={
                 r.hasDescription
-                  ? 'Run the AI fit score (one paid call)'
+                  ? researchFresh(r.researchAt)
+                    ? 'AI fit score (paid); company research is recent and will be reused'
+                    : 'AI fit score + company research with web search (paid)'
                   : 'Needs a description first'
               }
             >
@@ -372,7 +419,19 @@ function ScreeningCard({
             Move back to inbox
           </Button>
         )}
-        <ErrorText error={score.error ?? move.error ?? pass.error} />
+        <Button
+          variant="ghost"
+          className="ml-auto text-ink-3"
+          disabled={remove.isPending}
+          onClick={() =>
+            confirm(
+              `Delete "${r.title}" at ${r.company}? This removes it and its scores completely.`,
+            ) && remove.mutate()
+          }
+        >
+          Delete
+        </Button>
+        <ErrorText error={score.error ?? move.error ?? pass.error ?? remove.error} />
       </div>
     </div>
   );

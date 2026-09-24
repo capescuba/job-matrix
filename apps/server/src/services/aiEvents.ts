@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
  * In memory only: the durable record of each call is the ai_usage row.
  */
 export type RunEvent =
-  | { type: 'start'; label: string; applicationId: number | null }
+  | { type: 'start'; label: string; applicationId: number | null; companyId: number | null }
   | { type: 'step'; text: string; detail?: string }
   | { type: 'thinking'; text: string }
   | { type: 'output'; text: string }
@@ -19,6 +19,7 @@ interface Run {
   id: string;
   label: string;
   applicationId: number | null;
+  companyId: number | null;
   startedAt: number;
   finished: boolean;
   events: RunEventEnvelope[];
@@ -37,11 +38,16 @@ export interface RunHandle {
   step(text: string, detail?: string): void;
 }
 
-export function startRun(label: string, applicationId: number | null): RunHandle {
+export function startRun(
+  label: string,
+  applicationId: number | null,
+  companyId: number | null = null,
+): RunHandle {
   const run: Run = {
     id: randomUUID(),
     label,
     applicationId,
+    companyId,
     startedAt: Date.now(),
     finished: false,
     events: [],
@@ -56,7 +62,7 @@ export function startRun(label: string, applicationId: number | null): RunHandle
     }
     bus.emit('event', env);
   };
-  publish({ type: 'start', label, applicationId });
+  publish({ type: 'start', label, applicationId, companyId });
   return {
     id: run.id,
     emit: publish,

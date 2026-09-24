@@ -37,7 +37,10 @@ import {
 } from './services/jobfetch.ts';
 import { addResume, getProfile, setDefaultResume, updateProfile } from './services/resume.ts';
 import { getSettings, updateSettings } from './services/settings.ts';
+import { analyzeApplication } from './services/analyze.ts';
+import { ensureResearch, isStale, latestResearch } from './services/research.ts';
 import { captureJob, findTrackedByUrl } from './services/screening.ts';
+import { getStock } from './services/stock.ts';
 import { getStats } from './services/stats.ts';
 import { extensionToken, tokenMatches } from './services/token.ts';
 import { getCall, getUsageSummary } from './services/usage.ts';
@@ -113,8 +116,47 @@ export function buildApp(
   });
   // Starts (or reports) a background batch; the UI polls GET for progress.
   app.post('/api/fit/batch', (req) => {
-    const { status } = z.object({ status: z.enum(STATUSES).optional() }).parse(req.query);
-    return startFitBatch(db, { status });
+    const { status, research } = z
+      .object({
+        status: z.enum(STATUSES).optional(),
+        research: z
+          .string()
+          .optional()
+          .transform((v) => v === '1' || v === 'true'),
+      })
+      .parse(req.query);
+    return startFitBatch(db, {
+      status,
+      ...(research && { task: (id: number) => analyzeApplication(db, id) }),
+    });
+  });
+  // Screening's Score: fit + company research (if not fresh), in parallel.
+  app.post('/api/applications/:id/analyze', async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { force } = z
+      .object({
+        force: z
+          .string()
+          .optional()
+          .transform((v) => v === '1' || v === 'true'),
+      })
+      .parse(req.query);
+    return analyzeApplication(db, id, { force });
+  });
+
+  // ----- company research & stock -----
+  app.get('/api/companies/:id/research', (req) => {
+    const r = latestResearch(db, idParam.parse(req.params).id);
+    return r && { ...r, stale: isStale(r, getSettings().model) };
+  });
+  app.post('/api/companies/:id/research', async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { research } = await ensureResearch(db, id, { force: true });
+    return research;
+  });
+  app.get('/api/companies/:id/stock', async (req) => {
+    const r = latestResearch(db, idParam.parse(req.params).id);
+    return r?.ticker ? await getStock(r.ticker, opts.fetchFn) : null;
   });
   app.get('/api/fit/batch', () => fitBatchStatus());
 
