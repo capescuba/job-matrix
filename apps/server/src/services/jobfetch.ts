@@ -6,6 +6,8 @@ import { NotFoundError, sha256 } from './applications.ts';
 
 export interface FetchedJob {
   title: string | null;
+  /** Hiring company, when the source names it (Greenhouse, LinkedIn, schema.org). */
+  company: string | null;
   location: string | null;
   remoteType: 'Remote' | 'Hybrid' | 'Onsite' | null;
   salaryMin: number | null;
@@ -164,7 +166,8 @@ function remoteFrom(s: string | null | undefined): FetchedJob['remoteType'] {
 }
 
 function finish(
-  partial: Omit<FetchedJob, 'salaryMin' | 'salaryMax' | 'posted' | 'closedHint'> & {
+  partial: Omit<FetchedJob, 'salaryMin' | 'salaryMax' | 'posted' | 'closedHint' | 'company'> & {
+    company?: string | null;
     salaryMin?: number | null;
     salaryMax?: number | null;
     posted?: PostedInfo | null;
@@ -183,6 +186,7 @@ function finish(
     descriptionText,
     salaryMin: salary?.min ?? null,
     salaryMax: salary?.max ?? null,
+    company: partial.company?.trim() || null,
     posted: partial.posted ?? null,
     closedHint: partial.closedHint ?? null,
   };
@@ -232,9 +236,11 @@ async function greenhouse(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     location?: { name?: string };
     first_published?: string;
     updated_at?: string;
+    company_name?: string;
   }>(f, `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}`);
   return finish({
     title: j.title,
+    company: j.company_name ?? null,
     location: j.location?.name ?? null,
     remoteType: remoteFrom(j.location?.name),
     descriptionText: htmlToText(j.content),
@@ -360,11 +366,13 @@ async function linkedin(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     );
   const title = html.match(/<h2[^>]*top-card-layout__title[^>]*>([\s\S]*?)<\/h2>/)?.[1];
   const location = html.match(/topcard__flavor--bullet[^>]*>([\s\S]*?)<\/span>/)?.[1];
+  const org = html.match(/topcard__org-name-link[^>]*>([\s\S]*?)<\/a>/)?.[1];
   // LinkedIn shows pay in a separate box, not in the description.
   const payBox = html.match(/compensation__salary[^>]*>([\s\S]*?)<\/div>/)?.[1];
   const pay = payBox ? parseSalaryRange(htmlToText(payBox)) : null;
   return finish({
     title: title ? htmlToText(title) : null,
+    company: org ? htmlToText(org) : null,
     location: location ? htmlToText(location) : null,
     remoteType: remoteFrom(location),
     salaryMin: pay?.min ?? null,
@@ -394,6 +402,7 @@ interface LdJobPosting {
   baseSalary?: { value?: { minValue?: number; maxValue?: number; unitText?: string } };
   datePosted?: string;
   validThrough?: string;
+  hiringOrganization?: string | { name?: string };
 }
 
 function findJobPosting(node: unknown): LdJobPosting | null {
@@ -440,6 +449,10 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
     const annual = !sal?.unitText || /year/i.test(sal.unitText);
     return finish({
       title: jp.title ? decodeEntities(jp.title) : null,
+      company:
+        typeof jp.hiringOrganization === 'string'
+          ? jp.hiringOrganization
+          : (jp.hiringOrganization?.name ?? null),
       location: place || null,
       remoteType: jp.jobLocationType === 'TELECOMMUTE' ? 'Remote' : null,
       salaryMin: annual ? (sal?.minValue ?? null) : null,

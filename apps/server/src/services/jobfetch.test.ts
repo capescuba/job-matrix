@@ -343,3 +343,46 @@ describe('closed-posting detection ignores text the page never shows', () => {
     expect((await checkPosting('https://careers.example.com/b', f)).postingStatus).toBe('closed');
   });
 });
+
+describe('company from the source', () => {
+  it('reads Greenhouse company_name, LinkedIn org link and schema.org hiringOrganization', async () => {
+    const gh = fakeFetch({
+      'https://boards-api.greenhouse.io/': {
+        body: JSON.stringify({
+          title: 'TPM',
+          company_name: 'Anthropic',
+          content: `<p>${LONG}</p>`,
+        }),
+      },
+    }).f;
+    expect(
+      (await fetchJobPosting('https://job-boards.greenhouse.io/anthropic/jobs/1', gh)).company,
+    ).toBe('Anthropic');
+
+    const li = fakeFetch({
+      'https://www.linkedin.com/': {
+        body: `<a class="topcard__org-name-link topcard__flavor--black-link" href="x">
+          Figma
+        </a><div class="show-more-less-html__markup">${LONG}</div>`,
+      },
+    }).f;
+    expect((await fetchJobPosting('https://www.linkedin.com/jobs/view/1/', li)).company).toBe(
+      'Figma',
+    );
+
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Sr. TPM',
+      hiringOrganization: { '@type': 'Organization', name: 'Docusign' },
+      description: `<p>${LONG}</p>`,
+    };
+    const page = fakeFetch({
+      'https://careers.docusign.com/': {
+        body: `<script type="application/ld+json">${JSON.stringify(ld)}</script>`,
+      },
+    }).f;
+    expect(
+      (await fetchJobPosting('https://careers.docusign.com/careers-home/jobs/30093', page)).company,
+    ).toBe('Docusign');
+  });
+});

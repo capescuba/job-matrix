@@ -357,3 +357,25 @@ describe('screening routes & inbox behaviour', () => {
     expect(unscoredApplicationIds(db)).toHaveLength(2);
   });
 });
+
+describe('Screen a URL uses the company the page names', () => {
+  it('fills the company from the fetched page instead of "Unknown"', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Sr. Technical Program Manager',
+      hiringOrganization: { name: 'Docusign' },
+      description: `<p>${LONG}</p>`,
+    };
+    const f = fakeFetch({
+      'https://careers.docusign.com/': {
+        body: `<script type="application/ld+json">${JSON.stringify(ld)}</script>`,
+      },
+    });
+    const r = await captureJob(
+      db,
+      { url: 'https://careers.docusign.com/careers-home/jobs/30093' },
+      { fetchFn: f },
+    );
+    expect(r).toMatchObject({ company: 'Docusign', title: 'Sr. Technical Program Manager' });
+  });
+});

@@ -225,6 +225,7 @@ export async function captureJob(
   const company =
     clean(f.company) ??
     clean(orgName) ??
+    clean(fetched?.company) ??
     fromTitle.company ??
     companyFromBoardUrl(url) ??
     'Unknown';
