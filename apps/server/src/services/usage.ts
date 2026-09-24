@@ -12,7 +12,7 @@ export type Feature = 'fit' | 'research';
 /** Output tokens (incl. thinking) a fit assessment typically uses, for forecasts before any history exists. */
 const FIT_OUTPUT_TOKENS_GUESS = 4_000;
 const CHARS_PER_TOKEN = 4;
-/** Research cost before history exists — measured: DocuSign on Opus 5, 6 searches, ~108k tokens in = $0.78. */
+/** Research cost before history exists, on Opus 5 (scaled for other models) — measured: DocuSign, 6 searches, ~108k tokens in = $0.78. */
 const RESEARCH_ESTIMATE_USD = 0.8;
 
 /** Logs one AI call (with its full trace when available). Returns the row id. */
@@ -159,18 +159,47 @@ export function getUsageSummary(db: Db, now = new Date()) {
   };
 }
 
+type UsageRow = {
+  feature: string;
+  model: string;
+  costUsd: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+};
+
+/**
+ * Average cost of past calls for a feature as if made with `model`: their tokens at its prices,
+ * plus what they spent on anything else (web searches). Null without usable history.
+ */
+export function repricedAverage(rows: UsageRow[], feature: string, model: string): number | null {
+  const costs = rows
+    .filter((r) => r.feature === feature && r.costUsd != null && pricingFor(r.model))
+    .map((r) => {
+      const tokens = {
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+        cacheReadTokens: r.cacheReadTokens,
+        cacheWriteTokens: r.cacheWriteTokens,
+      };
+      const other = r.costUsd! - (estimateCostUsd(r.model, tokens) ?? 0);
+      const at = estimateCostUsd(model, tokens);
+      return at == null ? null : at + Math.max(0, other);
+    })
+    .filter((c): c is number => c != null);
+  return costs.length ? costs.reduce((s, c) => s + c, 0) / costs.length : null;
+}
+
 /** Estimated cost of scoring every job that has a description but no score yet, with the current model. */
-function forecastFitBatch(
-  db: Db,
-  rows: { feature: string; model: string; costUsd: number | null }[],
-) {
-  const model = getSettings().model;
+function forecastFitBatch(db: Db, rows: UsageRow[]) {
+  const { model, researchModel } = getSettings();
   const ids = unscoredApplicationIds(db);
-  const history = rows.filter((r) => r.feature === 'fit' && r.model === model && r.costUsd != null);
+  const history = rows.filter((r) => r.feature === 'fit' && r.costUsd != null);
   let perCallUsd: number | null;
   let basis: 'history' | 'estimate';
   if (history.length >= 3) {
-    perCallUsd = history.reduce((s, r) => s + r.costUsd!, 0) / history.length;
+    perCallUsd = repricedAverage(rows, 'fit', model);
     basis = 'history';
   } else {
     // Rough: system prompt + resume + goals + an average JD in, a typical assessment out.
@@ -192,15 +221,14 @@ function forecastFitBatch(
     });
     basis = 'estimate';
   }
-  const research = rows.filter(
-    (r) => r.feature === 'research' && r.model === model && r.costUsd != null,
-  );
-  const researchPerCallUsd = research.length
-    ? research.reduce((s, r) => s + r.costUsd!, 0) / research.length
-    : RESEARCH_ESTIMATE_USD;
+  const researchPerCallUsd =
+    repricedAverage(rows, 'research', researchModel) ??
+    (RESEARCH_ESTIMATE_USD * (pricingFor(researchModel)?.input ?? 5)) / 5;
   return {
     model,
     modelLabel: pricingFor(model)?.label ?? model,
+    researchModel,
+    researchModelLabel: pricingFor(researchModel)?.label ?? researchModel,
     researchPerCallUsd,
     pending: ids.length,
     perCallUsd,

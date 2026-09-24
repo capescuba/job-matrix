@@ -30,4 +30,28 @@ describe('updateSettings', () => {
       model: 'claude-sonnet-5',
     });
   });
+
+  it('research follows the fit model until it has its own; Opus 5.5 by default', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jm-')), '.env');
+    delete process.env.AI_MODEL;
+    delete process.env.AI_RESEARCH_MODEL;
+    expect(getSettings()).toMatchObject({
+      model: 'claude-opus-5-5',
+      researchModel: 'claude-opus-5-5',
+      researchModelSet: false,
+    });
+    updateSettings({ AI_MODEL: 'claude-opus-5' }, file);
+    expect(getSettings().researchModel).toBe('claude-opus-5');
+    updateSettings({ AI_RESEARCH_MODEL: 'claude-sonnet-5' }, file);
+    expect(getSettings()).toMatchObject({
+      model: 'claude-opus-5',
+      researchModel: 'claude-sonnet-5',
+      researchModelSet: true,
+    });
+    updateSettings({ AI_RESEARCH_MODEL: null }, file);
+    expect(getSettings()).toMatchObject({
+      researchModel: 'claude-opus-5',
+      researchModelSet: false,
+    });
+  });
 });

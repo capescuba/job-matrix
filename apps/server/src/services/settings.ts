@@ -3,10 +3,10 @@ import { EFFORTS, resetProvider, type Effort } from '@jm/ai';
 import { ENV_FILE } from '../paths.ts';
 
 /** Keys the Settings UI may write to .env. */
-const EDITABLE = ['ANTHROPIC_API_KEY', 'AI_MODEL', 'AI_EFFORT'] as const;
+const EDITABLE = ['ANTHROPIC_API_KEY', 'AI_MODEL', 'AI_RESEARCH_MODEL', 'AI_EFFORT'] as const;
 type Key = (typeof EDITABLE)[number];
 
-export const DEFAULT_MODEL = 'claude-opus-5';
+export const DEFAULT_MODEL = 'claude-opus-5-5';
 /** Fit scoring doesn't need deep deliberation; low effort is ~3x faster than the model default. */
 export const DEFAULT_EFFORT: Effort = 'low';
 
@@ -22,6 +22,10 @@ export function getSettings() {
     // Never send the key back — just enough to recognise it.
     apiKeyHint: key ? `…${key.slice(-4)}` : null,
     model: process.env.AI_MODEL || DEFAULT_MODEL,
+    /** Company research (web search) — its own setting since it costs several times a fit score. */
+    researchModel: process.env.AI_RESEARCH_MODEL || process.env.AI_MODEL || DEFAULT_MODEL,
+    /** False when research just follows the fit model. */
+    researchModelSet: Boolean(process.env.AI_RESEARCH_MODEL),
     effort: currentEffort(),
   };
 }

@@ -4,14 +4,19 @@ import { api } from '../api.ts';
 import { Button, Card, ErrorText, Field, Input, Select } from './ui.tsx';
 
 const MODELS = [
-  { id: 'claude-opus-5', label: 'Claude Opus 5 — best quality' },
-  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5 — cheaper, faster' },
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 — best quality' },
+  { id: 'claude-opus-5', label: 'Claude Opus 5 — previous, costs more' },
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5 — about half the cost' },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 — cheapest, weakest' },
 ];
+
+const cents = (usd: number) => (usd < 1 ? `${Math.round(usd * 100)}¢` : `$${usd.toFixed(2)}`);
 
 /** Anthropic API key + model, saved to the local .env by the server. */
 export function AiSettings() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
+  const { data: usage } = useQuery({ queryKey: ['usage'], queryFn: api.usage });
   const [key, setKey] = useState('');
 
   const save = useMutation({
@@ -19,6 +24,7 @@ export function AiSettings() {
     onSuccess: (s) => {
       qc.setQueryData(['settings'], s);
       qc.invalidateQueries({ queryKey: ['profile'] });
+      qc.invalidateQueries({ queryKey: ['usage'] });
       setKey('');
     },
   });
@@ -26,7 +32,7 @@ export function AiSettings() {
   return (
     <Card title="AI settings">
       <p className="mb-3 text-sm text-ink-2">
-        Fit scoring uses the Anthropic API. Get a key at{' '}
+        Fit scoring and company research use the Anthropic API. Get a key at{' '}
         <a
           href="https://console.anthropic.com/settings/keys"
           target="_blank"
@@ -71,7 +77,7 @@ export function AiSettings() {
           </Button>
         )}
       </form>
-      <Field label="Model" className="mt-3 max-w-sm">
+      <Field label="Fit scoring model" className="mt-3 max-w-sm">
         <Select
           value={data?.model ?? ''}
           onChange={(e) => save.mutate({ aiModel: e.target.value })}
@@ -86,6 +92,30 @@ export function AiSettings() {
           )}
         </Select>
       </Field>
+      <Field label="Company research model" className="mt-3 max-w-sm">
+        <Select
+          value={data?.researchModelSet ? data.researchModel : ''}
+          onChange={(e) => save.mutate({ aiResearchModel: e.target.value || null })}
+        >
+          <option value="">Same as fit scoring</option>
+          {MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+          {data?.researchModelSet && !MODELS.some((m) => m.id === data.researchModel) && (
+            <option value={data.researchModel}>{data.researchModel}</option>
+          )}
+        </Select>
+      </Field>
+      {usage && (
+        <p className="mt-1 max-w-sm text-xs text-ink-3">
+          Web research reads a lot, so it costs several times a fit score: about{' '}
+          {cents(usage.forecast.researchPerCallUsd)} per company with{' '}
+          {usage.forecast.researchModelLabel}. Each company is researched once; only Refresh redoes
+          it.
+        </p>
+      )}
       <Field label="Speed vs. depth" className="mt-3 max-w-sm">
         <Select
           value={data?.effort ?? 'low'}

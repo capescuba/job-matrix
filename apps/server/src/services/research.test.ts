@@ -10,7 +10,7 @@ import { createApplication } from './applications.ts';
 import { fitBatchStatus, startFitBatch } from './fit.ts';
 import { ensureResearch, isStale, latestResearch } from './research.ts';
 import { parseYahooChart } from './stock.ts';
-import { getUsageSummary } from './usage.ts';
+import { getUsageSummary, repricedAverage } from './usage.ts';
 
 const brief: CompanyResearch = {
   flags: [
@@ -262,6 +262,27 @@ describe('company research', () => {
     expect(
       estimateCostUsd('claude-opus-5', { inputTokens: 0, outputTokens: 0, webSearches: 10 }),
     ).toBeCloseTo(0.1);
+  });
+
+  it('re-prices past research for another model, keeping the search cost', () => {
+    const rows = [
+      // DocuSign on Opus 5: 108k in, 6.4k out, 6 searches = $0.54 + $0.16 + $0.06
+      {
+        feature: 'research',
+        model: 'claude-opus-5',
+        costUsd: 0.76,
+        inputTokens: 108_000,
+        outputTokens: 6_400,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ];
+    expect(repricedAverage(rows, 'research', 'claude-opus-5')).toBeCloseTo(0.76);
+    // Sonnet 5 ($2/$10): 0.216 + 0.064 + 0.06
+    expect(repricedAverage(rows, 'research', 'claude-sonnet-5')).toBeCloseTo(0.34);
+    // Opus 5.5 ($4/$20): 0.432 + 0.128 + 0.06
+    expect(repricedAverage(rows, 'research', 'claude-opus-5-5')).toBeCloseTo(0.62);
+    expect(repricedAverage(rows, 'fit', 'claude-opus-5')).toBeNull();
   });
 
   it('usage shows the company for each call, including Refresh and deleted jobs', async () => {
