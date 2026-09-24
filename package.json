@@ -1,0 +1,24 @@
+{
+  "name": "job-matrix",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @jm/server\" \"npm run dev -w @jm/web\"",
+    "db:generate": "npm run db:generate -w @jm/server",
+    "typecheck": "tsc -p packages/shared && tsc -p packages/ai && tsc -p apps/server && tsc -p apps/web",
+    "test": "vitest run",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "concurrently": "^10.0.5",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
