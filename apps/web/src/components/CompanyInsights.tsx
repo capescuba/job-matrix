@@ -120,9 +120,16 @@ export function CompanyInsights({
         <span className="text-sm font-semibold">Company insights</span>
         <span className="text-bad">{reds} red</span>
         <span className="text-good">{greens} green</span>
-        <span className="text-ink-3">
+        <span
+          className={data.stale ? 'text-warn' : 'text-ink-3'}
+          title={
+            data.stale
+              ? 'Briefs are never redone automatically — press Refresh if you want the latest'
+              : 'Kept for this company and reused by all its jobs; only Refresh researches again'
+          }
+        >
           researched {ago(data.createdAt)}
-          {data.stale && ' · out of date'}
+          {data.stale && ' · Refresh for the latest'}
         </span>
         <span className="ml-auto flex gap-1">
           {data.usageId != null && (
@@ -139,7 +146,7 @@ export function CompanyInsights({
             className="px-2 py-0.5 text-xs"
             disabled={refresh.isPending || running}
             onClick={() => refresh.mutate()}
-            title="Research again with web search (a paid AI call)"
+            title="Research again with web search (a paid AI call, about 80¢)"
           >
             {refresh.isPending ? 'Researching…' : 'Refresh'}
           </Button>

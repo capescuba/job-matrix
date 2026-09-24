@@ -31,7 +31,7 @@ import type { getCall, getUsageSummary } from '../../server/src/services/usage.t
 export type Settings = ReturnType<typeof getSettings>;
 export type Usage = ReturnType<typeof getUsageSummary>;
 
-export type { ApplicationRow, FetchedJob };
+export type { ApplicationRow, FetchedJob, StockQuote };
 export type ApplicationDetail = ReturnType<typeof getApplicationDetail>;
 export type FitAssessment = Omit<ApplicationDetail['fits'][number], 'result' | 'gateReasons'> & {
   result: FitResult;

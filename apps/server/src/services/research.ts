@@ -31,7 +31,10 @@ Rules:
 - Every claim must be supported by a source you actually read. Give each source a numeric id in "sources" and reference it in sourceIds. Never invent URLs, dates, ratings or numbers; if something isn't found, use null or leave the list empty and say so in the summary.
 - Prefer the most recent information and say when something may be out of date.
 - Flags are the point of the brief: 3-8 red/green flags about this company that matter to THIS candidate, using their profile (target level, must-haves, deal-breakers, strong pluses, known gaps). E.g. a return-to-office policy that conflicts with their office-day limit is a red flag; an AI/agentic platform push that matches their strengths is a green flag. Most important first.
-- Keep every text field concise: one to three sentences.`;
+- Keep every text field concise: one to three sentences.
+- Flag titles are 3-6 word labels that read on their own in a short list; the detail goes in the other fields.
+- culture.officeDaysPerWeek: the number of office days per week the current policy requires, if a source states it.
+- Voice: write to the job seeker directly, in the second person ("you", "your"). Never use their name or "the candidate".`;
 
 export interface ResearchContext {
   applicationId?: number;
@@ -90,20 +93,21 @@ export function latestResearch(db: Db, companyId: number): ResearchRow | null {
   return row ? (row as ResearchRow) : null;
 }
 
-/** Missing, older than RESEARCH_MAX_AGE_DAYS, or made with a different model. */
-export function isStale(row: ResearchRow | null, model: string, now = new Date()): boolean {
+/**
+ * Older than RESEARCH_MAX_AGE_DAYS — shown as a hint only. Briefs are never redone
+ * automatically; only Refresh (force) replaces one.
+ */
+export function isStale(row: ResearchRow | null, now = new Date()): boolean {
   if (!row) return true;
-  const ageDays = (now.getTime() - Date.parse(row.createdAt)) / 86_400_000;
-  const sameModel = (pricingFor(row.model)?.id ?? row.model) === (pricingFor(model)?.id ?? model);
-  return ageDays > RESEARCH_MAX_AGE_DAYS || !sameModel;
+  return (now.getTime() - Date.parse(row.createdAt)) / 86_400_000 > RESEARCH_MAX_AGE_DAYS;
 }
 
 /** One research run per company at a time — parallel jobs at the same company share it. */
 const inflight = new Map<number, Promise<ResearchRow>>();
 
 /**
- * Returns fresh research for the company, running it only if missing/stale (or forced).
- * `reused` says whether a stored brief was used (no AI call, no cost).
+ * Returns the company's brief, researching only when it has none — or when forced (Refresh).
+ * An existing brief is reused however old it is; `reused` means no AI call, no cost.
  */
 export async function ensureResearch(
   db: Db,
@@ -112,8 +116,7 @@ export async function ensureResearch(
 ): Promise<{ research: ResearchRow; reused: boolean }> {
   const provider = opts.provider ?? getProvider();
   const current = latestResearch(db, companyId);
-  if (!opts.force && current && !isStale(current, provider.defaultModel))
-    return { research: current, reused: true };
+  if (!opts.force && current) return { research: current, reused: true };
   const running = inflight.get(companyId);
   if (running) return { research: await running, reused: true };
   const p = researchCompany(db, companyId, { ...opts, provider }).finally(() =>

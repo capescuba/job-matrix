@@ -245,7 +245,7 @@ export async function captureJob(
   const ldSal = ld?.baseSalary?.value;
   const salary =
     parseSalaryRange(f.salaryText ?? '') ??
-    (fetched?.salaryMin != null
+    (fetched?.salaryMin
       ? { min: fetched.salaryMin, max: fetched.salaryMax ?? fetched.salaryMin }
       : null) ??
     (ldSal?.minValue && (!ldSal.unitText || /year/i.test(ldSal.unitText))

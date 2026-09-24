@@ -147,7 +147,7 @@ export function buildApp(
   // ----- company research & stock -----
   app.get('/api/companies/:id/research', (req) => {
     const r = latestResearch(db, idParam.parse(req.params).id);
-    return r && { ...r, stale: isStale(r, getSettings().model) };
+    return r && { ...r, stale: isStale(r) };
   });
   app.post('/api/companies/:id/research', async (req) => {
     const { id } = idParam.parse(req.params);

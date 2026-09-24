@@ -65,6 +65,9 @@ function relative(text: string | null | undefined, source: string): PostedInfo |
   return date ? { date, source, approx: true, raw: clean ?? null } : null;
 }
 
+/** Feeds use 0 as "not provided" — treat anything non-positive as missing. */
+const positive = (n: number | null | undefined) => (typeof n === 'number' && n > 0 ? n : null);
+
 const CLOSED_TEXT =
   /no longer (accepting applications|available|open|active)|(position|job|role) (has been|is) (filled|closed)|(job|posting) (has )?(expired|closed)|this (job|role|position|posting) is no longer/i;
 
@@ -178,7 +181,7 @@ function finish(
   if (descriptionText.length < 200)
     throw new JobFetchError('The page had no usable job description.');
   const salary =
-    partial.salaryMin != null
+    partial.salaryMin != null && partial.salaryMin > 0
       ? { min: partial.salaryMin, max: partial.salaryMax ?? partial.salaryMin }
       : parseSalaryRange(descriptionText);
   return {
@@ -277,8 +280,8 @@ async function lever(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     title: j.text,
     location: j.categories?.location ?? null,
     remoteType: remoteFrom(j.workplaceType),
-    salaryMin: annual ? (j.salaryRange?.min ?? null) : null,
-    salaryMax: annual ? (j.salaryRange?.max ?? null) : null,
+    salaryMin: annual ? positive(j.salaryRange?.min) : null,
+    salaryMax: annual ? positive(j.salaryRange?.max) : null,
     descriptionText: parts.filter(Boolean).join('\n\n'),
     posted: exact(j.createdAt, 'Lever createdAt'),
     via: 'Lever API',
@@ -455,8 +458,8 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
           : (jp.hiringOrganization?.name ?? null),
       location: place || null,
       remoteType: jp.jobLocationType === 'TELECOMMUTE' ? 'Remote' : null,
-      salaryMin: annual ? (sal?.minValue ?? null) : null,
-      salaryMax: annual ? (sal?.maxValue ?? null) : null,
+      salaryMin: annual ? positive(sal?.minValue) : null,
+      salaryMax: annual ? positive(sal?.maxValue) : null,
       descriptionText: htmlToText(jp.description),
       posted: exact(jp.datePosted, 'Page structured data (schema.org datePosted)'),
       // The posting's own "valid through" date is the most direct evidence: a future one means

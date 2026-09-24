@@ -13,10 +13,10 @@ import {
   capUnpostedPay,
   computeGate,
   fitBatchStatus,
-  payCheck,
   shortLabel,
   startFitBatch,
 } from './services/fit.ts';
+import { payCheck, withCurrentPay } from './services/pay.ts';
 import { updateProfile } from './services/resume.ts';
 import { weekStart } from './services/stats.ts';
 
@@ -41,9 +41,10 @@ const sampleFit: FitResult = {
       note: 'Not stated',
     },
   ],
-  strengths: [{ point: 'Ran launches', evidence: 'Led 12-team launch' }],
+  strengths: [{ label: 'Ran big launches', point: 'Ran launches', evidence: 'Led 12-team launch' }],
   gaps: [
     {
+      label: 'No model-serving experience',
       gap: 'No hands-on model serving',
       theme: 'LLM inference experience',
       severity: 'Moderate',
@@ -305,6 +306,37 @@ describe('gates', () => {
     expect(payCheck(200_000, null, null)?.status).toBe('unclear');
     expect(payCheck(200_000, 180_000, 240_000)).toBeNull();
     expect(payCheck(null, 100_000, 120_000)).toBeNull();
+  });
+
+  it('withCurrentPay re-checks a saved pay failure against the current range, keeping AI criteria', () => {
+    const saved = [
+      {
+        kind: 'pay' as const,
+        label: 'Base',
+        status: 'fails' as const,
+        note: 'Top of range $0 is below $200,000',
+      },
+      {
+        kind: 'must' as const,
+        label: 'Hybrid',
+        status: 'unclear' as const,
+        note: 'Office days not stated',
+      },
+    ];
+    const fixed = withCurrentPay(saved, 200_000, {
+      min: 140_000,
+      max: 235_000,
+      from: 'description',
+    });
+    expect(fixed.gate).toBe('check');
+    expect(fixed.reasons.map((r) => r.label)).toEqual(['Hybrid']);
+    const raised = withCurrentPay(saved, 250_000, {
+      min: 140_000,
+      max: 235_000,
+      from: 'description',
+    });
+    expect(raised.gate).toBe('fail');
+    expect(raised.reasons[0]).toMatchObject({ kind: 'pay', status: 'fails' });
   });
 
   it('computeGate: fails beat checks; pass when all ok', () => {

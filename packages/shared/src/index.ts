@@ -222,12 +222,14 @@ export const fitResultSchema = z.object({
     .describe('One entry for every must-have and every deal-breaker, in order'),
   strengths: z.array(
     z.object({
+      label: z.string().describe('3-6 word label for a list, e.g. "Led 12-team K8s migration"'),
       point: z.string(),
       evidence: z.string().describe('Specific line or fact from the resume that supports it'),
     }),
   ),
   gaps: z.array(
     z.object({
+      label: z.string().describe('3-6 word label for a list, e.g. "Led 12-team K8s migration"'),
       gap: z.string().describe('The specific gap for this job'),
       theme: z
         .string()
@@ -416,7 +418,11 @@ export const companyResearchSchema = z.object({
     .array(
       z.object({
         tone: z.enum(['red', 'green']),
-        title: z.string().describe('Short, e.g. "Layoffs in May 2026" or "Remote-friendly"'),
+        title: z
+          .string()
+          .describe(
+            '3-6 word label for a list, e.g. "Layoffs in May 2026" or "2 office days a week"',
+          ),
         detail: z.string(),
         whyItMatters: z.string().describe("How it relates to the candidate's profile"),
         ...cited,
@@ -471,6 +477,10 @@ export const companyResearchSchema = z.object({
       .nullable()
       .describe('Office-days policy, as specific as sources allow'),
     tpmOrg: z.string().nullable().describe('Anything about the TPM / program management org'),
+    officeDaysPerWeek: z
+      .number()
+      .nullable()
+      .describe('Typical required office days per week under the current policy, if stated'),
     ...cited,
   }),
   interview: z.object({

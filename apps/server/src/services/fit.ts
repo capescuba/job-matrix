@@ -17,13 +17,13 @@ import type { Db } from '../db/client.ts';
 import { applications, companies, contacts, fitAssessments, fitGaps, jobs } from '../db/schema.ts';
 import { startRun } from './aiEvents.ts';
 import { NotFoundError, sha256 } from './applications.ts';
-import { parseSalaryRange } from './jobfetch.ts';
+import { gateOf, payCheck, payRangeOf } from './pay.ts';
 import { getDefaultResume, getProfile } from './resume.ts';
 import { currentEffort } from './settings.ts';
 import { recordUsage } from './usage.ts';
 
 /** Bump when the prompt or schema changes so cached assessments are recomputed. */
-export const FIT_PROMPT_VERSION = 'tpm-v3';
+export const FIT_PROMPT_VERSION = 'tpm-v4';
 
 export const FIT_SYSTEM_PROMPT = `You are a seasoned Technical Program Manager hiring manager and recruiter who has hired TPMs at large tech companies and startups. You assess how well a specific candidate fits a specific job posting, honestly and specifically, the way a trusted advisor would.
 
@@ -50,7 +50,10 @@ Known gaps lower the relevant part scores; they are not deal-breakers. Mark know
 Gap themes: give each gap a short reusable theme (2-5 words). Reuse one of the existing themes when it fits so recurring gaps can be counted; otherwise create a new one.
 Flags: levelMismatch when the level or years asked are clearly off the target (say how); outreach.recommended when contacting someone directly would materially help (a known contact, a named hiring manager, a small company, a standing pool, a referral-heavy company) — say who and why.
 
-Be concise and concrete. Gaps should be actionable. Talking points are the 3 things to lead with in the application and first screen.`;
+Be concise and concrete. Gaps should be actionable. Talking points are the 3 things to lead with in the application and first screen.
+
+Voice: write every text field to the job seeker directly, in the second person ("you", "your"). Never use their name, "the candidate" or "he/she".
+Labels: every strength and gap has a 3-6 word label that reads on its own in a short list; put the explanation in the other fields.`;
 
 export interface FitInputs {
   company: string;
@@ -130,32 +133,6 @@ ${list(i.existingGapThemes)}
 Assess this candidate's fit for this job.`;
 }
 
-/** Pay floor, checked in code against the posted range (more reliable than the model). */
-export function payCheck(
-  minBase: number | null,
-  salaryMin: number | null,
-  salaryMax: number | null,
-): GateReason | null {
-  if (!minBase) return null;
-  const floor = money(minBase);
-  if (salaryMin == null && salaryMax == null)
-    return {
-      kind: 'pay',
-      label: 'Base',
-      status: 'unclear',
-      note: `No pay range posted (floor ${floor})`,
-    };
-  const top = salaryMax ?? salaryMin!;
-  if (top < minBase)
-    return {
-      kind: 'pay',
-      label: 'Base',
-      status: 'fails',
-      note: `Top of range ${money(top)} is below ${floor}`,
-    };
-  return null;
-}
-
 /** Short label for a criterion, for "Fails: base, onsite" style summaries. */
 export function shortLabel(criterion: string): string {
   const s = criterion
@@ -170,7 +147,7 @@ export function computeGate(
   result: FitResult,
   pay: GateReason | null,
 ): { gate: Gate; reasons: GateReason[] } {
-  const reasons: GateReason[] = [
+  return gateOf([
     ...(pay ? [pay] : []),
     ...result.criteria
       .filter((c) => c.status !== 'ok')
@@ -180,15 +157,7 @@ export function computeGate(
         status: c.status as 'fails' | 'unclear',
         note: c.note,
       })),
-  ];
-  const gate: Gate = reasons.some((r) => r.status === 'fails')
-    ? 'fail'
-    : reasons.length
-      ? 'check'
-      : 'pass';
-  // Failures first, then things to check.
-  reasons.sort((a, b) => (a.status === b.status ? 0 : a.status === 'fails' ? -1 : 1));
-  return { gate, reasons };
+  ]);
 }
 
 /** No posted range → pay can't score above 6, whatever the model guesses about the company. */
@@ -234,10 +203,7 @@ export async function assessFit(
   const resume = getDefaultResume(db);
   if (!resume) throw new FitError('Upload a resume on the Profile page before scoring.');
 
-  const range =
-    row.job.salaryMin != null || row.job.salaryMax != null
-      ? { min: row.job.salaryMin, max: row.job.salaryMax }
-      : parseSalaryRange(row.job.descriptionText);
+  const range = payRangeOf(row.job);
 
   const provider = opts.provider ?? getProvider();
   const model = provider.defaultModel;

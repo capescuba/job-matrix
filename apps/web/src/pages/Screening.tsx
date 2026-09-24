@@ -1,17 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { RESEARCH_MAX_AGE_DAYS } from '@jm/shared';
-import { api, type ApplicationRow } from '../api.ts';
-import { useAiRuns } from '../aiActivity.ts';
-import { FitBadge, FlagChips, jobFlags } from '../components/badges.tsx';
-import { CompanyInsights } from '../components/CompanyInsights.tsx';
-import { LiveRun } from '../components/LiveRun.tsx';
+import { api } from '../api.ts';
+import { ScreeningCard } from '../components/ScreeningCard.tsx';
 import { Button, ErrorText, Input, cx } from '../components/ui.tsx';
-
-/** Research younger than RESEARCH_MAX_AGE_DAYS is reused, so Score won't pay for it again. */
-const researchFresh = (at: string | null) =>
-  !!at && Date.now() - Date.parse(at) < RESEARCH_MAX_AGE_DAYS * 86_400_000;
 
 /**
  * The Screening inbox: jobs captured (by the extension or "Screen a URL") waiting for a decision.
@@ -43,6 +35,11 @@ export default function ScreeningPage() {
     .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
   const rows = tab === 'inbox' ? inbox : passed;
   const unscored = inbox.filter((r) => r.hasDescription && r.fitScore == null);
+  const { data: usage } = useQuery({ queryKey: ['usage'], queryFn: api.usage });
+  const costs = {
+    fit: usage?.forecast.perCallUsd ?? null,
+    research: usage?.forecast.researchPerCallUsd ?? 0.8,
+  };
 
   const scoreAll = useMutation({
     mutationFn: () => api.startScoreAllWithResearch('Screening'),
@@ -91,9 +88,9 @@ export default function ScreeningPage() {
                 onClick={async () => {
                   const u = await qc.fetchQuery({ queryKey: ['usage'], queryFn: api.usage });
                   const each = u.forecast.perCallUsd;
-                  // Research runs once per company that has no fresh brief.
+                  // Research runs once per company that has no brief yet.
                   const toResearch = new Set(
-                    unscored.filter((r) => !researchFresh(r.researchAt)).map((r) => r.companyId),
+                    unscored.filter((r) => !r.researchAt).map((r) => r.companyId),
                   ).size;
                   const total =
                     (each ?? 0) * unscored.length + u.forecast.researchPerCallUsd * toResearch;
@@ -129,7 +126,13 @@ export default function ScreeningPage() {
       ) : (
         <div className="space-y-3">
           {rows.map((r) => (
-            <ScreeningCard key={r.id} row={r} focused={r.id === focus} onChanged={refresh} />
+            <ScreeningCard
+              key={r.id}
+              row={r}
+              focused={r.id === focus}
+              costs={costs}
+              onChanged={refresh}
+            />
           ))}
         </div>
       )}
@@ -177,313 +180,5 @@ function ScreenUrl({ onAdded }: { onAdded: (applicationId: number) => void }) {
       )}
       <ErrorText error={add.error} />
     </form>
-  );
-}
-
-function ScreeningCard({
-  row: r,
-  focused,
-  onChanged,
-}: {
-  row: ApplicationRow;
-  focused: boolean;
-  onChanged: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [highlight, setHighlight] = useState(focused);
-  const [expanded, setExpanded] = useState(false);
-  const [passing, setPassing] = useState(false);
-  const [reason, setReason] = useState('');
-  const [mountedAt] = useState(Date.now);
-  const runs = useAiRuns().filter(
-    (x) =>
-      x.applicationId === r.id &&
-      x.companyId == null &&
-      (!x.finishedAt || x.startedAt >= mountedAt - 1000),
-  );
-  const qc = useQueryClient();
-
-  useEffect(() => {
-    if (!focused) return;
-    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setHighlight(true);
-    const t = setTimeout(() => setHighlight(false), 3000);
-    return () => clearTimeout(t);
-  }, [focused]);
-
-  const score = useMutation({
-    mutationFn: () => api.analyze(r.id, r.fitScore != null),
-    onSettled: () => {
-      onChanged();
-      qc.invalidateQueries({ queryKey: ['research', r.companyId] });
-      qc.invalidateQueries({ queryKey: ['usage'] });
-    },
-  });
-  const remove = useMutation({
-    mutationFn: () => api.deleteApplication(r.id),
-    onSuccess: onChanged,
-  });
-  const move = useMutation({
-    mutationFn: (status: 'Saved' | 'Applied' | 'Screening') =>
-      api.updateApplication(r.id, { status }),
-    onSuccess: onChanged,
-  });
-  const pass = useMutation({
-    mutationFn: () =>
-      api.addActivity(r.id, {
-        at: new Date().toLocaleDateString('en-CA'),
-        kind: 'Note',
-        summary: reason.trim() ? `Passed: ${reason.trim()}` : 'Passed at screening',
-        setStatus: 'Passed',
-      }),
-    onSuccess: onChanged,
-  });
-  const scoring = score.isPending || runs.some((x) => !x.finishedAt);
-
-  return (
-    <div
-      ref={ref}
-      className={cx(
-        'rounded-lg border bg-surface p-4 transition-shadow',
-        highlight ? 'border-accent ring-2 ring-accent/40' : 'border-border',
-      )}
-    >
-      <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-x-2">
-            <InlineEdit
-              value={r.title}
-              unknown={r.title === 'Unknown role'}
-              className="font-semibold"
-              onSave={(v) => api.updateJob(r.jobId, { title: v }).then(onChanged)}
-            />
-            <span className="text-ink-3">·</span>
-            <InlineEdit
-              value={r.company}
-              unknown={r.company === 'Unknown'}
-              className="text-ink-2"
-              onSave={(v) => api.updateJob(r.jobId, { companyName: v }).then(onChanged)}
-            />
-          </div>
-          <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-ink-3">
-            {r.location && <span>{r.location}</span>}
-            {r.remoteType && <span>{r.remoteType}</span>}
-            {r.applicantCount != null && <span>{r.applicantCount}+ applicants</span>}
-            {r.source && <span>via {r.source}</span>}
-            <span>captured {new Date(r.createdAt).toLocaleDateString()}</span>
-            {r.url && (
-              <a
-                href={r.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent hover:underline"
-              >
-                Open posting ↗
-              </a>
-            )}
-            <Link to={`/applications/${r.id}`} className="text-accent hover:underline">
-              Details
-            </Link>
-          </div>
-          <div className="mt-1">
-            <FlagChips flags={jobFlags(r)} />
-          </div>
-        </div>
-        <div className="text-right">
-          {r.fitScore != null ? (
-            <FitBadge
-              score={r.fitScore}
-              verdict={r.fitVerdict}
-              gate={r.fitGate}
-              reasons={r.fitGateReasons}
-            />
-          ) : (
-            <span className="text-xs text-ink-3">Not scored</span>
-          )}
-        </div>
-      </div>
-
-      {r.fitSummary && !scoring && (
-        <div className="mt-3 space-y-1 text-sm">
-          <p>{r.fitSummary}</p>
-          {r.fitWhyNotHigher && (
-            <p className="text-ink-2">
-              <span className="font-medium text-ink">Why not higher:</span> {r.fitWhyNotHigher}
-            </p>
-          )}
-        </div>
-      )}
-      {runs.length > 0 && (
-        <div className="mt-3 grid gap-2 lg:grid-cols-2">
-          {runs.map((x) => (
-            <LiveRun key={x.id} run={x} showLabel />
-          ))}
-        </div>
-      )}
-      {(score.data?.fitError || score.data?.researchError) && (
-        <p className="mt-2 text-sm text-warn">
-          {score.data.fitError && `Fit score failed: ${score.data.fitError}. `}
-          {score.data.researchError && `Company research failed: ${score.data.researchError}`}
-        </p>
-      )}
-      <div className="mt-3">
-        <CompanyInsights
-          key={r.researchAt ?? 'none'}
-          companyId={r.companyId}
-          companyName={r.company}
-        />
-      </div>
-
-      <div className="mt-3 text-sm">
-        {r.descriptionPreview ? (
-          <>
-            <div className="text-xs text-ink-3">
-              Description from: {r.descriptionSource ?? 'unknown'}
-            </div>
-            <p className={cx('mt-1 whitespace-pre-wrap text-ink-2', !expanded && 'line-clamp-3')}>
-              {r.descriptionPreview}
-              {expanded && r.descriptionPreview.length >= 600 && '…'}
-            </p>
-            <button
-              className="text-xs text-accent hover:underline"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? 'Less' : 'More'}
-            </button>
-          </>
-        ) : (
-          <p className="text-warn">
-            No description captured.{' '}
-            <Link to={`/applications/${r.id}`} className="underline">
-              Paste it on the details page
-            </Link>{' '}
-            to enable scoring.
-          </p>
-        )}
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
-        {r.status === 'Screening' ? (
-          <>
-            <Button
-              variant={r.fitScore == null ? 'primary' : 'secondary'}
-              disabled={!r.hasDescription || !!scoring}
-              onClick={() => score.mutate()}
-              title={
-                r.hasDescription
-                  ? researchFresh(r.researchAt)
-                    ? 'AI fit score (paid); company research is recent and will be reused'
-                    : 'AI fit score + company research with web search (paid)'
-                  : 'Needs a description first'
-              }
-            >
-              {scoring ? 'Scoring…' : r.fitScore == null ? 'Score' : 'Re-score'}
-            </Button>
-            <span className="mx-1 h-5 w-px bg-border" />
-            <Button onClick={() => move.mutate('Saved')} disabled={move.isPending}>
-              Add to pipeline
-            </Button>
-            <Button onClick={() => move.mutate('Applied')} disabled={move.isPending}>
-              Applied
-            </Button>
-            {passing ? (
-              <form
-                className="flex items-center gap-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  pass.mutate();
-                }}
-              >
-                <Input
-                  autoFocus
-                  className="w-56"
-                  placeholder="Reason (optional)"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                />
-                <Button type="submit" variant="danger" disabled={pass.isPending}>
-                  Pass
-                </Button>
-                <Button type="button" variant="ghost" onClick={() => setPassing(false)}>
-                  Cancel
-                </Button>
-              </form>
-            ) : (
-              <Button variant="danger" onClick={() => setPassing(true)}>
-                Pass
-              </Button>
-            )}
-          </>
-        ) : (
-          <Button onClick={() => move.mutate('Screening')} disabled={move.isPending}>
-            Move back to inbox
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          className="ml-auto text-ink-3"
-          disabled={remove.isPending}
-          onClick={() =>
-            confirm(
-              `Delete "${r.title}" at ${r.company}? This removes it and its scores completely.`,
-            ) && remove.mutate()
-          }
-        >
-          Delete
-        </Button>
-        <ErrorText error={score.error ?? move.error ?? pass.error ?? remove.error} />
-      </div>
-    </div>
-  );
-}
-
-/** Click to edit; highlighted when the capture couldn't work the value out. */
-function InlineEdit({
-  value,
-  unknown,
-  className,
-  onSave,
-}: {
-  value: string;
-  unknown: boolean;
-  className?: string;
-  onSave: (v: string) => Promise<unknown>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [v, setV] = useState(value);
-  if (editing)
-    return (
-      <form
-        className="inline-flex"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (v.trim() && v.trim() !== value) void onSave(v.trim()).then(() => setEditing(false));
-          else setEditing(false);
-        }}
-      >
-        <Input
-          autoFocus
-          className="w-56 py-0.5"
-          value={v}
-          onChange={(e) => setV(e.target.value)}
-          onBlur={() => setEditing(false)}
-        />
-      </form>
-    );
-  return (
-    <button
-      className={cx(
-        className,
-        'text-left hover:underline',
-        unknown && 'rounded border border-dashed border-warn/60 px-1 text-warn',
-      )}
-      title={unknown ? 'Not found on the page — click to fill in' : 'Click to edit'}
-      onClick={() => {
-        setV(unknown ? '' : value);
-        setEditing(true);
-      }}
-    >
-      {value}
-    </button>
   );
 }

@@ -7,8 +7,9 @@ import { assessFit } from './fit.ts';
 import { ensureResearch } from './research.ts';
 
 /**
- * "Score" on a Screening card: the fit score and — when the company has no fresh brief — company
- * research, side by side so it takes no longer than scoring alone. A research failure doesn't
+ * "Score" on a Screening card: the fit score and — only when the company has no brief yet —
+ * company research, side by side so it takes no longer than scoring alone. Re-scoring never
+ * redoes research; that's Refresh on the brief. A research failure doesn't
  * lose the score (and vice versa); errors come back per part.
  */
 export async function analyzeApplication(

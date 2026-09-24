@@ -56,6 +56,7 @@ const brief: CompanyResearch = {
     cons: ['Reorgs'],
     workLifeBalance: 'Good',
     returnToOffice: '3 days/week',
+    officeDaysPerWeek: 3,
     tpmOrg: null,
     sourceIds: [3],
   },
@@ -159,7 +160,7 @@ describe('company research', () => {
     expect(companyResearchSchema.safeParse(brief).success).toBe(true);
   });
 
-  it('is reused while fresh, redone when stale or for another model', async () => {
+  it('is reused however old it is; only Refresh researches again', async () => {
     const { provider, calls } = fakeProvider();
     const id = addJob('DocuSign');
     const cid = companyOf(id);
@@ -169,11 +170,19 @@ describe('company research', () => {
     expect((await ensureResearch(db, cid, { provider })).reused).toBe(true);
     expect(calls.research).toBe(1);
 
+    // Old briefs are only flagged, never redone automatically — even after a model change.
     const row = latestResearch(db, cid)!;
-    const later = new Date(Date.parse(row.createdAt) + 15 * 86_400_000);
-    expect(isStale(row, 'claude-opus-5', later)).toBe(true);
-    expect(isStale(row, 'claude-sonnet-5')).toBe(true);
-    expect(isStale(row, 'claude-opus-5')).toBe(false);
+    const later = new Date(Date.parse(row.createdAt) + 30 * 86_400_000);
+    expect(isStale(row, later)).toBe(true);
+    expect(isStale(row)).toBe(false);
+    db.$client
+      .prepare(
+        "UPDATE company_research SET created_at = '2020-01-01T00:00:00Z', model = 'claude-sonnet-5'",
+      )
+      .run();
+    expect((await ensureResearch(db, cid, { provider })).reused).toBe(true);
+    expect(calls.research).toBe(1);
+    // Only Refresh (force) researches again.
     await ensureResearch(db, cid, { provider, force: true });
     expect(calls.research).toBe(2);
   });

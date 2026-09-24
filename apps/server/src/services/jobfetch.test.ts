@@ -386,3 +386,24 @@ describe('company from the source', () => {
     ).toBe('Docusign');
   });
 });
+
+describe('placeholder salaries', () => {
+  it('treats a schema.org salary of 0 as missing and reads the range from the description', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Sr. TPM',
+      description: `<p>${LONG}</p><p>California: $146,400.00 - $235,375.00 base salary</p>`,
+      baseSalary: {
+        '@type': 'MonetaryAmount',
+        value: { minValue: 0, maxValue: 0, unitText: 'YEAR' },
+      },
+    };
+    const { f } = fakeFetch({
+      'https://careers.docusign.com/': {
+        body: `<script type="application/ld+json">${JSON.stringify(ld)}</script>`,
+      },
+    });
+    const r = await fetchJobPosting('https://careers.docusign.com/careers-home/jobs/30093', f);
+    expect([r.salaryMin, r.salaryMax]).toEqual([146400, 235375]);
+  });
+});
