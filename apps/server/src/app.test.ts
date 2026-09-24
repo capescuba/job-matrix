@@ -7,6 +7,7 @@ import { subscribe, type RunEventEnvelope } from './services/aiEvents.ts';
 import { openDb, type Db } from './db/client.ts';
 import { resumeVersions } from './db/schema.ts';
 import { planStatusChange } from './services/applications.ts';
+import { checkPostings } from './services/jobfetch.ts';
 import {
   assessFit,
   capUnpostedPay,
@@ -330,9 +331,7 @@ describe('gates', () => {
   });
 
   it('shortLabel trims criteria to a readable tag', () => {
-    expect(shortLabel('Remote, or hybrid ≤ 3 days/week within ~60 min of home')).toBe(
-      'Remote',
-    );
+    expect(shortLabel('Remote, or hybrid ≤ 3 days/week within ~60 min of home')).toBe('Remote');
     expect(shortLabel('Heavy travel (>25%)')).toBe('Heavy travel');
   });
 
@@ -563,5 +562,59 @@ describe('live activity & call traces', () => {
     un2();
     expect(again.at(-1)).toMatchObject({ type: 'done', usageId: assessment.usageId });
     expect((again.at(-1) as { text: string }).text).toMatch(/reused/);
+  });
+});
+
+describe('posted-date citations', () => {
+  const ashby = (publishedAt: string) =>
+    (async () =>
+      new Response(
+        JSON.stringify({
+          jobs: [
+            {
+              id: 'abc',
+              title: 'TPM',
+              descriptionPlain: 'Responsibilities: '.repeat(40),
+              publishedAt,
+            },
+          ],
+        }),
+      )) as unknown as typeof fetch;
+
+  it('replaces an uncited date on the next check, but keeps a cited one', async () => {
+    const id = await quickAdd({
+      company: 'Acme',
+      title: 'TPM',
+      url: 'https://jobs.ashbyhq.com/acme/abc',
+    });
+    const jobId = (await app.inject(`/api/applications/${id}`)).json().job.id;
+    db.$client.prepare("UPDATE jobs SET posted_at = '2026-05-01' WHERE id = ?").run(jobId); // legacy, no source
+
+    await checkPostings(db, ashby('2026-04-15T22:25:10Z'));
+    let row = (await app.inject('/api/applications')).json()[0];
+    expect(row).toMatchObject({
+      postedAt: '2026-04-15',
+      postedSource: 'Ashby publishedAt',
+      postedApprox: false,
+    });
+
+    await checkPostings(db, ashby('2026-09-20T00:00:00Z')); // a later "republish" doesn't overwrite
+    row = (await app.inject('/api/applications')).json()[0];
+    expect(row.postedAt).toBe('2026-04-15');
+  });
+
+  it('marks a date changed in the form as entered manually, but not an unchanged save', async () => {
+    const id = await quickAdd({ company: 'Acme', title: 'TPM' });
+    const jobId = (await app.inject(`/api/applications/${id}`)).json().job.id;
+    const patch = (payload: Record<string, unknown>) =>
+      app.inject({ method: 'PATCH', url: `/api/jobs/${jobId}`, payload });
+    await patch({ postedAt: '2026-06-01' });
+    let job = (await app.inject(`/api/applications/${id}`)).json().job;
+    expect(job).toMatchObject({ postedAt: '2026-06-01', postedSource: 'Entered manually' });
+
+    db.$client.prepare("UPDATE jobs SET posted_source = 'Lever createdAt' WHERE id = ?").run(jobId);
+    await patch({ postedAt: '2026-06-01', title: 'Senior TPM' }); // same date re-sent by the form
+    job = (await app.inject(`/api/applications/${id}`)).json().job;
+    expect(job.postedSource).toBe('Lever createdAt');
   });
 });

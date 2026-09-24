@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import type { PostedInfo } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import { companies, jobs } from '../db/schema.ts';
 import { NotFoundError, sha256 } from './applications.ts';
@@ -10,8 +11,8 @@ export interface FetchedJob {
   salaryMin: number | null;
   salaryMax: number | null;
   descriptionText: string;
-  /** YYYY-MM-DD when the posting went up, if the source says. */
-  postedAt: string | null;
+  /** When the posting went up, with its source — null if the source doesn't say. */
+  posted: PostedInfo | null;
   /** Set when the page says the posting is closed/filled/expired (it may still show the text). */
   closedHint: string | null;
   /** Which strategy produced it, e.g. "Greenhouse API". */
@@ -47,6 +48,19 @@ export function relativeToDate(text: string | null | undefined, now = new Date()
     year: 365,
   };
   return toDate(now.getTime() - Number(m[1]) * days[m[2].toLowerCase()] * DAY);
+}
+
+/** An exact date from a source field. */
+function exact(v: string | number | null | undefined, source: string): PostedInfo | null {
+  const date = toDate(v);
+  return date ? { date, source, approx: false, raw: typeof v === 'string' ? v : date } : null;
+}
+
+/** A date worked out from relative text like "2 weeks ago" — approximate. */
+function relative(text: string | null | undefined, source: string): PostedInfo | null {
+  const clean = text?.replace(/\s+/g, ' ').trim();
+  const date = relativeToDate(clean);
+  return date ? { date, source, approx: true, raw: clean ?? null } : null;
 }
 
 const CLOSED_TEXT =
@@ -150,10 +164,10 @@ function remoteFrom(s: string | null | undefined): FetchedJob['remoteType'] {
 }
 
 function finish(
-  partial: Omit<FetchedJob, 'salaryMin' | 'salaryMax' | 'postedAt' | 'closedHint'> & {
+  partial: Omit<FetchedJob, 'salaryMin' | 'salaryMax' | 'posted' | 'closedHint'> & {
     salaryMin?: number | null;
     salaryMax?: number | null;
-    postedAt?: string | null;
+    posted?: PostedInfo | null;
     closedHint?: string | null;
   },
 ): FetchedJob {
@@ -169,7 +183,7 @@ function finish(
     descriptionText,
     salaryMin: salary?.min ?? null,
     salaryMax: salary?.max ?? null,
-    postedAt: partial.postedAt ?? null,
+    posted: partial.posted ?? null,
     closedHint: partial.closedHint ?? null,
   };
 }
@@ -224,7 +238,10 @@ async function greenhouse(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     location: j.location?.name ?? null,
     remoteType: remoteFrom(j.location?.name),
     descriptionText: htmlToText(j.content),
-    postedAt: toDate(j.first_published ?? j.updated_at),
+    posted: j.first_published
+      ? exact(j.first_published, 'Greenhouse first_published')
+      : // Last-edited date: can make an old posting look newer, never older.
+        exact(j.updated_at, 'Greenhouse updated_at (first-published date not provided)'),
     via: 'Greenhouse API',
   });
 }
@@ -257,7 +274,7 @@ async function lever(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     salaryMin: annual ? (j.salaryRange?.min ?? null) : null,
     salaryMax: annual ? (j.salaryRange?.max ?? null) : null,
     descriptionText: parts.filter(Boolean).join('\n\n'),
-    postedAt: toDate(j.createdAt),
+    posted: exact(j.createdAt, 'Lever createdAt'),
     via: 'Lever API',
   });
 }
@@ -295,7 +312,7 @@ async function ashby(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     ]
       .filter(Boolean)
       .join('\n\n'),
-    postedAt: toDate(j.publishedAt),
+    posted: exact(j.publishedAt, 'Ashby publishedAt'),
     via: 'Ashby API',
   });
 }
@@ -324,7 +341,9 @@ async function workday(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     location: info.location ?? null,
     remoteType: remoteFrom(info.remoteType),
     descriptionText: htmlToText(info.jobDescription),
-    postedAt: toDate(info.startDate) ?? relativeToDate(info.postedOn),
+    posted:
+      exact(info.startDate, 'Workday startDate') ??
+      relative(info.postedOn, 'Workday "posted on" text'),
     via: 'Workday API',
   });
 }
@@ -353,7 +372,10 @@ async function linkedin(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     descriptionText: [htmlToText(body), payBox ? `Pay (LinkedIn): ${htmlToText(payBox)}` : '']
       .filter(Boolean)
       .join('\n\n'),
-    postedAt: relativeToDate(html.match(/posted-time-ago__text[^>]*>([\s\S]*?)<\//)?.[1]),
+    posted: relative(
+      html.match(/posted-time-ago__text[^>]*>([\s\S]*?)<\//)?.[1],
+      'LinkedIn page text (resets when a job is reposted)',
+    ),
     closedHint: CLOSED_TEXT.test(html)
       ? 'LinkedIn says it is no longer accepting applications'
       : null,
@@ -417,7 +439,7 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
       salaryMin: annual ? (sal?.minValue ?? null) : null,
       salaryMax: annual ? (sal?.maxValue ?? null) : null,
       descriptionText: htmlToText(jp.description),
-      postedAt: toDate(jp.datePosted),
+      posted: exact(jp.datePosted, 'Page structured data (schema.org datePosted)'),
       closedHint:
         jp.validThrough && Date.parse(jp.validThrough) < Date.now()
           ? `Listing expired ${toDate(jp.validThrough)}`
@@ -495,7 +517,7 @@ export function applyFetchedJob(db: Db, jobId: number, fetched: FetchedJob) {
       remoteType: job.remoteType ?? fetched.remoteType,
       salaryMin: job.salaryMin ?? fetched.salaryMin,
       salaryMax: job.salaryMax ?? fetched.salaryMax,
-      postedAt: job.postedAt ?? fetched.postedAt,
+      ...postedColumns(job, fetched.posted),
       ...postingState(fetched),
     })
     .where(eq(jobs.id, jobId))
@@ -555,6 +577,23 @@ export async function fetchMissingDescriptions(db: Db, f: FetchFn = fetch, concu
 
 // ---------- posting status checks ----------
 
+/**
+ * Posted-date columns to write: keep an existing date that has a source (the first one found is
+ * the most original), but replace one saved before sources were tracked.
+ */
+function postedColumns(
+  current: { postedAt: string | null; postedSource: string | null },
+  posted: PostedInfo | null,
+) {
+  if (!posted || (current.postedAt && current.postedSource)) return {};
+  return {
+    postedAt: posted.date,
+    postedSource: posted.source,
+    postedApprox: posted.approx,
+    postedRaw: posted.raw,
+  };
+}
+
 function postingState(f: FetchedJob) {
   return {
     postingStatus: f.closedHint ? 'closed' : 'open',
@@ -566,13 +605,13 @@ function postingState(f: FetchedJob) {
 export async function checkPosting(url: string, f: FetchFn = fetch) {
   try {
     const fetched = await fetchJobPosting(url, f);
-    return { ...postingState(fetched), postedAt: fetched.postedAt };
+    return { ...postingState(fetched), posted: fetched.posted };
   } catch (e) {
     return {
       postingStatus: e instanceof PostingClosedError ? 'closed' : null,
       postingNote: (e as Error).message,
       postingCheckedAt: new Date().toISOString(),
-      postedAt: null,
+      posted: null,
     };
   }
 }
@@ -584,7 +623,8 @@ export async function checkPosting(url: string, f: FetchFn = fetch) {
 export async function checkPostings(db: Db, f: FetchFn = fetch, concurrency = 4) {
   const targets = db.$client
     .prepare(
-      `SELECT j.id, j.url, j.posted_at AS postedAt, c.name AS company, j.title
+      `SELECT j.id, j.url, j.posted_at AS postedAt, j.posted_source AS postedSource,
+              c.name AS company, j.title
        FROM jobs j JOIN companies c ON c.id = j.company_id JOIN applications a ON a.job_id = j.id
        WHERE j.url IS NOT NULL AND a.status NOT IN ('Offer','Rejected','Withdrawn','Ghosted')`,
     )
@@ -592,6 +632,7 @@ export async function checkPostings(db: Db, f: FetchFn = fetch, concurrency = 4)
     id: number;
     url: string;
     postedAt: string | null;
+    postedSource: string | null;
     company: string;
     title: string;
   }[];
@@ -612,7 +653,7 @@ export async function checkPostings(db: Db, f: FetchFn = fetch, concurrency = 4)
           postingStatus: r.postingStatus,
           postingNote: r.postingNote,
           postingCheckedAt: r.postingCheckedAt,
-          postedAt: t.postedAt ?? r.postedAt,
+          ...postedColumns(t, r.posted),
         })
         .where(eq(jobs.id, t.id))
         .run();

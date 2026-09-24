@@ -252,6 +252,46 @@ export interface GateReason {
   note: string;
 }
 
+// ---------- posted dates ----------
+
+/** When a posting went up, and where that date came from. */
+export interface PostedInfo {
+  /** YYYY-MM-DD */
+  date: string;
+  /** e.g. "Ashby publishedAt", "LinkedIn page text", "Entered manually". Null for older rows. */
+  source: string | null;
+  /** True when derived from relative text like "2 weeks ago" or "30+ days ago". */
+  approx: boolean;
+  /** The original text/value, e.g. "Posted 30+ Days Ago". */
+  raw: string | null;
+}
+
+const DAY_MS = 86_400_000;
+const longDate = (d: string) =>
+  new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+
+/** "Posted 162d ago" / "~14d" / "30d+", with a tooltip citing where the date came from. */
+export function describePosted(p: PostedInfo, now = new Date()) {
+  const days = Math.max(
+    0,
+    Math.floor((now.getTime() - Date.parse(`${p.date}T12:00:00Z`)) / DAY_MS),
+  );
+  const atLeast = p.approx && /\+/.test(p.raw ?? '');
+  const age = atLeast ? `${days}d+` : p.approx ? `~${days}d` : `${days}d`;
+  const from = p.source ?? 'Source not recorded (checked before sources were tracked)';
+  const value = p.raw && p.raw !== p.date ? `"${p.raw}"` : longDate(p.date);
+  return {
+    days,
+    label: `Posted ${age} ago`,
+    title: `${from}: ${value}${p.approx ? ` → about ${longDate(p.date)} (approximate)` : ''}`,
+  };
+}
+
 // ---------- AI usage pricing ----------
 
 /** USD per million tokens (Anthropic list prices, Sep 2026). Cache reads bill at 10% of input, writes at 125%. */

@@ -1,4 +1,10 @@
-import { CLOSED_STATUSES, type Gate, type GateReason, type Status } from '@jm/shared';
+import {
+  CLOSED_STATUSES,
+  describePosted,
+  type Gate,
+  type GateReason,
+  type Status,
+} from '@jm/shared';
 import type { ApplicationRow } from '../api.ts';
 import { cx } from './ui.tsx';
 
@@ -97,6 +103,23 @@ export function FitBadge({
   );
 }
 
+/** Posted-date label + citation for a job/row, or null if no date is known. */
+export function postedOf(j: {
+  postedAt: string | null;
+  postedSource: string | null;
+  postedApprox: boolean;
+  postedRaw: string | null;
+}) {
+  return j.postedAt
+    ? describePosted({
+        date: j.postedAt,
+        source: j.postedSource,
+        approx: j.postedApprox,
+        raw: j.postedRaw,
+      })
+    : null;
+}
+
 const DAY = 86_400_000;
 export const daysSince = (date: string) =>
   Math.floor((Date.now() - Date.parse(`${date.slice(0, 10)}T12:00:00Z`)) / DAY);
@@ -119,12 +142,13 @@ export function jobFlags(r: ApplicationRow): Flag[] {
       tone: 'bad',
       title: r.postingNote ?? '',
     });
-  if (open && r.postedAt && daysSince(r.postedAt) > 60)
+  const posted = postedOf(r);
+  if (open && posted && posted.days > 60)
     flags.push({
       key: 'stale',
-      label: `Posted ${daysSince(r.postedAt)}d ago`,
+      label: posted.label,
       tone: 'warn',
-      title: 'Over 60 days old: often stale or a standing hiring pool.',
+      title: `${posted.title}\nOver 60 days old: often stale or a standing hiring pool.`,
     });
   if (r.levelMismatch)
     flags.push({ key: 'level', label: 'Level mismatch', tone: 'warn', title: r.levelMismatch });
