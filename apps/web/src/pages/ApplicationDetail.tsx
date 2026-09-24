@@ -11,10 +11,10 @@ import {
   type Status,
 } from '@jm/shared';
 import { api, type ApplicationDetail, type FitAssessment } from '../api.ts';
-import { StatusBadge, daysSince } from '../components/badges.tsx';
+import { StatusBadge, postedOf } from '../components/badges.tsx';
 import { ActivityLog } from '../components/ActivityLog.tsx';
 import { FitPanel } from '../components/FitPanel.tsx';
-import { Button, Card, ErrorText, Field, Input, Select, Textarea } from '../components/ui.tsx';
+import { Button, Card, ErrorText, Field, Input, Select, Textarea, cx } from '../components/ui.tsx';
 
 export default function ApplicationDetailPage() {
   const id = Number(useParams().id);
@@ -37,6 +37,7 @@ function useInvalidate(id: number) {
 
 function Detail({ data }: { data: ApplicationDetail }) {
   const { application: app, job, company, fits } = data;
+  const posted = postedOf(job);
   const invalidate = useInvalidate(app.id);
   const navigate = useNavigate();
 
@@ -82,9 +83,15 @@ function Detail({ data }: { data: ApplicationDetail }) {
               Open posting ↗
             </a>
           )}
-          {job.postedAt && (
-            <span className={daysSince(job.postedAt) > 60 ? 'text-warn' : undefined}>
-              Posted {daysSince(job.postedAt)}d ago
+          {posted && (
+            <span
+              className={cx(
+                'cursor-help underline decoration-dotted underline-offset-2',
+                posted.days > 60 && 'text-warn',
+              )}
+              title={posted.title}
+            >
+              {posted.label}
             </span>
           )}
           {job.postingStatus === 'closed' && (
@@ -347,6 +354,12 @@ function JobCard({ data, onSaved }: { data: ApplicationDetail; onSaved: () => vo
         </Field>
         <Field label="Posted">
           <Input type="date" value={f.postedAt} onChange={set('postedAt')} />
+          {job.postedAt && f.postedAt === job.postedAt && (
+            <span className="mt-1 block text-xs text-ink-3" title={postedOf(job)?.title}>
+              From: {job.postedSource ?? 'not recorded'}
+              {job.postedApprox && ' (approx.)'}
+            </span>
+          )}
         </Field>
         <Field label="Posting status">
           <Select value={f.postingStatus} onChange={set('postingStatus')}>

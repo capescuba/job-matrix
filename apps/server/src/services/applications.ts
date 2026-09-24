@@ -127,14 +127,18 @@ export interface ApplicationRow {
   outreachRecommended: boolean;
   outreachWhy: string | null;
   postedAt: string | null;
+  postedSource: string | null;
+  postedApprox: boolean;
+  postedRaw: string | null;
   postingStatus: 'open' | 'closed' | null;
   postingNote: string | null;
   contactCount: number;
 }
 
-type RawRow = Omit<ApplicationRow, 'fitGateReasons' | 'outreachRecommended'> & {
+type RawRow = Omit<ApplicationRow, 'fitGateReasons' | 'outreachRecommended' | 'postedApprox'> & {
   fitGateReasons: string | null;
   outreachRecommended: number | null;
+  postedApprox: number;
 };
 
 export function listApplications(db: Db): ApplicationRow[] {
@@ -150,7 +154,9 @@ export function listApplications(db: Db): ApplicationRow[] {
            json_extract(f.result, '$.flags.levelMismatch') AS levelMismatch,
            json_extract(f.result, '$.flags.outreach.recommended') AS outreachRecommended,
            json_extract(f.result, '$.flags.outreach.why') AS outreachWhy,
-           j.posted_at AS postedAt, j.posting_status AS postingStatus, j.posting_note AS postingNote,
+           j.posted_at AS postedAt, j.posted_source AS postedSource,
+           j.posted_approx AS postedApprox, j.posted_raw AS postedRaw,
+           j.posting_status AS postingStatus, j.posting_note AS postingNote,
            (SELECT count(*) FROM contacts ct WHERE ct.company_id = c.id) AS contactCount,
            COALESCE((SELECT max(at) FROM activities WHERE application_id = a.id), a.applied_at) AS lastActivityAt
     FROM applications a
@@ -165,6 +171,7 @@ export function listApplications(db: Db): ApplicationRow[] {
     ...r,
     fitGateReasons: r.fitGateReasons ? (JSON.parse(r.fitGateReasons) as GateReason[]) : null,
     outreachRecommended: Boolean(r.outreachRecommended),
+    postedApprox: Boolean(r.postedApprox),
   }));
 }
 
@@ -244,6 +251,16 @@ export function updateApplication(
 export function updateJob(db: Db, id: number, patch: JobPatch) {
   const values: Partial<typeof jobs.$inferInsert> = { ...patch };
   if (patch.postingStatus !== undefined) values.postingCheckedAt = new Date().toISOString();
+  if (patch.postedAt !== undefined) {
+    const current = db.select({ postedAt: jobs.postedAt }).from(jobs).where(eq(jobs.id, id)).get();
+    // Only a changed date counts as a manual entry; saving the form unchanged keeps the citation.
+    if (patch.postedAt !== current?.postedAt)
+      Object.assign(values, {
+        postedSource: patch.postedAt ? 'Entered manually' : null,
+        postedApprox: false,
+        postedRaw: null,
+      });
+  }
   if (patch.descriptionText !== undefined) {
     const jd = patch.descriptionText?.trim() || null;
     values.descriptionText = jd;

@@ -6,6 +6,7 @@ import {
   parseSalaryRange,
   relativeToDate,
 } from './jobfetch.ts';
+import { describePosted } from '@jm/shared';
 
 const LONG =
   'You will drive programs across teams. Responsibilities include planning and execution. '.repeat(
@@ -179,11 +180,117 @@ describe('posting dates and status', () => {
       },
     });
     const r = await checkPosting('https://careers.example.com/j/3', f);
-    expect(r).toMatchObject({ postingStatus: 'open', postedAt: '2026-07-01' });
+    expect(r).toMatchObject({
+      postingStatus: 'open',
+      posted: {
+        date: '2026-07-01',
+        source: 'Page structured data (schema.org datePosted)',
+        approx: false,
+      },
+    });
   });
 
   it('leaves status unknown when the site blocks us', async () => {
     const { f } = fakeFetch({ 'https://careers.blocked.com/': { status: 403, body: '' } });
     expect((await checkPosting('https://careers.blocked.com/j', f)).postingStatus).toBeNull();
+  });
+});
+
+describe('posted-date sources', () => {
+  const gh = (extra: Record<string, unknown>) =>
+    fakeFetch({
+      'https://boards-api.greenhouse.io/': {
+        body: JSON.stringify({ title: 'TPM', content: `<p>${LONG}</p>`, ...extra }),
+      },
+    }).f;
+
+  it('cites Greenhouse first_published, and flags the updated_at fallback', async () => {
+    const a = await fetchJobPosting(
+      'https://job-boards.greenhouse.io/acme/jobs/1',
+      gh({ first_published: '2026-04-01T10:00:00Z', updated_at: '2026-09-01T10:00:00Z' }),
+    );
+    expect(a.posted).toMatchObject({ date: '2026-04-01', source: 'Greenhouse first_published' });
+    const b = await fetchJobPosting(
+      'https://job-boards.greenhouse.io/acme/jobs/1',
+      gh({ updated_at: '2026-09-01T10:00:00Z' }),
+    );
+    expect(b.posted?.source).toMatch(/updated_at \(first-published date not provided\)/);
+  });
+
+  it('cites Ashby publishedAt', async () => {
+    const { f } = fakeFetch({
+      'https://api.ashbyhq.com/': {
+        body: JSON.stringify({
+          jobs: [
+            {
+              id: 'abc',
+              title: 'TPM',
+              descriptionPlain: LONG,
+              publishedAt: '2026-04-15T22:25:10.601+00:00',
+            },
+          ],
+        }),
+      },
+    });
+    const r = await fetchJobPosting('https://jobs.ashbyhq.com/acme/abc', f);
+    expect(r.posted).toEqual({
+      date: '2026-04-15',
+      source: 'Ashby publishedAt',
+      approx: false,
+      raw: '2026-04-15T22:25:10.601+00:00',
+    });
+  });
+
+  it('marks relative LinkedIn text as approximate and keeps the raw text', async () => {
+    const html = `<h2 class="top-card-layout__title">TPM</h2>
+      <span class="posted-time-ago__text topcard__flavor--metadata">
+        2 weeks ago
+      </span>
+      <div class="show-more-less-html__markup">${LONG}</div>`;
+    const { f } = fakeFetch({ 'https://www.linkedin.com/': { body: html } });
+    const r = await fetchJobPosting('https://www.linkedin.com/jobs/view/123/', f);
+    expect(r.posted).toMatchObject({ approx: true, raw: '2 weeks ago' });
+    expect(r.posted?.source).toMatch(/^LinkedIn page text/);
+  });
+});
+
+describe('describePosted', () => {
+  const now = new Date('2026-09-24T12:00:00Z');
+  it('labels exact, approximate and at-least dates with a citation', () => {
+    const exact = describePosted(
+      {
+        date: '2026-04-15',
+        source: 'Ashby publishedAt',
+        approx: false,
+        raw: '2026-04-15T22:25:10Z',
+      },
+      now,
+    );
+    expect(exact.label).toBe('Posted 162d ago');
+    expect(exact.title).toBe('Ashby publishedAt: "2026-04-15T22:25:10Z"');
+
+    const approx = describePosted(
+      { date: '2026-09-10', source: 'LinkedIn page text', approx: true, raw: '2 weeks ago' },
+      now,
+    );
+    expect(approx.label).toBe('Posted ~14d ago');
+    expect(approx.title).toBe(
+      'LinkedIn page text: "2 weeks ago" → about Sep 10, 2026 (approximate)',
+    );
+
+    const floor = describePosted(
+      {
+        date: '2026-08-25',
+        source: 'Workday "posted on" text',
+        approx: true,
+        raw: 'Posted 30+ Days Ago',
+      },
+      now,
+    );
+    expect(floor.label).toBe('Posted 30d+ ago');
+
+    expect(
+      describePosted({ date: '2026-09-01', source: null, approx: false, raw: null }, now).title,
+    ).toMatch(/^Source not recorded/);
   });
 });

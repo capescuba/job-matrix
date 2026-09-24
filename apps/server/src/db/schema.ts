@@ -36,6 +36,11 @@ export const jobs = sqliteTable(
     descriptionText: text('description_text'),
     descriptionHash: text('description_hash'),
     postedAt: text('posted_at'),
+    /** Where postedAt came from, e.g. "Ashby publishedAt"; null for dates saved before tracking. */
+    postedSource: text('posted_source'),
+    postedApprox: integer('posted_approx', { mode: 'boolean' }).notNull().default(false),
+    /** The original value/text the date was read from. */
+    postedRaw: text('posted_raw'),
     applicantCount: integer('applicant_count'),
     /** 'open' | 'closed' from the last posting check; null = never checked. */
     postingStatus: text('posting_status'),
