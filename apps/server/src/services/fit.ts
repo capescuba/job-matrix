@@ -308,6 +308,7 @@ export async function assessFit(
           provider: provider.name,
           model,
           applicationId,
+          companyId: row.job.companyId,
           trace,
           error: (err as Error).message,
         })
@@ -321,6 +322,7 @@ export async function assessFit(
     model: res.model,
     usage: res.usage,
     applicationId,
+    companyId: row.job.companyId,
     trace: res.trace,
   });
   const u = res.usage;

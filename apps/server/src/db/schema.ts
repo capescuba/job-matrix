@@ -197,6 +197,8 @@ export const aiUsage = sqliteTable(
     /** Cost at the time of the call, so later price changes don't rewrite history. */
     costUsd: real('cost_usd'),
     applicationId: integer('application_id'),
+    /** The company it was about — kept when the job is deleted, and set for company-only research. */
+    companyId: integer('company_id'),
     durationMs: integer('duration_ms'),
     stopReason: text('stop_reason'),
     /** Error message when the call failed after reaching the model. */

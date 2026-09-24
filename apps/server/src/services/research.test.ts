@@ -10,6 +10,7 @@ import { createApplication } from './applications.ts';
 import { fitBatchStatus, startFitBatch } from './fit.ts';
 import { ensureResearch, isStale, latestResearch } from './research.ts';
 import { parseYahooChart } from './stock.ts';
+import { getUsageSummary } from './usage.ts';
 
 const brief: CompanyResearch = {
   flags: [
@@ -261,6 +262,19 @@ describe('company research', () => {
     expect(
       estimateCostUsd('claude-opus-5', { inputTokens: 0, outputTokens: 0, webSearches: 10 }),
     ).toBeCloseTo(0.1);
+  });
+
+  it('usage shows the company for each call, including Refresh and deleted jobs', async () => {
+    const { provider } = fakeProvider();
+    const id = addJob('DocuSign');
+    await analyzeApplication(db, id, { provider });
+    await ensureResearch(db, companyOf(id), { provider, force: true }); // Refresh: no job
+    await buildApp(db).inject({ method: 'DELETE', url: `/api/applications/${id}` });
+    const recent = getUsageSummary(db).recent;
+    expect(recent).toHaveLength(3);
+    expect(recent.map((r) => r.company)).toEqual(['DocuSign', 'DocuSign', 'DocuSign']);
+    // The job is gone, so no link to it.
+    expect(recent.every((r) => r.applicationId == null && r.jobTitle == null)).toBe(true);
   });
 });
 

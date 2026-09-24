@@ -190,6 +190,7 @@ async function researchCompany(
           provider: provider.name,
           model,
           applicationId: opts.applicationId,
+          companyId,
           trace,
           error: (err as Error).message,
         })
@@ -206,6 +207,7 @@ async function researchCompany(
     model: res.model,
     usage: res.usage,
     applicationId: opts.applicationId,
+    companyId,
     trace: res.trace,
     ...(empty && { error: 'No sources found — brief not saved' }),
   });

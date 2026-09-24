@@ -1,8 +1,8 @@
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { CallTrace, TokenUsage } from '@jm/ai';
 import { PRICING_AS_OF, estimateCostUsd, pricingFor } from '@jm/shared';
 import type { Db } from '../db/client.ts';
-import { aiUsage } from '../db/schema.ts';
+import { aiUsage, applications, companies, jobs } from '../db/schema.ts';
 import { FIT_SYSTEM_PROMPT, unscoredApplicationIds } from './fit.ts';
 import { getDefaultResume, getProfile } from './resume.ts';
 import { getSettings } from './settings.ts';
@@ -24,6 +24,7 @@ export function recordUsage(
     model: string;
     usage?: TokenUsage;
     applicationId?: number;
+    companyId?: number;
     trace?: CallTrace;
     error?: string;
   },
@@ -41,6 +42,7 @@ export function recordUsage(
       cacheWriteTokens: u.cacheWriteTokens ?? 0,
       costUsd: estimateCostUsd(e.model, u),
       applicationId: e.applicationId ?? null,
+      companyId: e.companyId ?? null,
       durationMs: e.trace?.durationMs ?? null,
       stopReason: e.trace?.stopReason ?? null,
       error: e.error ?? null,
@@ -87,8 +89,13 @@ export function getUsageSummary(db: Db, now = new Date()) {
       applicationId: aiUsage.applicationId,
       durationMs: aiUsage.durationMs,
       error: aiUsage.error,
+      company: companies.name,
+      jobTitle: jobs.title,
     })
     .from(aiUsage)
+    .leftJoin(applications, eq(applications.id, aiUsage.applicationId))
+    .leftJoin(jobs, eq(jobs.id, applications.jobId))
+    .leftJoin(companies, eq(companies.id, sql`coalesce(${aiUsage.companyId}, ${jobs.companyId})`))
     .orderBy(desc(aiUsage.at), desc(aiUsage.id))
     .all();
   const add = (a: Agg, r: (typeof rows)[number]) => {
@@ -142,7 +149,9 @@ export function getUsageSummary(db: Db, now = new Date()) {
       inputTokens: r.inputTokens + r.cacheReadTokens + r.cacheWriteTokens,
       outputTokens: r.outputTokens,
       costUsd: r.costUsd,
-      applicationId: r.applicationId,
+      applicationId: r.jobTitle == null ? null : r.applicationId,
+      company: r.company,
+      jobTitle: r.jobTitle,
       durationMs: r.durationMs,
       error: r.error,
     })),
