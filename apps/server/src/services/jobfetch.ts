@@ -6,6 +6,8 @@ import { NotFoundError, sha256 } from './applications.ts';
 
 export interface FetchedJob {
   title: string | null;
+  /** Hiring company, when the source names it (Greenhouse, LinkedIn, schema.org). */
+  company: string | null;
   location: string | null;
   remoteType: 'Remote' | 'Hybrid' | 'Onsite' | null;
   salaryMin: number | null;
@@ -62,6 +64,9 @@ function relative(text: string | null | undefined, source: string): PostedInfo |
   const date = relativeToDate(clean);
   return date ? { date, source, approx: true, raw: clean ?? null } : null;
 }
+
+/** Feeds use 0 as "not provided" — treat anything non-positive as missing. */
+const positive = (n: number | null | undefined) => (typeof n === 'number' && n > 0 ? n : null);
 
 const CLOSED_TEXT =
   /no longer (accepting applications|available|open|active)|(position|job|role) (has been|is) (filled|closed)|(job|posting) (has )?(expired|closed)|this (job|role|position|posting) is no longer/i;
@@ -164,7 +169,8 @@ function remoteFrom(s: string | null | undefined): FetchedJob['remoteType'] {
 }
 
 function finish(
-  partial: Omit<FetchedJob, 'salaryMin' | 'salaryMax' | 'posted' | 'closedHint'> & {
+  partial: Omit<FetchedJob, 'salaryMin' | 'salaryMax' | 'posted' | 'closedHint' | 'company'> & {
+    company?: string | null;
     salaryMin?: number | null;
     salaryMax?: number | null;
     posted?: PostedInfo | null;
@@ -175,7 +181,7 @@ function finish(
   if (descriptionText.length < 200)
     throw new JobFetchError('The page had no usable job description.');
   const salary =
-    partial.salaryMin != null
+    partial.salaryMin != null && partial.salaryMin > 0
       ? { min: partial.salaryMin, max: partial.salaryMax ?? partial.salaryMin }
       : parseSalaryRange(descriptionText);
   return {
@@ -183,6 +189,7 @@ function finish(
     descriptionText,
     salaryMin: salary?.min ?? null,
     salaryMax: salary?.max ?? null,
+    company: partial.company?.trim() || null,
     posted: partial.posted ?? null,
     closedHint: partial.closedHint ?? null,
   };
@@ -232,9 +239,11 @@ async function greenhouse(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     location?: { name?: string };
     first_published?: string;
     updated_at?: string;
+    company_name?: string;
   }>(f, `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}`);
   return finish({
     title: j.title,
+    company: j.company_name ?? null,
     location: j.location?.name ?? null,
     remoteType: remoteFrom(j.location?.name),
     descriptionText: htmlToText(j.content),
@@ -271,8 +280,8 @@ async function lever(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     title: j.text,
     location: j.categories?.location ?? null,
     remoteType: remoteFrom(j.workplaceType),
-    salaryMin: annual ? (j.salaryRange?.min ?? null) : null,
-    salaryMax: annual ? (j.salaryRange?.max ?? null) : null,
+    salaryMin: annual ? positive(j.salaryRange?.min) : null,
+    salaryMax: annual ? positive(j.salaryRange?.max) : null,
     descriptionText: parts.filter(Boolean).join('\n\n'),
     posted: exact(j.createdAt, 'Lever createdAt'),
     via: 'Lever API',
@@ -360,11 +369,13 @@ async function linkedin(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     );
   const title = html.match(/<h2[^>]*top-card-layout__title[^>]*>([\s\S]*?)<\/h2>/)?.[1];
   const location = html.match(/topcard__flavor--bullet[^>]*>([\s\S]*?)<\/span>/)?.[1];
+  const org = html.match(/topcard__org-name-link[^>]*>([\s\S]*?)<\/a>/)?.[1];
   // LinkedIn shows pay in a separate box, not in the description.
   const payBox = html.match(/compensation__salary[^>]*>([\s\S]*?)<\/div>/)?.[1];
   const pay = payBox ? parseSalaryRange(htmlToText(payBox)) : null;
   return finish({
     title: title ? htmlToText(title) : null,
+    company: org ? htmlToText(org) : null,
     location: location ? htmlToText(location) : null,
     remoteType: remoteFrom(location),
     salaryMin: pay?.min ?? null,
@@ -394,6 +405,7 @@ interface LdJobPosting {
   baseSalary?: { value?: { minValue?: number; maxValue?: number; unitText?: string } };
   datePosted?: string;
   validThrough?: string;
+  hiringOrganization?: string | { name?: string };
 }
 
 function findJobPosting(node: unknown): LdJobPosting | null {
@@ -415,12 +427,18 @@ function findJobPosting(node: unknown): LdJobPosting | null {
 /** Any page: schema.org JobPosting JSON-LD first, else the readable text of <main>. */
 async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
   const html = await getText(f, u.toString());
-  const pageText = htmlToText(html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? html);
-  const closedPhrase = pageText.match(CLOSED_TEXT)?.[0];
-  for (const m of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+  const ldBlocks = [
+    ...html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi),
+  ].map((m) => m[1]);
+  // Drop code before looking for the body: scripts can hold text that's never shown — e.g. a
+  // site's "this job may be no longer available" error message, or the literal text "<body".
+  const visible = html.replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1\s*>/gi, ' ');
+  const body = visible.match(/<body[\s\S]*<\/body>/i)?.[0] ?? visible;
+  const closedPhrase = htmlToText(body).match(CLOSED_TEXT)?.[0];
+  for (const block of ldBlocks) {
     let data: unknown;
     try {
-      data = JSON.parse(m[1].trim());
+      data = JSON.parse(block.trim());
     } catch {
       continue;
     }
@@ -434,23 +452,29 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
     const annual = !sal?.unitText || /year/i.test(sal.unitText);
     return finish({
       title: jp.title ? decodeEntities(jp.title) : null,
+      company:
+        typeof jp.hiringOrganization === 'string'
+          ? jp.hiringOrganization
+          : (jp.hiringOrganization?.name ?? null),
       location: place || null,
       remoteType: jp.jobLocationType === 'TELECOMMUTE' ? 'Remote' : null,
-      salaryMin: annual ? (sal?.minValue ?? null) : null,
-      salaryMax: annual ? (sal?.maxValue ?? null) : null,
+      salaryMin: annual ? positive(sal?.minValue) : null,
+      salaryMax: annual ? positive(sal?.maxValue) : null,
       descriptionText: htmlToText(jp.description),
       posted: exact(jp.datePosted, 'Page structured data (schema.org datePosted)'),
-      closedHint:
-        jp.validThrough && Date.parse(jp.validThrough) < Date.now()
+      // The posting's own "valid through" date is the most direct evidence: a future one means
+      // open, whatever the page text says; only without one do page phrases count.
+      closedHint: !jp.validThrough
+        ? closedPhrase
+          ? `Page says "${closedPhrase}"`
+          : null
+        : Date.parse(jp.validThrough) < Date.now()
           ? `Listing expired ${toDate(jp.validThrough)}`
-          : closedPhrase
-            ? `Page says "${closedPhrase}"`
-            : null,
+          : null,
       via: 'Page structured data',
     });
   }
-  const main =
-    html.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? '';
+  const main = visible.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? body;
   const text = htmlToText(main.replace(/<(nav|header|footer|form|button)[\s\S]*?<\/\1>/gi, ' '));
   if (
     text.length < 800 ||

@@ -43,6 +43,34 @@
       "when": 1790285062375,
       "tag": "0005_posted_source",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790286376180,
+      "tag": "0006_screening",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790289031147,
+      "tag": "0007_company_research",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790290829504,
+      "tag": "0008_fix_zero_salaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790291570036,
+      "tag": "0009_usage_company",
+      "breakpoints": true
     }
   ]
 }

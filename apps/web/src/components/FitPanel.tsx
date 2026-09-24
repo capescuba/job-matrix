@@ -26,10 +26,19 @@ export function FitPanel({
   const [inspect, setInspect] = useState(false);
   const [mountedAt] = useState(Date.now);
   // This job's latest run, if it's live or started since this page opened.
-  const run = useAiRuns().find(
-    (r) => r.applicationId === applicationId && (!r.finishedAt || r.startedAt >= mountedAt - 1000),
+  const runs = useAiRuns().filter(
+    (r) =>
+      r.applicationId === applicationId &&
+      r.companyId == null &&
+      (!r.finishedAt || r.startedAt >= mountedAt - 1000),
   );
-  const live = run && <LiveRun run={run} />;
+  const live = runs.length > 0 && (
+    <div className="space-y-2">
+      {runs.map((r) => (
+        <LiveRun key={r.id} run={r} showLabel={runs.length > 1} />
+      ))}
+    </div>
+  );
   const score = useMutation({
     mutationFn: (force: boolean) => api.scoreFit(applicationId, force),
     onSuccess: () => {

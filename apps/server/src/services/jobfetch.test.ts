@@ -294,3 +294,116 @@ describe('describePosted', () => {
     ).toMatch(/^Source not recorded/);
   });
 });
+
+describe('closed-posting detection ignores text the page never shows', () => {
+  // Modelled on careers.docusign.com: a head script carries the site's error messages (and the
+  // literal text "<body"), which used to leak into the page text and mark open jobs closed.
+  const siteMessages = `<script>window.i18n = {"ERROR":{"NO_JOBS_404":"We’re sorry, but it looks like this job may be no longer available or does not exist."},"TPL":"<body class='x'>"};</script>`;
+
+  it('does not flag a job closed because of hidden script strings', async () => {
+    const html = `<html><head>${siteMessages}</head><body><main><h1>TPM</h1><p>${LONG}${LONG}</p></main></body></html>`;
+    const { f } = fakeFetch({ 'https://careers.example.com/': { body: html } });
+    expect((await checkPosting('https://careers.example.com/jobs/1', f)).postingStatus).toBe(
+      'open',
+    );
+  });
+
+  it('trusts a future validThrough in structured data', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Sr. TPM',
+      description: `<p>${LONG}</p>`,
+      datePosted: '2026-08-13T16:31:00+0000',
+      validThrough: '2099-08-13T16:31:59.000Z',
+    };
+    const html = `<html><head>${siteMessages}<script type="application/ld+json">${JSON.stringify(ld)}</script></head><body><p>${LONG}</p></body></html>`;
+    const { f } = fakeFetch({ 'https://careers.example.com/': { body: html } });
+    const r = await checkPosting('https://careers.example.com/jobs/2', f);
+    expect(r).toMatchObject({ postingStatus: 'open', posted: { date: '2026-08-13' } });
+  });
+
+  it('still flags an expired validThrough, and visible closed text when there is no date', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'TPM',
+      description: `<p>${LONG}</p>`,
+      validThrough: '2020-01-01',
+    };
+    const { f } = fakeFetch({
+      'https://careers.example.com/a': {
+        body: `<script type="application/ld+json">${JSON.stringify(ld)}</script>`,
+      },
+      'https://careers.example.com/b': {
+        body: `<body><main><p>This position has been filled. ${LONG}${LONG}</p></main></body>`,
+      },
+    });
+    expect((await checkPosting('https://careers.example.com/a', f)).postingNote).toMatch(
+      /Listing expired 2020-01-01/,
+    );
+    expect((await checkPosting('https://careers.example.com/b', f)).postingStatus).toBe('closed');
+  });
+});
+
+describe('company from the source', () => {
+  it('reads Greenhouse company_name, LinkedIn org link and schema.org hiringOrganization', async () => {
+    const gh = fakeFetch({
+      'https://boards-api.greenhouse.io/': {
+        body: JSON.stringify({
+          title: 'TPM',
+          company_name: 'Anthropic',
+          content: `<p>${LONG}</p>`,
+        }),
+      },
+    }).f;
+    expect(
+      (await fetchJobPosting('https://job-boards.greenhouse.io/anthropic/jobs/1', gh)).company,
+    ).toBe('Anthropic');
+
+    const li = fakeFetch({
+      'https://www.linkedin.com/': {
+        body: `<a class="topcard__org-name-link topcard__flavor--black-link" href="x">
+          Figma
+        </a><div class="show-more-less-html__markup">${LONG}</div>`,
+      },
+    }).f;
+    expect((await fetchJobPosting('https://www.linkedin.com/jobs/view/1/', li)).company).toBe(
+      'Figma',
+    );
+
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Sr. TPM',
+      hiringOrganization: { '@type': 'Organization', name: 'Docusign' },
+      description: `<p>${LONG}</p>`,
+    };
+    const page = fakeFetch({
+      'https://careers.docusign.com/': {
+        body: `<script type="application/ld+json">${JSON.stringify(ld)}</script>`,
+      },
+    }).f;
+    expect(
+      (await fetchJobPosting('https://careers.docusign.com/careers-home/jobs/30093', page)).company,
+    ).toBe('Docusign');
+  });
+});
+
+describe('placeholder salaries', () => {
+  it('treats a schema.org salary of 0 as missing and reads the range from the description', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Sr. TPM',
+      description: `<p>${LONG}</p><p>California: $146,400.00 - $235,375.00 base salary</p>`,
+      baseSalary: {
+        '@type': 'MonetaryAmount',
+        value: { minValue: 0, maxValue: 0, unitText: 'YEAR' },
+      },
+    };
+    const { f } = fakeFetch({
+      'https://careers.docusign.com/': {
+        body: `<script type="application/ld+json">${JSON.stringify(ld)}</script>`,
+      },
+    });
+    const r = await fetchJobPosting('https://careers.docusign.com/careers-home/jobs/30093', f);
+    expect([r.salaryMin, r.salaryMax]).toEqual([146400, 235375]);
+  });
+});

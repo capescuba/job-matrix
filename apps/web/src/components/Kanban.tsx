@@ -9,14 +9,15 @@ import {
 } from '@dnd-kit/core';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { STATUSES, type Status } from '@jm/shared';
+import { SCREENING_STATUSES, STATUSES, type Status } from '@jm/shared';
 import type { ApplicationRow } from '../api.ts';
 import { FitBadge, FlagChips, jobFlags } from './badges.tsx';
 import { cx } from './ui.tsx';
 
 /** Dead-end statuses: collapsed into slim drop targets unless expanded. Offer stays a full column. */
 const ENDED: Status[] = ['Rejected', 'Withdrawn', 'Ghosted'];
-const PIPELINE = STATUSES.filter((s) => !ENDED.includes(s));
+// Screening/Passed live on the Screening page, not the board.
+const PIPELINE = STATUSES.filter((s) => !ENDED.includes(s) && !SCREENING_STATUSES.includes(s));
 const KEY = 'jm-kanban-show-closed';
 
 export function Kanban({

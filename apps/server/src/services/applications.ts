@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import {
+  NOT_APPLIED_STATUSES,
   guessSource,
   quickAddSchema,
   type ActivityInput,
@@ -13,6 +14,8 @@ import {
 } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import { parseSalaryRange } from './jobfetch.ts';
+import { payRangeOf, withCurrentPay } from './pay.ts';
+import { getProfile } from './resume.ts';
 import {
   activities,
   applications,
@@ -43,7 +46,7 @@ export function planStatusChange(
   now = new Date(),
 ): { changed: boolean; appliedAt: string | null } {
   if (current.status === next) return { changed: false, appliedAt: current.appliedAt };
-  const needsApplied = next !== 'Saved' && next !== 'Withdrawn' && !current.appliedAt;
+  const needsApplied = !NOT_APPLIED_STATUSES.includes(next) && !current.appliedAt;
   return { changed: true, appliedAt: needsApplied ? today(now) : current.appliedAt };
 }
 
@@ -79,8 +82,7 @@ export function createApplication(db: Db, raw: QuickAddInput, now = new Date()) 
       .returning({ id: jobs.id })
       .get();
     const appliedAt =
-      input.appliedAt ||
-      (input.status !== 'Saved' && input.status !== 'Withdrawn' ? today(now) : null);
+      input.appliedAt || (NOT_APPLIED_STATUSES.includes(input.status) ? null : today(now));
     const app = tx
       .insert(applications)
       .values({ jobId: job.id, status: input.status, appliedAt, notes: input.notes || null })
@@ -133,12 +135,24 @@ export interface ApplicationRow {
   postingStatus: 'open' | 'closed' | null;
   postingNote: string | null;
   contactCount: number;
+  applicantCount: number | null;
+  descriptionSource: string | null;
+  /** First ~600 chars of the description, for inbox cards. */
+  descriptionPreview: string | null;
+  fitSummary: string | null;
+  fitWhyNotHigher: string | null;
+  /** When the company's latest research brief was made (null = never). */
+  researchAt: string | null;
 }
 
 type RawRow = Omit<ApplicationRow, 'fitGateReasons' | 'outreachRecommended' | 'postedApprox'> & {
   fitGateReasons: string | null;
   outreachRecommended: number | null;
   postedApprox: number;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  /** The description, only when a scored job's range has to be read from it. */
+  payText: string | null;
 };
 
 export function listApplications(db: Db): ApplicationRow[] {
@@ -151,6 +165,10 @@ export function listApplications(db: Db): ApplicationRow[] {
            c.id AS companyId, c.name AS company,
            f.overall_score AS fitScore, json_extract(f.result, '$.verdict') AS fitVerdict,
            f.gate AS fitGate, f.gate_reasons AS fitGateReasons,
+           j.salary_min AS salaryMin, j.salary_max AS salaryMax,
+           CASE WHEN f.id IS NOT NULL AND COALESCE(j.salary_min, 0) <= 0
+                     AND COALESCE(j.salary_max, 0) <= 0
+                THEN j.description_text END AS payText,
            json_extract(f.result, '$.flags.levelMismatch') AS levelMismatch,
            json_extract(f.result, '$.flags.outreach.recommended') AS outreachRecommended,
            json_extract(f.result, '$.flags.outreach.why') AS outreachWhy,
@@ -158,6 +176,11 @@ export function listApplications(db: Db): ApplicationRow[] {
            j.posted_approx AS postedApprox, j.posted_raw AS postedRaw,
            j.posting_status AS postingStatus, j.posting_note AS postingNote,
            (SELECT count(*) FROM contacts ct WHERE ct.company_id = c.id) AS contactCount,
+           j.applicant_count AS applicantCount, j.description_source AS descriptionSource,
+           substr(j.description_text, 1, 600) AS descriptionPreview,
+           json_extract(f.result, '$.summary') AS fitSummary,
+           json_extract(f.result, '$.whyNotHigher') AS fitWhyNotHigher,
+           (SELECT max(created_at) FROM company_research cr WHERE cr.company_id = c.id) AS researchAt,
            COALESCE((SELECT max(at) FROM activities WHERE application_id = a.id), a.applied_at) AS lastActivityAt
     FROM applications a
     JOIN jobs j ON j.id = a.job_id
@@ -167,12 +190,24 @@ export function listApplications(db: Db): ApplicationRow[] {
     )
     ORDER BY COALESCE(a.updated_at, a.created_at) DESC
   `);
-  return rows.map((r) => ({
-    ...r,
-    fitGateReasons: r.fitGateReasons ? (JSON.parse(r.fitGateReasons) as GateReason[]) : null,
-    outreachRecommended: Boolean(r.outreachRecommended),
-    postedApprox: Boolean(r.postedApprox),
-  }));
+  const { minBase } = getProfile(db);
+  return rows.map(({ salaryMin, salaryMax, payText, ...r }) => {
+    const saved = r.fitGateReasons ? (JSON.parse(r.fitGateReasons) as GateReason[]) : null;
+    const gate =
+      r.fitGate &&
+      withCurrentPay(
+        saved,
+        minBase,
+        payRangeOf({ salaryMin, salaryMax, descriptionText: payText }),
+      );
+    return {
+      ...r,
+      fitGate: gate ? gate.gate : null,
+      fitGateReasons: gate ? gate.reasons : null,
+      outreachRecommended: Boolean(r.outreachRecommended),
+      postedApprox: Boolean(r.postedApprox),
+    };
+  });
 }
 
 export function getApplicationDetail(db: Db, id: number) {
@@ -203,9 +238,20 @@ export function getApplicationDetail(db: Db, id: number) {
     .where(eq(activities.applicationId, id))
     .orderBy(activities.at, activities.id)
     .all();
+  const payRange = payRangeOf(job);
+  // The latest score's gate, with the pay floor checked against today's range and floor.
+  if (fits[0]) {
+    const g = withCurrentPay(
+      fits[0].gateReasons as GateReason[] | null,
+      getProfile(db).minBase,
+      payRange,
+    );
+    fits[0] = { ...fits[0], gate: g.gate, gateReasons: g.reasons };
+  }
   return {
     application: app,
     job,
+    payRange,
     company,
     events,
     activities: acts,
@@ -249,7 +295,9 @@ export function updateApplication(
 }
 
 export function updateJob(db: Db, id: number, patch: JobPatch) {
-  const values: Partial<typeof jobs.$inferInsert> = { ...patch };
+  const { companyName, ...rest } = patch;
+  const values: Partial<typeof jobs.$inferInsert> = { ...rest };
+  if (companyName) values.companyId = findOrCreateCompany(db, companyName);
   if (patch.postingStatus !== undefined) values.postingCheckedAt = new Date().toISOString();
   if (patch.postedAt !== undefined) {
     const current = db.select({ postedAt: jobs.postedAt }).from(jobs).where(eq(jobs.id, id)).get();

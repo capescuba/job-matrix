@@ -35,6 +35,10 @@ export const jobs = sqliteTable(
     salaryMax: integer('salary_max'),
     descriptionText: text('description_text'),
     descriptionHash: text('description_hash'),
+    /** Where the description came from, e.g. "Your selection", "LinkedIn template", "Greenhouse API". */
+    descriptionSource: text('description_source'),
+    /** Signed-in LinkedIn extras: "people you know", alumni, etc. (string[]) */
+    linkedinInsights: text('linkedin_insights', { mode: 'json' }),
     postedAt: text('posted_at'),
     /** Where postedAt came from, e.g. "Ashby publishedAt"; null for dates saved before tracking. */
     postedSource: text('posted_source'),
@@ -193,6 +197,8 @@ export const aiUsage = sqliteTable(
     /** Cost at the time of the call, so later price changes don't rewrite history. */
     costUsd: real('cost_usd'),
     applicationId: integer('application_id'),
+    /** The company it was about — kept when the job is deleted, and set for company-only research. */
+    companyId: integer('company_id'),
     durationMs: integer('duration_ms'),
     stopReason: text('stop_reason'),
     /** Error message when the call failed after reaching the model. */
@@ -203,6 +209,23 @@ export const aiUsage = sqliteTable(
     thinkingText: text('thinking_text'),
   },
   (t) => [index('ai_usage_at').on(t.at)],
+);
+
+/** Cited company briefs from web research; the latest row per company is the current one. */
+export const companyResearch = sqliteTable(
+  'company_research',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    companyId: integer('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    model: text('model').notNull(),
+    usageId: integer('usage_id'),
+    ticker: text('ticker'),
+    result: text('result', { mode: 'json' }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('company_research_company').on(t.companyId)],
 );
 
 /** Gaps from each assessment, stored separately so recurring themes can be counted. */

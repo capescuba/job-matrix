@@ -4,13 +4,16 @@ import { asc, eq } from 'drizzle-orm';
 import { ZodError, z } from 'zod';
 import { EFFORTS, LLMError } from '@jm/ai';
 import {
+  STATUSES,
   activitySchema,
   applicationPatchSchema,
+  captureSchema,
   contactSchema,
   jobPatchSchema,
   profilePatchSchema,
   quickAddSchema,
 } from '@jm/shared';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Db } from './db/client.ts';
 import { companies, contacts, resumeVersions } from './db/schema.ts';
 import {
@@ -34,13 +37,28 @@ import {
 } from './services/jobfetch.ts';
 import { addResume, getProfile, setDefaultResume, updateProfile } from './services/resume.ts';
 import { getSettings, updateSettings } from './services/settings.ts';
+import { analyzeApplication } from './services/analyze.ts';
+import { ensureResearch, isStale, latestResearch } from './services/research.ts';
+import { captureJob, findTrackedByUrl } from './services/screening.ts';
+import { getStock } from './services/stock.ts';
 import { getStats } from './services/stats.ts';
+import { extensionToken, tokenMatches } from './services/token.ts';
 import { getCall, getUsageSummary } from './services/usage.ts';
 import { replay, subscribe, type RunEventEnvelope } from './services/aiEvents.ts';
 
 const idParam = z.object({ id: z.coerce.number().int() });
 
-export function buildApp(db: Db, opts: { logger?: boolean } = {}) {
+export function buildApp(
+  db: Db,
+  opts: { logger?: boolean; extensionToken?: string; fetchFn?: typeof fetch } = {},
+) {
+  const token = () => opts.extensionToken ?? extensionToken();
+  /** Extension routes: the shared token must be in X-JM-Token (blocks other web pages). */
+  const requireToken = async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!tokenMatches(req.headers['x-jm-token'], token()))
+      return reply.status(401).send({ error: 'Missing or wrong extension token' });
+  };
+
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 5 * 1024 * 1024 });
   app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -97,8 +115,68 @@ export function buildApp(db: Db, opts: { logger?: boolean } = {}) {
     return assessFit(db, id, { force });
   });
   // Starts (or reports) a background batch; the UI polls GET for progress.
-  app.post('/api/fit/batch', () => startFitBatch(db));
+  app.post('/api/fit/batch', (req) => {
+    const { status, research } = z
+      .object({
+        status: z.enum(STATUSES).optional(),
+        research: z
+          .string()
+          .optional()
+          .transform((v) => v === '1' || v === 'true'),
+      })
+      .parse(req.query);
+    return startFitBatch(db, {
+      status,
+      ...(research && { task: (id: number) => analyzeApplication(db, id) }),
+    });
+  });
+  // Screening's Score: fit + company research (if not fresh), in parallel.
+  app.post('/api/applications/:id/analyze', async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { force } = z
+      .object({
+        force: z
+          .string()
+          .optional()
+          .transform((v) => v === '1' || v === 'true'),
+      })
+      .parse(req.query);
+    return analyzeApplication(db, id, { force });
+  });
+
+  // ----- company research & stock -----
+  app.get('/api/companies/:id/research', (req) => {
+    const r = latestResearch(db, idParam.parse(req.params).id);
+    return r && { ...r, stale: isStale(r) };
+  });
+  app.post('/api/companies/:id/research', async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { research } = await ensureResearch(db, id, { force: true });
+    return research;
+  });
+  app.get('/api/companies/:id/stock', async (req) => {
+    const r = latestResearch(db, idParam.parse(req.params).id);
+    return r?.ticker ? await getStock(r.ticker, opts.fetchFn) : null;
+  });
   app.get('/api/fit/batch', () => fitBatchStatus());
+
+  // ----- screening capture -----
+  // From the Chrome extension: the page as you see it (selection, template fields, page text).
+  app.post('/api/screen/capture', { preHandler: requireToken }, async (req, reply) => {
+    const r = await captureJob(db, captureSchema.parse(req.body), { fetchFn: opts.fetchFn });
+    return reply.status(r.existing ? 200 : 201).send(r);
+  });
+  // From the Screening page's "Screen a URL" box: server-side fetch only.
+  app.post('/api/screen/url', async (req, reply) => {
+    const { url } = z.object({ url: z.string().trim().url() }).parse(req.body);
+    const r = await captureJob(db, { url }, { fetchFn: opts.fetchFn });
+    return reply.status(r.existing ? 200 : 201).send(r);
+  });
+  // Is this posting already tracked? (the extension popup asks before capturing)
+  app.get('/api/screen/lookup', { preHandler: requireToken }, (req) => {
+    const { url } = z.object({ url: z.string().url() }).parse(req.query);
+    return { tracked: findTrackedByUrl(db, url) };
+  });
 
   // ----- job description import -----
   app.post('/api/fetch-job', async (req) => {

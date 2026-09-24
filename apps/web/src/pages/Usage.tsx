@@ -15,7 +15,7 @@ const tokens = (n: number) =>
     : n >= 1_000
       ? `${(n / 1_000).toFixed(1)}k`
       : String(n);
-const FEATURE_LABELS: Record<string, string> = { fit: 'Fit scoring' };
+const FEATURE_LABELS: Record<string, string> = { fit: 'Fit scoring', research: 'Company research' };
 
 export default function UsagePage() {
   const { data, error, isLoading } = useQuery({ queryKey: ['usage'], queryFn: api.usage });
@@ -111,6 +111,15 @@ export default function UsagePage() {
                     </td>
                     <td className="py-1.5">
                       {FEATURE_LABELS[r.feature] ?? r.feature}
+                      {r.company && (
+                        <>
+                          <span className="text-ink-3"> · </span>
+                          <span className="font-medium">{r.company}</span>
+                        </>
+                      )}
+                      {r.feature === 'fit' && r.jobTitle && (
+                        <span className="text-ink-3"> · {r.jobTitle}</span>
+                      )}
                       {r.applicationId && (
                         <Link
                           to={`/applications/${r.applicationId}`}

@@ -1,17 +1,19 @@
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { CallTrace, TokenUsage } from '@jm/ai';
 import { PRICING_AS_OF, estimateCostUsd, pricingFor } from '@jm/shared';
 import type { Db } from '../db/client.ts';
-import { aiUsage } from '../db/schema.ts';
+import { aiUsage, applications, companies, jobs } from '../db/schema.ts';
 import { FIT_SYSTEM_PROMPT, unscoredApplicationIds } from './fit.ts';
 import { getDefaultResume, getProfile } from './resume.ts';
 import { getSettings } from './settings.ts';
 
-export type Feature = 'fit';
+export type Feature = 'fit' | 'research';
 
 /** Output tokens (incl. thinking) a fit assessment typically uses, for forecasts before any history exists. */
 const FIT_OUTPUT_TOKENS_GUESS = 4_000;
 const CHARS_PER_TOKEN = 4;
+/** Research cost before history exists — measured: DocuSign on Opus 5, 6 searches, ~108k tokens in = $0.78. */
+const RESEARCH_ESTIMATE_USD = 0.8;
 
 /** Logs one AI call (with its full trace when available). Returns the row id. */
 export function recordUsage(
@@ -22,6 +24,7 @@ export function recordUsage(
     model: string;
     usage?: TokenUsage;
     applicationId?: number;
+    companyId?: number;
     trace?: CallTrace;
     error?: string;
   },
@@ -39,6 +42,7 @@ export function recordUsage(
       cacheWriteTokens: u.cacheWriteTokens ?? 0,
       costUsd: estimateCostUsd(e.model, u),
       applicationId: e.applicationId ?? null,
+      companyId: e.companyId ?? null,
       durationMs: e.trace?.durationMs ?? null,
       stopReason: e.trace?.stopReason ?? null,
       error: e.error ?? null,
@@ -85,8 +89,13 @@ export function getUsageSummary(db: Db, now = new Date()) {
       applicationId: aiUsage.applicationId,
       durationMs: aiUsage.durationMs,
       error: aiUsage.error,
+      company: companies.name,
+      jobTitle: jobs.title,
     })
     .from(aiUsage)
+    .leftJoin(applications, eq(applications.id, aiUsage.applicationId))
+    .leftJoin(jobs, eq(jobs.id, applications.jobId))
+    .leftJoin(companies, eq(companies.id, sql`coalesce(${aiUsage.companyId}, ${jobs.companyId})`))
     .orderBy(desc(aiUsage.at), desc(aiUsage.id))
     .all();
   const add = (a: Agg, r: (typeof rows)[number]) => {
@@ -140,7 +149,9 @@ export function getUsageSummary(db: Db, now = new Date()) {
       inputTokens: r.inputTokens + r.cacheReadTokens + r.cacheWriteTokens,
       outputTokens: r.outputTokens,
       costUsd: r.costUsd,
-      applicationId: r.applicationId,
+      applicationId: r.jobTitle == null ? null : r.applicationId,
+      company: r.company,
+      jobTitle: r.jobTitle,
       durationMs: r.durationMs,
       error: r.error,
     })),
@@ -181,9 +192,16 @@ function forecastFitBatch(
     });
     basis = 'estimate';
   }
+  const research = rows.filter(
+    (r) => r.feature === 'research' && r.model === model && r.costUsd != null,
+  );
+  const researchPerCallUsd = research.length
+    ? research.reduce((s, r) => s + r.costUsd!, 0) / research.length
+    : RESEARCH_ESTIMATE_USD;
   return {
     model,
     modelLabel: pricingFor(model)?.label ?? model,
+    researchPerCallUsd,
     pending: ids.length,
     perCallUsd,
     totalUsd: perCallUsd == null ? null : perCallUsd * ids.length,

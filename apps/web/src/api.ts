@@ -7,6 +7,7 @@ import type {
   JobPatch,
   ProfilePatch,
   QuickAddInput,
+  Status,
 } from '@jm/shared';
 import type {
   ApplicationRow,
@@ -19,6 +20,10 @@ import type {
 } from '../../server/src/services/jobfetch.ts';
 import type { FitBatchStatus } from '../../server/src/services/fit.ts';
 import type { getProfile } from '../../server/src/services/resume.ts';
+import type { analyzeApplication } from '../../server/src/services/analyze.ts';
+import type { ResearchRow } from '../../server/src/services/research.ts';
+import type { CaptureResult } from '../../server/src/services/screening.ts';
+import type { StockQuote } from '../../server/src/services/stock.ts';
 import type { getSettings } from '../../server/src/services/settings.ts';
 import type { getStats } from '../../server/src/services/stats.ts';
 import type { getCall, getUsageSummary } from '../../server/src/services/usage.ts';
@@ -26,7 +31,7 @@ import type { getCall, getUsageSummary } from '../../server/src/services/usage.t
 export type Settings = ReturnType<typeof getSettings>;
 export type Usage = ReturnType<typeof getUsageSummary>;
 
-export type { ApplicationRow, FetchedJob };
+export type { ApplicationRow, FetchedJob, StockQuote };
 export type ApplicationDetail = ReturnType<typeof getApplicationDetail>;
 export type FitAssessment = Omit<ApplicationDetail['fits'][number], 'result' | 'gateReasons'> & {
   result: FitResult;
@@ -83,7 +88,33 @@ export const api = {
       `/api/applications/${id}/fit${force ? '?force=1' : ''}`,
     ),
   /** Starts background scoring of every unscored job (or joins the running batch). */
-  startScoreAll: () => request<FitBatchStatus>('POST', '/api/fit/batch'),
+  /** Screening's Score: fit + company research (when not fresh). */
+  analyze: (id: number, force = false) =>
+    request<Awaited<ReturnType<typeof analyzeApplication>>>(
+      'POST',
+      `/api/applications/${id}/analyze${force ? '?force=1' : ''}`,
+    ),
+  getResearch: (companyId: number) =>
+    request<(ResearchRow & { stale: boolean }) | null>(
+      'GET',
+      `/api/companies/${companyId}/research`,
+    ),
+  refreshResearch: (companyId: number) =>
+    request<ResearchRow>('POST', `/api/companies/${companyId}/research?force=1`),
+  getStock: (companyId: number) =>
+    request<StockQuote | null>('GET', `/api/companies/${companyId}/stock`),
+  startScoreAllWithResearch: (status: Status) =>
+    request<FitBatchStatus>(
+      'POST',
+      `/api/fit/batch?status=${encodeURIComponent(status)}&research=1`,
+    ),
+  startScoreAll: (status?: Status) =>
+    request<FitBatchStatus>(
+      'POST',
+      `/api/fit/batch${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+    ),
+  /** Add a job to the Screening inbox from its URL (server-side fetch). */
+  screenUrl: (url: string) => request<CaptureResult>('POST', '/api/screen/url', { url }),
   scoreAllStatus: () => request<FitBatchStatus | null>('GET', '/api/fit/batch'),
   /** Fetch a posting's details from its URL without saving (for forms). */
   fetchJob: (url: string) => request<FetchedJob>('POST', '/api/fetch-job', { url }),

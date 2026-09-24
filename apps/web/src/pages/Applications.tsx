@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CLOSED_STATUSES, STATUSES, type Status } from '@jm/shared';
+import { CLOSED_STATUSES, SCREENING_STATUSES, STATUSES, type Status } from '@jm/shared';
 import { api, type ApplicationRow } from '../api.ts';
 import { FitBadge, FlagChips, jobFlags } from '../components/badges.tsx';
 import { Kanban } from '../components/Kanban.tsx';
@@ -81,7 +81,11 @@ export default function ApplicationsPage() {
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const filtered = data.filter((r) => {
-      if (statusFilter === 'open' && CLOSED_STATUSES.includes(r.status)) return false;
+      if (
+        statusFilter === 'open' &&
+        (CLOSED_STATUSES.includes(r.status) || SCREENING_STATUSES.includes(r.status))
+      )
+        return false;
       if (statusFilter !== 'open' && statusFilter !== 'all' && r.status !== statusFilter)
         return false;
       return (
@@ -280,6 +284,7 @@ export default function ApplicationsPage() {
       ) : view === 'board' ? (
         <Kanban
           rows={data.filter((r) => {
+            if (SCREENING_STATUSES.includes(r.status)) return false;
             const n = q.trim().toLowerCase();
             return !n || `${r.company} ${r.title}`.toLowerCase().includes(n);
           })}
