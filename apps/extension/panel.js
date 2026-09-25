@@ -51,13 +51,29 @@ const STATUS_TONE = {
   Applied: 'accent',
   'Recruiter Screen': 'good',
   'Hiring Manager': 'good',
-  Interviewing: 'good',
+  'Interview Loop': 'good',
   Offer: 'good',
   Rejected: 'bad',
   Withdrawn: '',
   Ghosted: 'warn',
   Passed: '',
 };
+/** "You passed on this" etc. for applications you've closed. */
+const DECISION_TEXT = {
+  Passed: 'You passed on this',
+  Rejected: 'They turned you down',
+  Withdrawn: 'You withdrew',
+  Ghosted: 'No response — marked ghosted',
+};
+function decisionBanner(a, prefix = '') {
+  const d = a.decision;
+  if (!d) return '';
+  const when = d.at ? ` · ${day(d.at)} <span class="faint">(${daysAgo(d.at)})</span>` : '';
+  return `<div class="decision ${d.status === 'Rejected' ? 'bad' : ''}">
+    <div><strong>${prefix}${esc(DECISION_TEXT[d.status] ?? d.status)}</strong>${when}</div>
+    ${d.reason ? `<div class="muted">“${esc(d.reason)}”</div>` : ''}
+  </div>`;
+}
 const statusChip = (s) => `<span class="chip ${STATUS_TONE[s] ?? ''}">${esc(s)}</span>`;
 const gateChip = (a) =>
   a.fitGate === 'fail'
@@ -91,15 +107,19 @@ async function refresh() {
   const mine = ++seq;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (mine !== seq) return;
+  // Same page as before (e.g. the panel just got focus back): keep drafts, teaching and notices.
+  const samePage = !!tab && state.tab?.id === tab.id && state.tab?.url === tab.url;
   Object.assign(state, {
     tab: tab ? { id: tab.id, url: tab.url } : null,
     error: null,
-    notice: null,
-    drafts: {},
-    saved: {},
-    teach: null,
-    useApp: null,
-    showAdd: false,
+    ...(!samePage && {
+      notice: null,
+      drafts: {},
+      saved: {},
+      teach: null,
+      useApp: null,
+      showAdd: false,
+    }),
   });
   if (!tab?.url || !/^https?:/.test(tab.url)) {
     Object.assign(state, { page: null, ctx: null });
@@ -189,7 +209,7 @@ function appLine(a) {
   return `<li>
     <span class="t" title="${esc(a.title)}">${esc(a.title)}</span>
     ${statusChip(a.status)}
-    <span class="faint small">${a.appliedAt ? day(a.appliedAt) : ''}</span>
+    <span class="faint small" title="${esc(a.decision?.reason ?? '')}">${a.decision?.at ? day(a.decision.at) : a.appliedAt ? day(a.appliedAt) : ''}</span>
     ${a.fitScore != null ? `<span class="small">${a.fitScore.toFixed(1)}</span>` : ''}
     <button class="link small" data-action="open" data-path="/applications/${a.applicationId}">Open</button>
   </li>`;
@@ -214,6 +234,7 @@ function postingSection() {
   if (t) {
     return `<section>
       <h2>This posting ${statusChip(t.status)}</h2>
+      ${decisionBanner(t)}
       <div class="row" style="align-items:flex-start">
         <div class="grow">
           <div class="title">${esc(t.title)}</div>
@@ -222,8 +243,8 @@ function postingSection() {
         ${t.fitScore != null ? `<span class="score ${t.fitGate === 'fail' ? 'fail' : ''}" title="${esc(t.fitVerdict ?? '')}">${t.fitScore.toFixed(1)}</span>` : ''}
       </div>
       <div class="stack small" style="margin-top:6px">
-        ${t.appliedAt ? `<div>Applied <strong>${day(t.appliedAt)}</strong> <span class="faint">(${daysAgo(t.appliedAt)})</span></div>` : '<div class="faint">Not applied yet</div>'}
-        ${t.fitScore != null ? `<div class="row">${esc(t.fitVerdict ?? '')} ${gateChip(t)}</div>` : '<div class="faint">Not scored yet</div>'}
+        ${t.appliedAt ? `<div>Applied <strong>${day(t.appliedAt)}</strong> <span class="faint">(${daysAgo(t.appliedAt)})</span></div>` : t.decision ? '' : '<div class="faint">Not applied yet</div>'}
+        ${t.fitScore != null ? `<div class="row">${esc(t.fitVerdict ?? '')} ${gateChip(t)}</div>` : t.decision ? '' : '<div class="faint">Not scored yet</div>'}
         ${t.nextAction ? `<div>Next: ${esc(t.nextAction)}${t.nextActionDate ? ` <span class="faint">by ${day(t.nextActionDate)}</span>` : ''}</div>` : ''}
         ${t.lastActivityAt ? `<div class="faint">Last activity ${daysAgo(t.lastActivityAt)}</div>` : ''}
       </div>
@@ -238,9 +259,11 @@ function postingSection() {
     return `<section><h2>This page</h2><p class="muted" style="margin:0 0 6px">This doesn’t look like a single job posting.</p>
       <button class="link small" data-action="show-add">Add it to Screening anyway</button></section>`;
 
+  // Same role at another address: if you already decided on it, say so up front.
+  const decided = ctx.similar.find((s) => s.decision);
   const similar = ctx.similar.length
     ? `<div class="saved" style="margin-bottom:8px">
-        <strong class="warn">Looks like one you’re already tracking</strong>
+        ${decided ? decisionBanner(decided, 'Same role elsewhere: ') : '<strong class="warn">Looks like one you’re already tracking</strong>'}
         <ul class="apps">${ctx.similar.map(appLine).join('')}</ul>
       </div>`
     : '';
@@ -251,6 +274,17 @@ function postingSection() {
       : page.liFields?.descriptionText
         ? 'LinkedIn’s job panel'
         : 'the page (Job Matrix reads the posting from its address first)';
+  // Matches a job you already track (or passed on): no add buttons unless you say it's different.
+  if (ctx.similar.length && !state.showAdd)
+    return `<section>
+      <h2>This posting</h2>
+      ${similar}
+      <div class="row">
+        <button class="primary" data-action="open" data-path="/applications/${ctx.similar[0].applicationId}">Open in Job Matrix</button>
+        <button class="link small" data-action="show-add">It’s a different role — add it anyway</button>
+      </div>
+    </section>`;
+
   const cost = (ctx.costs.fit ?? 0) + (ctx.costs.researchNeeded ? ctx.costs.research : 0);
   return `<section>
     <h2>New posting</h2>
@@ -392,6 +426,7 @@ function teachSection() {
 // ---------- actions ----------
 
 async function add(score) {
+  state.notice = null;
   state.busy = score ? 'score' : 'add';
   render();
   try {
@@ -475,6 +510,7 @@ async function saveTemplate() {
       body: { name: host.replace(/^www\./, ''), selectors: state.teach.selectors },
     });
     state.busy = null;
+    state.teach = null;
     await refresh();
     state.notice = {
       tone: 'good',
@@ -526,6 +562,7 @@ document.addEventListener('click', async (e) => {
     await api(`/api/ext/templates/${encodeURIComponent(new URL(state.tab.url).hostname)}`, {
       method: 'DELETE',
     });
+    state.teach = null;
     refresh();
   } else if (a === 'pick') {
     await chrome.scripting.executeScript({
@@ -565,5 +602,8 @@ chrome.tabs.onUpdated.addListener((id, info) => {
   if (id === state.tab?.id && (info.status === 'complete' || info.url)) soon();
 });
 chrome.windows.onFocusChanged.addListener(soon);
+// Coming back to the panel (e.g. after passing on the job in Job Matrix) reads it again.
+document.addEventListener('visibilitychange', () => document.hidden || soon());
+window.addEventListener('focus', soon);
 
 refresh();

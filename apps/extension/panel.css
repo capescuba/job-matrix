@@ -60,7 +60,7 @@ a {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 3px 8px 3px 12px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -328,4 +328,15 @@ body.options label {
   gap: 4px;
   margin: 16px 0 4px;
   font-weight: 600;
+}
+
+.decision {
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--ink-3);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+.decision.bad {
+  border-left-color: var(--bad);
 }

@@ -1,15 +1,17 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, like } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProvider, type LLMProvider } from '@jm/ai';
-import type { CompanyResearch, FitResult } from '@jm/shared';
+import type { CompanyResearch, FitResult, Status } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import {
+  activities,
   applicationAnswers,
   applications,
   companies,
   fitAssessments,
   jobs,
   siteTemplates,
+  statusEvents,
 } from '../db/schema.ts';
 import { NotFoundError, listApplications, type ApplicationRow } from './applications.ts';
 import { latestResearch, isStale } from './research.ts';
@@ -103,8 +105,36 @@ export const pageInputSchema = z.object({
 export type PageInput = z.infer<typeof pageInputSchema>;
 
 /** What the side panel shows about one application. */
-function summary(r: ApplicationRow) {
+/**
+ * For a closed application (passed, rejected, withdrawn, ghosted): when that happened and, for a
+ * pass, the reason you gave ("Passed: 5 days onsite").
+ */
+const DECIDED: readonly Status[] = ['Passed', 'Rejected', 'Withdrawn', 'Ghosted'];
+
+function decisionOf(db: Db, r: ApplicationRow) {
+  if (!DECIDED.includes(r.status)) return null;
+  const ev = db
+    .select({ at: statusEvents.at })
+    .from(statusEvents)
+    .where(and(eq(statusEvents.applicationId, r.id), eq(statusEvents.toStatus, r.status)))
+    .orderBy(desc(statusEvents.at), desc(statusEvents.id))
+    .get();
+  const note =
+    r.status === 'Passed'
+      ? db
+          .select({ summary: activities.summary })
+          .from(activities)
+          .where(and(eq(activities.applicationId, r.id), like(activities.summary, 'Passed%')))
+          .orderBy(desc(activities.at), desc(activities.id))
+          .get()
+      : undefined;
+  const reason = note?.summary?.replace(/^Passed(:\s*|\s+at screening\s*)/i, '').trim() || null;
+  return { status: r.status, at: ev?.at ?? r.updatedAt, reason };
+}
+
+function summary(db: Db, r: ApplicationRow) {
   return {
+    decision: decisionOf(db, r),
     applicationId: r.id,
     title: r.title,
     company: r.company,
@@ -218,8 +248,8 @@ export async function pageContext(db: Db, input: PageInput, opts: { fetchFn?: ty
   return {
     url,
     detected,
-    tracked: tracked ? summary(tracked) : null,
-    similar: similar.map(summary),
+    tracked: tracked ? summary(db, tracked) : null,
+    similar: similar.map((r) => summary(db, r)),
     company: company
       ? {
           id: company.id,
@@ -234,7 +264,7 @@ export async function pageContext(db: Db, input: PageInput, opts: { fetchFn?: ty
           },
           applications: rows
             .filter((r) => r.companyId === company.id && r.id !== tracked?.id)
-            .map(summary),
+            .map((r) => summary(db, r)),
         }
       : null,
     costs: {
