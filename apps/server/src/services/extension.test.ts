@@ -16,6 +16,8 @@ import {
   suggestAnswer,
 } from './extension.ts';
 import { captureJob } from './screening.ts';
+import { EXTENSION_ORIGIN } from './token.ts';
+import type { AddressInfo } from 'node:net';
 
 const TOKEN = 't'.repeat(48);
 const offline = (async () => new Response('', { status: 404 })) as typeof fetch;
@@ -324,6 +326,31 @@ describe('fit score in the panel', () => {
     });
     expect(c.company?.brief).toBeNull();
     expect(c.costs.researchNeeded).toBe(true);
+  });
+});
+
+describe('live progress feed', () => {
+  it('lets the extension read the live AI stream, and no other site', async () => {
+    const app = buildApp(db, { extensionToken: TOKEN, fetchFn: offline });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const { port } = app.server.address() as AddressInfo;
+    const allowOrigin = async (origin: string) => {
+      const ctrl = new AbortController();
+      const res = await fetch(`http://127.0.0.1:${port}/api/ai/events`, {
+        headers: { origin },
+        signal: ctrl.signal,
+      });
+      const header = res.headers.get('access-control-allow-origin');
+      ctrl.abort();
+      return header;
+    };
+    try {
+      expect(await allowOrigin(EXTENSION_ORIGIN)).toBe(EXTENSION_ORIGIN);
+      expect(await allowOrigin('https://evil.example')).toBeNull();
+    } finally {
+      app.server.closeAllConnections();
+      await app.close();
+    }
   });
 });
 

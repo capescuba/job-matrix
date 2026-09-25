@@ -2,6 +2,7 @@
 import { api, openInApp } from './api.js';
 import { captureBody, contextBody, readTab } from './capture.js';
 import { fillField, startPicker } from './reader.js';
+import { connectLive, isRunning, renderLive, toggleStream } from './live.js';
 
 const root = document.getElementById('root');
 const statusEl = document.getElementById('status');
@@ -105,6 +106,7 @@ const spark = (points, up) => {
 let seq = 0;
 async function refresh() {
   const mine = ++seq;
+  connectLive();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (mine !== seq) return;
   // Same page as before (e.g. the panel just got focus back): keep drafts, teaching and notices.
@@ -179,6 +181,7 @@ function render() {
       : null;
   const caret = key ? [a.selectionStart, a.selectionEnd] : null;
   draw();
+  renderLive(root);
   if (key) {
     const el = root.querySelector(key);
     el?.focus();
@@ -237,7 +240,8 @@ function postingSection() {
   const t = ctx.tracked;
   if (t) {
     const f = t.fit;
-    const scoring = state.scoring === t.applicationId;
+    const scoring =
+      state.scoring === t.applicationId || isRunning({ applicationId: t.applicationId });
     const open = t.decision == null;
     const list = (items, tone, mark) =>
       items
@@ -261,7 +265,7 @@ function postingSection() {
            .map(([k, v]) => `${PART[k] ?? k} <strong class="ink">${Number(v).toFixed(1)}</strong>`)
            .join(' · ')}</div>`
       : scoring
-        ? `<div class="warn">Scoring your fit… <span id="elapsed">0s</span> <span class="faint">(usually 20–40s)</span></div>`
+        ? ''
         : open
           ? '<div class="faint">Not scored yet</div>'
           : '';
@@ -285,6 +289,7 @@ function postingSection() {
       <div class="stack small" style="margin-top:6px">
         ${t.appliedAt ? `<div>Applied <strong>${day(t.appliedAt)}</strong> <span class="faint">(${daysAgo(t.appliedAt)})</span></div>` : ''}
         ${fitBlock}
+        <div data-live="app:${t.applicationId}" ${state.scoring === t.applicationId ? 'data-pending="Starting the fit score…"' : ''}></div>
         ${t.nextAction ? `<div>Next: ${esc(t.nextAction)}${t.nextActionDate ? ` <span class="faint">by ${day(t.nextActionDate)}</span>` : ''}</div>` : ''}
       </div>
       <div class="row" style="margin-top:8px">
@@ -358,7 +363,8 @@ function companySection() {
     : '';
   if (!b)
     return `<section><h2>${esc(c.name)}</h2><p class="muted" style="margin:0">No company brief yet.</p>
-      <div class="row" style="margin-top:6px"><button data-action="research" data-id="${c.id}" ${state.researching ? 'disabled' : ''} title="Web research on the company: news, culture, stock or funding, red and green flags. Made once, then reused for all its jobs.">${state.researching ? 'Researching… (about 1–2 minutes)' : `Research company · ~${money(state.ctx.costs.research)}`}</button></div>
+      <div class="row" style="margin-top:6px"><button data-action="research" data-id="${c.id}" ${state.researching ? 'disabled' : ''} title="Web research on the company: news, culture, stock or funding, red and green flags. Made once, then reused for all its jobs.">${state.researching || isRunning({ companyId: c.id }) ? 'Researching…' : `Research company · ~${money(state.ctx.costs.research)}`}</button></div>
+      <div data-live="company:${c.id}" ${state.researching ? 'data-pending="Starting the research…"' : ''}></div>
       ${others}</section>`;
   const stock = c.stock
     ? `<div class="tile"><div class="k">${esc(c.stock.ticker)}</div><div class="v">${c.stock.price.toLocaleString(undefined, { style: 'currency', currency: c.stock.currency ?? 'USD' })}</div>${spark(c.stock.series, (c.stock.change1yPct ?? 0) >= 0)}<div class="small ${(c.stock.change1yPct ?? 0) >= 0 ? 'good' : 'bad'}">${c.stock.change1yPct == null ? '' : `${c.stock.change1yPct >= 0 ? '+' : ''}${c.stock.change1yPct.toFixed(0)}% 1 yr`}</div></div>`
@@ -377,6 +383,7 @@ function companySection() {
       <div class="tile"><div class="k">Office</div><div class="v">${b.officeDaysPerWeek == null ? 'Not stated' : b.officeDaysPerWeek === 0 ? 'Remote' : `${b.officeDaysPerWeek} days/wk`}</div></div>
       ${stock}
     </div>
+    <div data-live="company:${c.id}"></div>
     <ul class="list">${flags(b.green, 'good', '✓')}${flags(b.red, 'bad', '!')}</ul>
     <div class="row" style="margin-top:6px"><button class="link small" data-action="open" data-path="${c.applications[0] || state.ctx.tracked ? `/applications/${(state.ctx.tracked ?? c.applications[0]).applicationId}?tab=company` : '/'}">Full brief in Job Matrix</button></div>
     ${others}
@@ -507,24 +514,16 @@ async function add(score) {
   }
 }
 
-/** Fit score only (no company research); the panel shows it when it's done. */
-let ticker;
+/** Fit score only (no company research); the panel shows it live and when it's done. */
 async function scoreFit(applicationId) {
   state.scoring = applicationId;
   state.notice = null;
-  const started = Date.now();
-  clearInterval(ticker);
-  ticker = setInterval(() => {
-    const el = document.getElementById('elapsed');
-    if (el) el.textContent = `${Math.round((Date.now() - started) / 1000)}s`;
-  }, 1000);
   render();
   try {
     await api(`/api/applications/${applicationId}/fit`, { method: 'POST' });
   } catch (e) {
     state.notice = { tone: 'error', text: `Scoring failed: ${e.message || e}` };
   }
-  clearInterval(ticker);
   state.scoring = null;
   await refresh();
 }
@@ -623,6 +622,12 @@ async function saveTemplate() {
 }
 
 document.addEventListener('click', async (e) => {
+  const stream = e.target.closest('[data-live-stream]');
+  if (stream) {
+    toggleStream(stream.dataset.run, stream.dataset.liveStream);
+    renderLive(root);
+    return;
+  }
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const a = el.dataset.action;
@@ -713,4 +718,8 @@ chrome.windows.onFocusChanged.addListener(soon);
 document.addEventListener('visibilitychange', () => document.hidden || soon());
 window.addEventListener('focus', soon);
 
+connectLive({
+  onChange: () => renderLive(root),
+  onFinish: () => soon(),
+});
 refresh();
