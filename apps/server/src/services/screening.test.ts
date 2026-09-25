@@ -68,6 +68,11 @@ describe('title/company without AI', () => {
     ['Acme hiring Staff TPM in San Francisco, CA | LinkedIn', 'Staff TPM', 'Acme'],
     ['Job Application for Principal TPM at Glean', 'Principal TPM', 'Glean'],
     ['Staff TPM at Box - Careers', 'Staff TPM', 'Box'],
+    [
+      'Distinguished, Technical Program Manager - Walmart Careers',
+      'Distinguished, Technical Program Manager',
+      'Walmart',
+    ],
     ['Careers page', 'Careers page', null],
   ])('%s', (title, t, c) => expect(parsePageTitle(title)).toEqual({ title: t, company: c }));
 
@@ -320,6 +325,24 @@ describe('screening routes & inbox behaviour', () => {
       payload: { status: 'Saved' },
     });
     expect(row(a.applicationId)).toMatchObject({ status: 'Saved', appliedAt: null });
+  });
+
+  it('Screen a URL uses the page title when the page has no job data', async () => {
+    const page = `<html><head><title>Principal TPM - Acme Careers</title></head><body><main>
+      <h1>Principal TPM</h1><p>${LONG}</p><p>${LONG}</p><p>Qualifications: 10 years.</p>
+    </main></body></html>`;
+    const app = buildApp(db, {
+      extensionToken: TOKEN,
+      fetchFn: fakeFetch({ 'https://careers.acme.com/': { body: page } }),
+    });
+    const r = (
+      await app.inject({
+        method: 'POST',
+        url: '/api/screen/url',
+        payload: { url: 'https://careers.acme.com/jobs/77' },
+      })
+    ).json();
+    expect(r).toMatchObject({ title: 'Principal TPM', company: 'Acme' });
   });
 
   it('fixes an Unknown company by moving the job to a named company', async () => {
