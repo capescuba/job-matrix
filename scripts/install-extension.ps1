@@ -2,6 +2,8 @@
 # Job Matrix and fetch its token). Per user: writes two files under data\ and one registry key in
 # HKCU. No admin rights needed. Safe to run again (e.g. after Node.js moves).
 # Then, in Chrome: chrome://extensions → Developer mode → Load unpacked → apps\extension.
+# Run it from a normal PowerShell window: apps packaged by Windows (e.g. the Claude desktop app)
+# get a private copy of the registry, so a key written from inside them is invisible to Chrome.
 # -AppRoot: the Job Matrix folder the helper serves (its data\ and launcher). Defaults to this one.
 param([string]$AppRoot)
 $ErrorActionPreference = 'Stop'
@@ -29,7 +31,10 @@ $manifestPath = Join-Path $dataDir "$hostName.json"
   path            = $cmdPath
   type            = 'stdio'
   allowed_origins = @("chrome-extension://$extensionId/")
-} | ConvertTo-Json | Set-Content -Path $manifestPath -Encoding utf8
+} | ConvertTo-Json | ForEach-Object {
+  # UTF-8 without a BOM whichever PowerShell runs this (5.1's -Encoding utf8 adds one).
+  [IO.File]::WriteAllText($manifestPath, $_, [Text.UTF8Encoding]::new($false))
+}
 
 $key = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
 New-Item -Path $key -Force | Out-Null

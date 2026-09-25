@@ -16,7 +16,7 @@ const root =
     ? path.resolve(process.argv[rootArg + 1])
     : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const tokenFile = path.join(root, 'data', 'extension-token');
-const APP_URL = 'http://127.0.0.1:5174';
+const APP_URL = process.env.JM_APP_URL || 'http://127.0.0.1:5174';
 
 /** Same format the server creates (services/token.ts) — whichever runs first makes it. */
 function token() {
@@ -82,11 +82,19 @@ async function handle(msg) {
   return { ok: false, error: `Unknown message type: ${msg?.type}` };
 }
 
+// Chrome may close stdin right after sending a message, so don't exit until every reply is out
+// (a 'start' can take a while: it may launch Job Matrix and wait for it).
 let buf = Buffer.alloc(0);
+let pending = 0;
+let ended = false;
+const maybeExit = () => {
+  if (ended && pending === 0) process.stdout.write('', () => process.exit(0));
+};
 process.stdin.on('data', async (chunk) => {
   const { messages, rest } = decode(Buffer.concat([buf, chunk]));
   buf = rest;
   for (const m of messages) {
+    pending++;
     let reply;
     try {
       reply = await handle(m);
@@ -94,6 +102,11 @@ process.stdin.on('data', async (chunk) => {
       reply = { ok: false, error: String(e?.message ?? e) };
     }
     process.stdout.write(encode(reply));
+    pending--;
+    maybeExit();
   }
 });
-process.stdin.on('end', () => process.exit(0));
+process.stdin.on('end', () => {
+  ended = true;
+  maybeExit();
+});

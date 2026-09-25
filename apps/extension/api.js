@@ -6,17 +6,45 @@ export const DEFAULT_SERVER = 'http://127.0.0.1:5174';
 
 export async function settings() {
   const s = await chrome.storage.local.get(['server', 'token']);
-  return { server: (s.server || DEFAULT_SERVER).replace(/\/+$/, ''), token: s.token || null };
+  return { server: normalizeServer(s.server) ?? DEFAULT_SERVER, token: s.token || null };
 }
 
-/** Asks the native helper; null when it isn't installed. */
-async function helper(message) {
+/**
+ * The server address as an origin ("http://127.0.0.1:5174"), or null if it isn't one — e.g.
+ * "http://http://127.0.0.1:5174/", which browsers read as a server called "http".
+ */
+export function normalizeServer(input) {
+  const raw = String(input ?? '').trim();
+  if (!raw) return DEFAULT_SERVER;
+  let u;
   try {
-    return await chrome.runtime.sendNativeMessage(HOST, message);
+    u = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : `http://${raw}`);
   } catch {
     return null;
   }
+  if (!/^https?:$/.test(u.protocol) || /^(https?|www)$/i.test(u.hostname)) return null;
+  if (u.pathname.replace(/\/+$/, '') || u.search || u.hash || u.username) return null;
+  return u.origin;
 }
+
+/** Chrome's reason the last helper call failed (e.g. "Specified native messaging host not found."). */
+let helperError = null;
+
+/** Asks the native helper; null (and helperError set) when Chrome can't reach it. */
+async function helper(message) {
+  try {
+    const r = await chrome.runtime.sendNativeMessage(HOST, message);
+    helperError = null;
+    return r;
+  } catch (e) {
+    helperError = e?.message || String(e);
+    console.warn('Job Matrix helper:', helperError);
+    return null;
+  }
+}
+
+const HELPER_FIX =
+  'Run scripts\\install-extension.ps1 from a normal PowerShell window (not from inside the Claude app), then try again.';
 
 export class ApiError extends Error {
   constructor(message, status, kind) {
@@ -70,7 +98,9 @@ export async function api(path, { method = 'GET', body, onStatus } = {}) {
     if (!started?.ok)
       throw new ApiError(
         started?.error ??
-          "Can't reach Job Matrix. Start it from its icon, or run scripts\install-extension.ps1 so the extension can start it.",
+          (helperError
+            ? `Can't reach Job Matrix, and the helper that starts it isn't available (Chrome says: ${helperError}). Start Job Matrix from its icon, or ${HELPER_FIX}`
+            : "Can't reach Job Matrix. Start it from its icon."),
         0,
         'offline',
       );
@@ -89,7 +119,9 @@ export async function api(path, { method = 'GET', body, onStatus } = {}) {
     res = await attempt();
     if (res.status === 401)
       throw new ApiError(
-        'Job Matrix refused the extension token. Set it on the Options page, or reinstall the helper.',
+        helperError
+          ? `Job Matrix needs the extension token, and Chrome couldn't get it from the helper (Chrome says: ${helperError}). ${HELPER_FIX} Or paste the token from data\\extension-token on the Options page.`
+          : 'Job Matrix refused the extension token. Clear the token on the Options page so the helper sets it again.',
         401,
         'token',
       );

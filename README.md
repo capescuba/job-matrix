@@ -34,6 +34,8 @@ It also adds a right-click menu item, **Add selection to Job Matrix**.
 
 One-time setup:
 1. `powershell -File scripts\install-extension.ps1`. This registers the native helper (per user, HKCU), which lets the extension start Job Matrix and fetch its token from `data\extension-token`.
+   - Run it from a normal PowerShell window. Apps packaged by Windows, such as the Claude desktop app, get a private copy of the registry, so a key written from inside them is invisible to Chrome. The result is "Specified native messaging host not found".
+   - To check the registration, run `reg query HKCU\Software\Google\Chrome\NativeMessagingHosts\com.jobmatrix.host` from that same normal window.
 2. In Chrome, go to `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose `apps\extension`. Pin the icon; clicking it opens the side panel.
 
 The extension's ID is fixed by the `key` in `apps/extension/manifest.json`: `keiamknmppkefljklkaceniaafephpcf`. To test a PR preview, set the server to `http://127.0.0.1:5185` on the extension's Options page.
