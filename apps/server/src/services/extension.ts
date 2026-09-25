@@ -132,6 +132,30 @@ function decisionOf(db: Db, r: ApplicationRow) {
   return { status: r.status, at: ev?.at ?? r.updatedAt, reason };
 }
 
+/** The latest fit score's short form for the panel: labels, not paragraphs. */
+function fitDetail(db: Db, jobId: number) {
+  const row = db
+    .select({ result: fitAssessments.result, createdAt: fitAssessments.createdAt })
+    .from(fitAssessments)
+    .where(eq(fitAssessments.jobId, jobId))
+    .orderBy(desc(fitAssessments.createdAt), desc(fitAssessments.id))
+    .get();
+  const f = row?.result as FitResult | undefined;
+  if (!f?.parts) return null;
+  return {
+    scoredAt: row!.createdAt,
+    verdict: f.verdict,
+    whyNotHigher: f.whyNotHigher,
+    strengths: f.strengths.map((s) => s.label ?? s.point).slice(0, 4),
+    gaps: f.gaps
+      .filter((g) => g.severity !== 'Minor')
+      .map((g) => g.label ?? g.gap)
+      .slice(0, 4),
+    levelMismatch: f.flags.levelMismatch,
+    parts: Object.fromEntries(Object.entries(f.parts).map(([k, v]) => [k, v.score])),
+  };
+}
+
 function summary(db: Db, r: ApplicationRow) {
   return {
     decision: decisionOf(db, r),
@@ -248,7 +272,7 @@ export async function pageContext(db: Db, input: PageInput, opts: { fetchFn?: ty
   return {
     url,
     detected,
-    tracked: tracked ? summary(db, tracked) : null,
+    tracked: tracked ? { ...summary(db, tracked), fit: fitDetail(db, tracked.jobId) } : null,
     similar: similar.map((r) => summary(db, r)),
     company: company
       ? {

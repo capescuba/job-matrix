@@ -340,3 +340,16 @@ body.options label {
 .decision.bad {
   border-left-color: var(--bad);
 }
+
+.cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 4px 0;
+}
+.ink {
+  color: var(--ink);
+}
+button.danger {
+  color: var(--bad);
+}
