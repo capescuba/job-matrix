@@ -246,3 +246,35 @@ export const fitGaps = sqliteTable(
   },
   (t) => [index('fit_gaps_theme').on(t.theme), index('fit_gaps_assessment').on(t.assessmentId)],
 );
+
+/** "Teach this site": CSS selectors for a job site's fields, one template per host. */
+export const siteTemplates = sqliteTable(
+  'site_templates',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    host: text('host').notNull(),
+    name: text('name').notNull(),
+    /** { title?, company?, location?, salary?, description? } → CSS selector. */
+    selectors: text('selectors', { mode: 'json' }).notNull(),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (t) => [uniqueIndex('site_templates_host').on(t.host)],
+);
+
+/** Drafted answers to application-form questions ("Why do you want to work at X?"). */
+export const applicationAnswers = sqliteTable(
+  'application_answers',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    applicationId: integer('application_id')
+      .notNull()
+      .references(() => applications.id, { onDelete: 'cascade' }),
+    question: text('question').notNull(),
+    answer: text('answer').notNull(),
+    usageId: integer('usage_id'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('application_answers_app').on(t.applicationId)],
+);

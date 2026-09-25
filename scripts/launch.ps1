@@ -1,5 +1,7 @@
 # Job Matrix desktop launcher. Started (hidden) by launch.vbs from the taskbar/desktop shortcut.
 # Starts the local server if needed, then opens it in a normal Chrome tab. Chrome only.
+# -NoBrowser: just start the server (used by the Chrome extension's native helper).
+param([switch]$NoBrowser)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $port = 5174
@@ -21,7 +23,7 @@ $chrome = @(
   "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
   "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $chrome) { Fail 'Google Chrome was not found. Job Matrix opens in Chrome only.' }
+if (-not $chrome -and -not $NoBrowser) { Fail 'Google Chrome was not found. Job Matrix opens in Chrome only.' }
 
 if (-not (Test-Up)) {
   $node = (Get-Command node -ErrorAction SilentlyContinue).Source
@@ -54,4 +56,4 @@ if (-not (Test-Up)) {
   }
 }
 
-Start-Process $chrome -ArgumentList $url
+if (-not $NoBrowser) { Start-Process $chrome -ArgumentList $url }

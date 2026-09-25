@@ -13,6 +13,7 @@ import {
 import { api, type ApplicationDetail, type FitAssessment } from '../api.ts';
 import { StatusBadge, postedOf } from '../components/badges.tsx';
 import { ActivityLog } from '../components/ActivityLog.tsx';
+import { ApplicationAnswers } from '../components/ApplicationAnswers.tsx';
 import { CompanyInsights } from '../components/CompanyInsights.tsx';
 import { useDecisionData } from '../components/Decision.tsx';
 import { FitDetails, FitSummary, InterviewPrep } from '../components/FitPanel.tsx';
@@ -142,7 +143,10 @@ function Detail({ data }: { data: ApplicationDetail }) {
           </div>
           {tab === 'fit' && <FitDetails fit={fits[0] as FitAssessment | undefined} />}
           {tab === 'prep' && (
-            <InterviewPrep fit={fits[0] as FitAssessment | undefined} brief={brief} />
+            <>
+              <InterviewPrep fit={fits[0] as FitAssessment | undefined} brief={brief} />
+              <ApplicationAnswers applicationId={app.id} />
+            </>
           )}
           {tab === 'company' && (
             <CompanyInsights companyId={company.id} companyName={company.name} />
