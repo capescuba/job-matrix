@@ -42,6 +42,19 @@ if (-not (Test-Up)) {
     if ($build.ExitCode -ne 0) { Fail "Building the app failed. See $dataDir\build-error.log" }
   }
 
+  # Keep the last three runs' logs (server.1.log is the previous run); the Log page shows them.
+  foreach ($base in 'server', 'server-error') {
+    $cur = Join-Path $dataDir "$base.log"
+    if ((Test-Path $cur) -and (Get-Item $cur).Length -gt 0) {
+      Remove-Item (Join-Path $dataDir "$base.3.log") -ErrorAction SilentlyContinue
+      foreach ($n in 2, 1) {
+        $from = Join-Path $dataDir "$base.$n.log"
+        if (Test-Path $from) { Move-Item $from (Join-Path $dataDir "$base.$($n + 1).log") -Force }
+      }
+      Move-Item $cur (Join-Path $dataDir "$base.1.log") -Force
+    }
+  }
+
   # The server exits by itself 10 minutes after the last window closes.
   $env:JM_IDLE_EXIT_MINUTES = '10'
   $env:API_PORT = "$port"

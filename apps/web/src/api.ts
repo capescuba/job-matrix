@@ -28,8 +28,27 @@ import type { getSettings } from '../../server/src/services/settings.ts';
 import type { getStats } from '../../server/src/services/stats.ts';
 import type { getCall, getUsageSummary } from '../../server/src/services/usage.ts';
 import type { listAnswers } from '../../server/src/services/extension.ts';
+import type { EmailUpdateRow } from '../../server/src/services/mail/updates.ts';
+import type { EmailKind } from '../../server/src/services/mail/rules.ts';
+import type { LogEntry, listLogs } from '../../server/src/services/logs.ts';
+import type { MailStatus as MailConnection } from '@jm/mail';
 
 export type Settings = ReturnType<typeof getSettings>;
+export type { EmailKind, EmailUpdateRow, LogEntry };
+export type LogFile = ReturnType<typeof listLogs>[number];
+export interface MailStatus extends MailConnection {
+  enabled: boolean;
+  intervalMinutes: number;
+  intervals: readonly number[];
+  lastSyncAt: string | null;
+  scanned: number;
+  found: number;
+  watermark: string | null;
+  nextSyncAt: string | null;
+  pending: number;
+  progress: { running: boolean; scanned: number; found: number; startedAt: string | null };
+  askAiUsd: number | null;
+}
 export type Usage = ReturnType<typeof getUsageSummary>;
 
 export type { ApplicationRow, FetchedJob, StockQuote };
@@ -160,6 +179,37 @@ export const api = {
     aiModel?: string | null;
     /** null = same as the fit model. */
     aiResearchModel?: string | null;
+    aiEmailModel?: string | null;
     aiEffort?: Settings['effort'] | null;
   }) => request<Settings>('PUT', '/api/settings', patch),
+
+  // ----- email -----
+  mailStatus: () => request<MailStatus>('GET', '/api/mail/status'),
+  mailConnect: () =>
+    request<{ userCode: string; verificationUri: string; expiresAt: number }>('POST', '/api/mail/connect'),
+  mailSettings: (patch: { enabled?: boolean; intervalMinutes?: number }) =>
+    request<MailStatus>('POST', '/api/mail/settings', patch),
+  mailSync: () => request<MailStatus>('POST', '/api/mail/sync'),
+  mailRescan: () => request<MailStatus>('POST', '/api/mail/rescan'),
+  emailUpdates: (state: 'pending' | 'done') =>
+    request<EmailUpdateRow[]>('GET', `/api/email-updates?state=${state}`),
+  applyEmailUpdate: (
+    id: number,
+    body: { applicationId?: number; status?: Status | null; nextAction?: string | null } = {},
+  ) => request('POST', `/api/email-updates/${id}/apply`, body),
+  dismissEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/dismiss`),
+  restoreEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/restore`),
+  relabelEmailUpdate: (id: number, body: { kind?: EmailKind; applicationId?: number | null }) =>
+    request('POST', `/api/email-updates/${id}/relabel`, body),
+  trackEmailUpdate: (id: number, body: { company: string; title: string }) =>
+    request('POST', `/api/email-updates/${id}/track`, body),
+  classifyEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/classify`),
+
+  // ----- logs -----
+  logs: () => request<{ dir: string; files: LogFile[] }>('GET', '/api/logs'),
+  log: (name: string, lines = 2000) =>
+    request<{ name: string; size: number; truncated: boolean; entries: LogEntry[] }>(
+      'GET',
+      `/api/logs/${encodeURIComponent(name)}?lines=${lines}`,
+    ),
 };

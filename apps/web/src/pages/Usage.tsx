@@ -19,6 +19,7 @@ const FEATURE_LABELS: Record<string, string> = {
   fit: 'Fit scoring',
   research: 'Company research',
   answer: 'Application answers',
+  email: 'Email updates',
 };
 
 export default function UsagePage() {

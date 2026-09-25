@@ -7,6 +7,8 @@ import { cx } from './components/ui.tsx';
 import ApplicationDetailPage from './pages/ApplicationDetail.tsx';
 import ApplicationsPage from './pages/Applications.tsx';
 import DashboardPage from './pages/Dashboard.tsx';
+import EmailUpdatesPage from './pages/EmailUpdates.tsx';
+import LogsPage from './pages/Logs.tsx';
 import ProfilePage from './pages/Profile.tsx';
 import ScreeningPage from './pages/Screening.tsx';
 import UsagePage from './pages/Usage.tsx';
@@ -15,8 +17,10 @@ const nav = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/screening', label: 'Screening' },
   { to: '/applications', label: 'Applications' },
+  { to: '/email', label: 'Email' },
   { to: '/profile', label: 'Profile' },
   { to: '/usage', label: 'AI usage' },
+  { to: '/logs', label: 'Log' },
 ];
 
 export default function App() {
@@ -25,6 +29,12 @@ export default function App() {
     queryFn: api.listApplications,
   });
   const inbox = apps.filter((a) => a.status === 'Screening').length;
+  const { data: mail } = useQuery({
+    queryKey: ['mail-status'],
+    queryFn: api.mailStatus,
+    refetchInterval: (q) => (q.state.data?.progress.running || q.state.data?.signingIn ? 2000 : 60_000),
+  });
+  const emailPending = mail?.pending ?? 0;
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-border bg-surface/90 backdrop-blur">
@@ -51,6 +61,11 @@ export default function App() {
                     {inbox}
                   </span>
                 )}
+                {n.to === '/email' && emailPending > 0 && (
+                  <span className="ml-1.5 rounded-full bg-accent/15 px-1.5 text-xs font-semibold text-accent">
+                    {emailPending}
+                  </span>
+                )}
               </NavLink>
             ))}
           </nav>
@@ -69,6 +84,8 @@ export default function App() {
           <Route path="/applications/:id" element={<ApplicationDetailPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/usage" element={<UsagePage />} />
+          <Route path="/email" element={<EmailUpdatesPage />} />
+          <Route path="/logs" element={<LogsPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>

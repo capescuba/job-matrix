@@ -5,9 +5,10 @@ import type { Db } from '../db/client.ts';
 import { aiUsage, applications, companies, jobs } from '../db/schema.ts';
 import { FIT_SYSTEM_PROMPT, unscoredApplicationIds } from './fit.ts';
 import { getDefaultResume, getProfile } from './resume.ts';
+import { logEvent } from './log.ts';
 import { getSettings } from './settings.ts';
 
-export type Feature = 'fit' | 'research' | 'answer';
+export type Feature = 'fit' | 'research' | 'answer' | 'email';
 
 /** Output tokens (incl. thinking) a fit assessment typically uses, for forecasts before any history exists. */
 const FIT_OUTPUT_TOKENS_GUESS = 4_000;
@@ -30,6 +31,13 @@ export function recordUsage(
   },
 ): number {
   const u = e.usage ?? { inputTokens: 0, outputTokens: 0 };
+  const cost = estimateCostUsd(e.model, u);
+  logEvent(
+    'ai.call',
+    `AI call (${e.feature}, ${e.model})${cost != null ? ` ≈ $${cost.toFixed(3)}` : ''}${e.error ? ` failed: ${e.error}` : ''}`,
+    { feature: e.feature, model: e.model, costUsd: cost, applicationId: e.applicationId, companyId: e.companyId },
+    e.error ? 'warn' : 'info',
+  );
   return db
     .insert(aiUsage)
     .values({
@@ -40,7 +48,7 @@ export function recordUsage(
       outputTokens: u.outputTokens,
       cacheReadTokens: u.cacheReadTokens ?? 0,
       cacheWriteTokens: u.cacheWriteTokens ?? 0,
-      costUsd: estimateCostUsd(e.model, u),
+      costUsd: cost,
       applicationId: e.applicationId ?? null,
       companyId: e.companyId ?? null,
       durationMs: e.trace?.durationMs ?? null,

@@ -40,6 +40,25 @@ One-time setup:
 
 The extension's ID is fixed by the `key` in `apps/extension/manifest.json`: `keiamknmppkefljklkaceniaafephpcf`. To test a PR preview, set the server to `http://127.0.0.1:5185` on the extension's Options page.
 
+## Email updates
+
+The **Email** page reads your Hotmail / Outlook.com mailbox (read-only, Microsoft Graph) and finds application emails: receipts, rejections, interview requests, forms or assessments to do, offers.
+
+- **Review first.** Each email becomes a suggestion (e.g. "DoorDash: Applied → Rejected", quoting the sentence that says so). Nothing changes until you press **Apply**, which logs the email on the job's timeline, dated to the email, and moves the status.
+- **Your choice of what happens next.** For a company where you track several jobs, you pick which one the email is about. Emails about jobs you don't track can be added with **Add to tracker**. Unclear ones get **Ask AI**: one small call, recorded on the AI usage page under "Email updates".
+- **When it checks.** **Manual only** by default: press **Check now**. You can instead choose "When Job Matrix opens" or every 15/30/60 minutes (only while the app is open). The first check, or **Re-scan history**, goes back to two weeks before your first application.
+- **Where it looks.** Every folder (Inbox, Junk, Deleted Items, your own folders) except Sent, Drafts and Outbox. Only job-related emails are kept, and only a short excerpt of each.
+- **Sign-in.** Shared with the [email-mcp](https://github.com/capescuba/mcp/tree/master/email-mcp) server: `%USERPROFILE%\.email-mcp\config.json` holds the Azure app ID, and `token.json` holds the sign-in. **Connect Outlook** shows a code to enter at microsoft.com/link. `OUTLOOK_CLIENT_ID` in `.env` overrides the app ID.
+
+## Log
+
+The **Log** page shows the app's log files from `data/`:
+- `server.log` for this run, and `server.1.log` to `.3.log` for the previous three (the launcher rotates them);
+- `server-error.log` for errors;
+- `build.log` for the web build.
+
+The log has one line per API call, with the polled ones left out, plus named events (`mail.sync.*`, `mail.update.*`, `ai.call`, `app.start`, `app.idle-exit`). The page has filters for level and routine requests, a search box, and **Follow**.
+
 ## Development
 
 ```bash
@@ -55,6 +74,7 @@ npm run dev            # web http://127.0.0.1:5173 (hot reload), API http://127.
 | `apps/web` | Vite + React + TanStack Query + Tailwind |
 | `packages/shared` | Status enum, zod input schemas, fit result schema |
 | `packages/ai` | `LLMProvider` interface + Anthropic implementation (`AI_PROVIDER`, `AI_MODEL`) |
+| `packages/mail` | Read-only Outlook.com client (Microsoft Graph, device-code sign-in shared with email-mcp) |
 | `apps/extension` | Chrome extension (Manifest V3, plain JS): side panel, page reader, site templates, application helper |
 | `scripts/native-host` | Native messaging helper: starts Job Matrix and hands the extension its token |
 
@@ -67,4 +87,4 @@ npm run dev            # web http://127.0.0.1:5173 (hot reload), API http://127.
 
 ## Roadmap
 
-Lightweight resume tailoring suggestions, email-driven status updates.
+Lightweight resume tailoring suggestions.

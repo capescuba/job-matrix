@@ -116,6 +116,25 @@ export function AiSettings() {
           it.
         </p>
       )}
+      <Field label="Email model (Ask AI on an unclear email)" className="mt-3 max-w-sm">
+        <Select
+          value={data?.emailModel ?? ''}
+          onChange={(e) => save.mutate({ aiEmailModel: e.target.value })}
+        >
+          {MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+          {data && !MODELS.some((m) => m.id === data.emailModel) && (
+            <option value={data.emailModel}>{data.emailModel}</option>
+          )}
+        </Select>
+      </Field>
+      <p className="mt-1 max-w-sm text-xs text-ink-3">
+        Only used when you press Ask AI on the Email page. Reading one email is a small job, so the
+        cheapest model is plenty.
+      </p>
       <Field label="Speed vs. depth" className="mt-3 max-w-sm">
         <Select
           value={data?.effort ?? 'low'}
