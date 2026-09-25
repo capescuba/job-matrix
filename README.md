@@ -21,6 +21,23 @@ Set the Anthropic API key and model on the **Profile** page (saved to `.env`).
 3. **Score fit** on a job page, or "Score N unscored" on the list. Results are cached per (JD, resume, goals, model); "Re-score" forces a fresh run.
 4. **Dashboard** — pipeline, weekly volume, response rate, fit vs. outcome, next actions.
 
+## Chrome extension
+
+The side panel shows what Job Matrix knows about the page you're on:
+- **This posting:** tracked or not; if tracked, its status, applied date and fit. It also flags the same role at another address, e.g. its LinkedIn copy.
+- **The company:** its brief.
+- **Adding:** adds a new posting to Screening, optionally scoring it straight away.
+- **Application forms:** drafts answers to questions like "Why X?".
+- **Teach this site:** records where a site keeps its title, company and description.
+
+It also adds a right-click menu item, **Add selection to Job Matrix**.
+
+One-time setup:
+1. `powershell -File scripts\install-extension.ps1`. This registers the native helper (per user, HKCU), which lets the extension start Job Matrix and fetch its token from `data\extension-token`.
+2. In Chrome, go to `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose `apps\extension`. Pin the icon; clicking it opens the side panel.
+
+The extension's ID is fixed by the `key` in `apps/extension/manifest.json`: `keiamknmppkefljklkaceniaafephpcf`. To test a PR preview, set the server to `http://127.0.0.1:5185` on the extension's Options page.
+
 ## Development
 
 ```bash
@@ -36,6 +53,8 @@ npm run dev            # web http://127.0.0.1:5173 (hot reload), API http://127.
 | `apps/web` | Vite + React + TanStack Query + Tailwind |
 | `packages/shared` | Status enum, zod input schemas, fit result schema |
 | `packages/ai` | `LLMProvider` interface + Anthropic implementation (`AI_PROVIDER`, `AI_MODEL`) |
+| `apps/extension` | Chrome extension (Manifest V3, plain JS): side panel, page reader, site templates, application helper |
+| `scripts/native-host` | Native messaging helper: starts Job Matrix and hands the extension its token |
 
 ## Scripts
 
@@ -46,4 +65,4 @@ npm run dev            # web http://127.0.0.1:5173 (hot reload), API http://127.
 
 ## Roadmap
 
-Chrome extension (capture jobs, draft "why us" answers), LinkedIn insights from your own browsing session, lightweight resume tailoring suggestions, email-driven status updates.
+Lightweight resume tailoring suggestions, email-driven status updates.

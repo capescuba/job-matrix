@@ -7,7 +7,7 @@ import { FIT_SYSTEM_PROMPT, unscoredApplicationIds } from './fit.ts';
 import { getDefaultResume, getProfile } from './resume.ts';
 import { getSettings } from './settings.ts';
 
-export type Feature = 'fit' | 'research';
+export type Feature = 'fit' | 'research' | 'answer';
 
 /** Output tokens (incl. thinking) a fit assessment typically uses, for forecasts before any history exists. */
 const FIT_OUTPUT_TOKENS_GUESS = 4_000;

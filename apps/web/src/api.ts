@@ -27,6 +27,7 @@ import type { StockQuote } from '../../server/src/services/stock.ts';
 import type { getSettings } from '../../server/src/services/settings.ts';
 import type { getStats } from '../../server/src/services/stats.ts';
 import type { getCall, getUsageSummary } from '../../server/src/services/usage.ts';
+import type { listAnswers } from '../../server/src/services/extension.ts';
 
 export type Settings = ReturnType<typeof getSettings>;
 export type Usage = ReturnType<typeof getUsageSummary>;
@@ -149,6 +150,10 @@ export const api = {
   /** One AI call's full record: request body, response, thinking. */
   getCall: (id: number) =>
     request<NonNullable<ReturnType<typeof getCall>>>('GET', `/api/ai/calls/${id}`),
+  /** Answers drafted by the extension's application helper. */
+  listAnswers: (applicationId: number) =>
+    request<ReturnType<typeof listAnswers>>('GET', `/api/applications/${applicationId}/answers`),
+  deleteAnswer: (id: number) => request<void>('DELETE', `/api/answers/${id}`),
   getSettings: () => request<Settings>('GET', '/api/settings'),
   updateSettings: (patch: {
     anthropicApiKey?: string | null;

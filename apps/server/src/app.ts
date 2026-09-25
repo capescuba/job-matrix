@@ -42,6 +42,19 @@ import { ensureResearch, isStale, latestResearch } from './services/research.ts'
 import { captureJob, findTrackedByUrl } from './services/screening.ts';
 import { getStock } from './services/stock.ts';
 import { getStats } from './services/stats.ts';
+import {
+  answerRequestSchema,
+  deleteAnswer,
+  deleteTemplate,
+  getTemplate,
+  listAnswers,
+  pageContext,
+  pageInputSchema,
+  saveTemplate,
+  similarAnswers,
+  suggestAnswer,
+  templateSchema,
+} from './services/extension.ts';
 import { extensionToken, tokenMatches } from './services/token.ts';
 import { getCall, getUsageSummary } from './services/usage.ts';
 import { replay, subscribe, type RunEventEnvelope } from './services/aiEvents.ts';
@@ -176,6 +189,35 @@ export function buildApp(
   app.get('/api/screen/lookup', { preHandler: requireToken }, (req) => {
     const { url } = z.object({ url: z.string().url() }).parse(req.query);
     return { tracked: findTrackedByUrl(db, url) };
+  });
+
+  // ----- Chrome extension (side panel) -----
+  const hostParam = z.object({ host: z.string().trim().min(1).max(253) });
+  app.get('/api/ext/hello', { preHandler: requireToken }, () => ({ ok: true, app: 'job-matrix' }));
+  app.post('/api/ext/context', { preHandler: requireToken }, (req) =>
+    pageContext(db, pageInputSchema.parse(req.body), { fetchFn: opts.fetchFn }),
+  );
+  app.get('/api/ext/templates/:host', { preHandler: requireToken }, (req) =>
+    getTemplate(db, hostParam.parse(req.params).host),
+  );
+  app.put('/api/ext/templates/:host', { preHandler: requireToken }, (req) =>
+    saveTemplate(db, hostParam.parse(req.params).host, templateSchema.parse(req.body)),
+  );
+  app.delete('/api/ext/templates/:host', { preHandler: requireToken }, (req, reply) => {
+    deleteTemplate(db, hostParam.parse(req.params).host);
+    return reply.status(204).send();
+  });
+  app.post('/api/ext/answer', { preHandler: requireToken }, (req) =>
+    suggestAnswer(db, answerRequestSchema.parse(req.body)),
+  );
+  app.get('/api/ext/answers', { preHandler: requireToken }, (req) =>
+    similarAnswers(db, z.object({ q: z.string().max(2000) }).parse(req.query).q),
+  );
+  // Saved answers on the job page.
+  app.get('/api/applications/:id/answers', (req) => listAnswers(db, idParam.parse(req.params).id));
+  app.delete('/api/answers/:id', (req, reply) => {
+    deleteAnswer(db, idParam.parse(req.params).id);
+    return reply.status(204).send();
   });
 
   // ----- job description import -----

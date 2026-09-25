@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Job Matrix options</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body class="options">
+    <h1>Job Matrix</h1>
+    <label>
+      Server address
+      <input id="server" type="url" placeholder="http://127.0.0.1:5174" />
+    </label>
+    <p class="muted">
+      Your Job Matrix runs on http://127.0.0.1:5174. Use port 5185 only to test a change before
+      merging it.
+    </p>
+    <label>
+      Extension token
+      <input
+        id="token"
+        type="password"
+        autocomplete="off"
+        placeholder="Filled in automatically by the helper"
+      />
+    </label>
+    <p class="muted">
+      Normally set for you by the helper (scripts\install-extension.ps1). Only paste one here if the
+      helper isn't installed; it's in data\extension-token.
+    </p>
+    <div class="row">
+      <button id="save" class="primary">Save</button>
+      <button id="test">Test connection</button>
+      <span id="msg" class="muted"></span>
+    </div>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
