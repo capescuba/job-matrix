@@ -66,13 +66,55 @@ const DECISION_TEXT = {
   Withdrawn: 'You withdrew',
   Ghosted: 'No response — marked ghosted',
 };
-function decisionBanner(a, prefix = '') {
+/** Where an application stands, said plainly: the first thing you see for a job you track. */
+const STANDING = {
+  Screening: { tone: 'accent', icon: '◎', text: 'In your Screening inbox', since: 'added' },
+  Saved: { tone: 'neutral', icon: '◇', text: 'Saved to your pipeline', since: 'added' },
+  Applied: { tone: 'accent', icon: '✓', text: 'You applied', since: 'applied' },
+  'Recruiter Screen': {
+    tone: 'good',
+    icon: '➜',
+    text: 'In progress: recruiter screen',
+    since: 'applied',
+  },
+  'Hiring Manager': {
+    tone: 'good',
+    icon: '➜',
+    text: 'In progress: hiring manager',
+    since: 'applied',
+  },
+  'Interview Loop': {
+    tone: 'good',
+    icon: '➜',
+    text: 'In progress: interview loop',
+    since: 'applied',
+  },
+  Offer: { tone: 'good', icon: '★', text: 'Offer', since: 'applied' },
+};
+const DECIDED_TONE = { Passed: 'stop', Rejected: 'bad', Withdrawn: 'stop', Ghosted: 'warn' };
+const DECIDED_ICON = { Passed: '⊘', Rejected: '✕', Withdrawn: '⊘', Ghosted: '…' };
+const when = (iso) => (iso ? `${day(iso)} (${daysAgo(iso)})` : '');
+
+function statusBanner(a, prefix = '') {
   const d = a.decision;
-  if (!d) return '';
-  const when = d.at ? ` · ${day(d.at)} <span class="faint">(${daysAgo(d.at)})</span>` : '';
-  return `<div class="decision ${d.status === 'Rejected' ? 'bad' : ''}">
-    <div><strong>${prefix}${esc(DECISION_TEXT[d.status] ?? d.status)}</strong>${when}</div>
-    ${d.reason ? `<div class="muted">“${esc(d.reason)}”</div>` : ''}
+  if (d) {
+    return `<div class="banner ${DECIDED_TONE[d.status] ?? 'stop'}">
+      <div class="head"><span class="ic">${DECIDED_ICON[d.status] ?? '⊘'}</span>${esc(prefix)}${esc(DECISION_TEXT[d.status] ?? d.status)}</div>
+      <div class="sub">${when(d.at)}${d.reason ? ` · “${esc(d.reason)}”` : ''}</div>
+    </div>`;
+  }
+  const st = STANDING[a.status] ?? { tone: 'neutral', icon: '•', text: a.status, since: 'added' };
+  const since =
+    st.since === 'applied' && a.appliedAt
+      ? `${a.status === 'Applied' ? '' : 'Applied '}${when(a.appliedAt)}`
+      : `Added ${when(a.createdAt)}${a.appliedAt ? '' : ' · not applied yet'}`;
+  const next = a.nextAction
+    ? `<div class="sub">Next: ${esc(a.nextAction)}${a.nextActionDate ? ` · by ${day(a.nextActionDate)}` : ''}</div>`
+    : '';
+  return `<div class="banner ${st.tone}">
+    <div class="head"><span class="ic">${st.icon}</span>${esc(prefix)}${esc(st.text)}</div>
+    <div class="sub">${since}</div>
+    ${next}
   </div>`;
 }
 const statusChip = (s) => `<span class="chip ${STATUS_TONE[s] ?? ''}">${esc(s)}</span>`;
@@ -101,6 +143,38 @@ const spark = (points, up) => {
   return `<svg class="spark" viewBox="0 0 100 14" preserveAspectRatio="none"><polyline fill="none" stroke-width="1.5" stroke="var(--${up ? 'good' : 'bad'})" points="${d}"/></svg>`;
 };
 
+// ---------- text size ----------
+
+const BASE_PX = 14.5;
+let pageZoom = 1;
+let textScale = 1;
+function applyTextSize() {
+  document.documentElement.style.fontSize = `${(BASE_PX * pageZoom * textScale).toFixed(2)}px`;
+}
+async function followZoom(tabId) {
+  try {
+    pageZoom = tabId ? await chrome.tabs.getZoom(tabId) : 1;
+  } catch {
+    pageZoom = 1;
+  }
+  applyTextSize();
+}
+chrome.storage.local.get('textScale').then((s) => {
+  textScale = Number(s.textScale) || 1;
+  applyTextSize();
+});
+function bumpText(step) {
+  textScale = Math.min(1.8, Math.max(0.8, Math.round((textScale + step) * 10) / 10));
+  chrome.storage.local.set({ textScale });
+  applyTextSize();
+}
+chrome.tabs.onZoomChange.addListener(({ tabId, newZoomFactor }) => {
+  if (tabId === state.tab?.id) {
+    pageZoom = newZoomFactor;
+    applyTextSize();
+  }
+});
+
 // ---------- reading the tab ----------
 
 let seq = 0;
@@ -109,6 +183,7 @@ async function refresh() {
   connectLive();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (mine !== seq) return;
+  followZoom(tab?.id);
   // Same page as before (e.g. the panel just got focus back): keep drafts, teaching and notices.
   const samePage = !!tab && state.tab?.id === tab.id && state.tab?.url === tab.url;
   Object.assign(state, {
@@ -243,6 +318,8 @@ function postingSection() {
     const scoring =
       state.scoring === t.applicationId || isRunning({ applicationId: t.applicationId });
     const open = t.decision == null;
+    // Before applying, scoring is the next step; after, the job page is.
+    const early = t.status === 'Screening' || t.status === 'Saved';
     const list = (items, tone, mark) =>
       items
         .map((x) => `<li><span class="${tone}">${mark}</span><span>${esc(x)}</span></li>`)
@@ -277,8 +354,8 @@ function postingSection() {
          </div>`
       : '';
     return `<section>
-      <h2>This posting ${statusChip(t.status)}</h2>
-      ${decisionBanner(t)}
+      <h2>This posting</h2>
+      ${statusBanner(t)}
       <div class="row" style="align-items:flex-start">
         <div class="grow">
           <div class="title">${esc(t.title)}</div>
@@ -287,19 +364,17 @@ function postingSection() {
         ${t.fitScore != null ? `<span class="score ${t.fitGate === 'fail' ? 'fail' : ''}" title="${esc(t.fitVerdict ?? '')}">${t.fitScore.toFixed(1)}</span>` : ''}
       </div>
       <div class="stack small" style="margin-top:6px">
-        ${t.appliedAt ? `<div>Applied <strong>${day(t.appliedAt)}</strong> <span class="faint">(${daysAgo(t.appliedAt)})</span></div>` : ''}
         ${fitBlock}
         <div data-live="app:${t.applicationId}" ${state.scoring === t.applicationId ? 'data-pending="Starting the fit score…"' : ''}></div>
-        ${t.nextAction ? `<div>Next: ${esc(t.nextAction)}${t.nextActionDate ? ` <span class="faint">by ${day(t.nextActionDate)}</span>` : ''}</div>` : ''}
       </div>
       <div class="row" style="margin-top:8px">
         ${
           open && t.fitScore == null
-            ? `<button class="primary" data-action="score-fit" data-id="${t.applicationId}" ${scoring ? 'disabled' : ''} title="Fit score only — company research stays separate">${scoring ? 'Scoring…' : `Score fit · ~${money(state.ctx.costs.fit)}`}</button>`
+            ? `<button class="${early ? 'primary' : ''}" data-action="score-fit" data-id="${t.applicationId}" ${scoring ? 'disabled' : ''} title="Fit score only — company research stays separate">${scoring ? 'Scoring…' : `Score fit · ~${money(state.ctx.costs.fit)}`}</button>`
             : ''
         }
         ${open && t.status === 'Screening' && !state.passing ? '<button class="danger" data-action="pass">Pass</button>' : ''}
-        <button class="${open && t.fitScore == null ? '' : 'primary'}" data-action="open" data-path="/applications/${t.applicationId}">Open in Job Matrix</button>
+        <button class="${open && t.fitScore == null && early ? '' : 'primary'}" data-action="open" data-path="/applications/${t.applicationId}">Open in Job Matrix</button>
       </div>
       ${passForm}
     </section>`;
@@ -311,10 +386,10 @@ function postingSection() {
       <button class="link small" data-action="show-add">Add it to Screening anyway</button></section>`;
 
   // Same role at another address: if you already decided on it, say so up front.
-  const decided = ctx.similar.find((s) => s.decision);
+  const lead = ctx.similar.find((s) => s.decision) ?? ctx.similar[0];
   const similar = ctx.similar.length
-    ? `<div class="saved" style="margin-bottom:8px">
-        ${decided ? decisionBanner(decided, 'Same role elsewhere: ') : '<strong class="warn">Looks like one you’re already tracking</strong>'}
+    ? `<div style="margin-bottom:8px">
+        ${statusBanner(lead, 'Same role elsewhere: ')}
         <ul class="apps">${ctx.similar.map(appLine).join('')}</ul>
       </div>`
     : '';
@@ -632,6 +707,8 @@ document.addEventListener('click', async (e) => {
   if (!el) return;
   const a = el.dataset.action;
   if (a === 'refresh') refresh();
+  else if (a === 'text-smaller') bumpText(-0.1);
+  else if (a === 'text-bigger') bumpText(0.1);
   else if (a === 'options') chrome.runtime.openOptionsPage();
   else if (a === 'open') openInApp(el.dataset.path);
   else if (a === 'show-add') {
