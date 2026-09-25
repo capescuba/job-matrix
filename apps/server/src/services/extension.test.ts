@@ -77,7 +77,12 @@ beforeEach(() => {
     .run();
 });
 
-const add = (company: string, title: string, url: string, status = 'Applied' as const) =>
+const add = (
+  company: string,
+  title: string,
+  url: string,
+  status: 'Applied' | 'Screening' = 'Applied',
+) =>
   createApplication(db, {
     company,
     title,
@@ -143,6 +148,63 @@ describe('pageContext', () => {
     expect(c.tracked).toBeNull();
     expect(c.similar.map((s) => s.applicationId)).toEqual([id]);
     expect(c.company?.name).toBe('Docusign');
+  });
+
+  it('says when and why you passed — on this posting and on its LinkedIn copy', async () => {
+    const id = add(
+      'OpenAI',
+      'TPM, Applied Infrastructure',
+      'https://www.linkedin.com/jobs/view/4461937123/',
+      'Screening',
+    );
+    await buildApp(db, { extensionToken: TOKEN, fetchFn: offline }).inject({
+      method: 'POST',
+      url: `/api/applications/${id}/activities`,
+      payload: {
+        at: '2026-09-25',
+        kind: 'Note',
+        summary: "Passed: Too many -v's",
+        setStatus: 'Passed',
+      },
+    });
+    const c = await pageContext(db, {
+      url: 'https://www.linkedin.com/jobs/search/?currentJobId=4461937123&keywords=tpm',
+    });
+    expect(c.tracked).toMatchObject({
+      status: 'Passed',
+      decision: { status: 'Passed', reason: "Too many -v's" },
+    });
+    expect(c.tracked?.decision?.at).toMatch(/^2026-09-25/);
+
+    const copy = await pageContext(db, {
+      url: 'https://openai.com/careers/tpm-applied-infrastructure',
+      fields: { title: 'TPM, Applied Infrastructure', company: 'OpenAI' },
+    });
+    expect(copy.similar[0]).toMatchObject({
+      status: 'Passed',
+      decision: { reason: "Too many -v's" },
+    });
+  });
+
+  it('a pass without a reason, and open applications, carry no reason', async () => {
+    const id = add('Acme', 'TPM', 'https://acme.com/jobs/1', 'Screening');
+    await buildApp(db, { extensionToken: TOKEN, fetchFn: offline }).inject({
+      method: 'POST',
+      url: `/api/applications/${id}/activities`,
+      payload: {
+        at: '2026-09-25',
+        kind: 'Note',
+        summary: 'Passed at screening',
+        setStatus: 'Passed',
+      },
+    });
+    const c = await pageContext(db, { url: 'https://acme.com/jobs/1' });
+    expect(c.tracked?.decision).toMatchObject({ status: 'Passed', reason: null });
+    const open = add('Acme', 'Staff TPM', 'https://acme.com/jobs/2');
+    expect((await pageContext(db, { url: 'https://acme.com/jobs/2' })).tracked).toMatchObject({
+      applicationId: open,
+      decision: null,
+    });
   });
 
   it('works out the company from a careers host it has seen before', async () => {
