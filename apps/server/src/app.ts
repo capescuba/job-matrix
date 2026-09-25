@@ -353,6 +353,8 @@ export function buildApp(
         'Access-Control-Allow-Origin': EXTENSION_ORIGIN,
       }),
     });
+    // A comment line flushes the headers now, rather than when the first run event arrives.
+    res.write(': connected\n\n');
     const send = (e: RunEventEnvelope) => res.write(`data: ${JSON.stringify(e)}\n\n`);
     for (const e of replay(applicationId)) send(e);
     const unsubscribe = subscribe((e) => {
