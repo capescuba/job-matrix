@@ -160,6 +160,7 @@ function summary(db: Db, r: ApplicationRow) {
   return {
     decision: decisionOf(db, r),
     applicationId: r.id,
+    createdAt: r.createdAt,
     title: r.title,
     company: r.company,
     status: r.status,

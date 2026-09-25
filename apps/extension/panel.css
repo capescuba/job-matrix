@@ -37,7 +37,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font:
-    13px/1.45 Inter,
+    1rem/1.45 Inter,
     ui-sans-serif,
     system-ui,
     'Segoe UI',
@@ -59,8 +59,8 @@ a {
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 8px 3px 12px;
+  gap: 0.462rem;
+  padding: 0.231rem 0.615rem 0.231rem 0.923rem;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -68,7 +68,7 @@ a {
   flex: 1;
 }
 .pad {
-  padding: 12px;
+  padding: 0.923rem;
 }
 .muted {
   color: var(--ink-2);
@@ -77,7 +77,7 @@ a {
   color: var(--ink-3);
 }
 .small {
-  font-size: 11px;
+  font-size: 0.846rem;
 }
 .good {
   color: var(--good);
@@ -90,46 +90,46 @@ a {
 }
 
 main {
-  padding: 10px;
+  padding: 0.769rem;
   display: grid;
-  gap: 10px;
+  gap: 0.769rem;
 }
 section {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 0.769rem 0.923rem;
 }
 section h2 {
-  margin: 0 0 6px;
-  font-size: 11px;
+  margin: 0 0 0.462rem;
+  font-size: 0.846rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink-2);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.462rem;
 }
 .title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 1.08rem;
 }
 .row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.462rem;
   flex-wrap: wrap;
 }
 .stack {
   display: grid;
-  gap: 6px;
+  gap: 0.462rem;
 }
 .chip {
   display: inline-block;
   border-radius: 999px;
-  padding: 1px 8px;
-  font-size: 11px;
+  padding: 1px 0.615rem;
+  font-size: 0.846rem;
   font-weight: 600;
   background: var(--surface-2);
   color: var(--ink-2);
@@ -154,8 +154,8 @@ section h2 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 2.92rem;
+  height: 2.92rem;
   border-radius: 50%;
   border: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
   font-weight: 700;
@@ -168,17 +168,17 @@ section h2 {
 .tiles {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin: 6px 0;
+  gap: 0.462rem;
+  margin: 0.462rem 0;
 }
 .tile {
   background: var(--surface-2);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 0.462rem 0.615rem;
   min-width: 0;
 }
 .tile .k {
-  font-size: 10px;
+  font-size: 0.769rem;
   color: var(--ink-3);
 }
 .tile .v {
@@ -192,11 +192,11 @@ section h2 {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 2px;
+  gap: 0.154rem;
 }
 .list li {
   display: flex;
-  gap: 6px;
+  gap: 0.462rem;
 }
 .list li span:last-child {
   overflow: hidden;
@@ -204,14 +204,14 @@ section h2 {
 }
 .apps {
   list-style: none;
-  margin: 4px 0 0;
+  margin: 0.308rem 0 0;
   padding: 0;
   display: grid;
-  gap: 4px;
+  gap: 0.308rem;
 }
 .apps li {
   display: flex;
-  gap: 6px;
+  gap: 0.462rem;
   align-items: baseline;
 }
 .apps li .t {
@@ -226,7 +226,7 @@ button {
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 6px;
-  padding: 5px 10px;
+  padding: 0.385rem 0.769rem;
   cursor: pointer;
   font-weight: 500;
 }
@@ -254,8 +254,8 @@ button.link {
 button.icon {
   border: 0;
   background: none;
-  padding: 2px 6px;
-  font-size: 15px;
+  padding: 0.154rem 0.462rem;
+  font-size: 1.15rem;
   color: var(--ink-2);
 }
 input[type='text'],
@@ -267,22 +267,22 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
-  padding: 5px 8px;
+  padding: 0.385rem 0.615rem;
 }
 textarea {
   resize: vertical;
-  min-height: 90px;
+  min-height: 6.92rem;
 }
 label.field {
   display: grid;
-  gap: 2px;
-  font-size: 11px;
+  gap: 0.154rem;
+  font-size: 0.846rem;
   color: var(--ink-2);
 }
 .q {
   border-top: 1px solid var(--border);
-  padding-top: 8px;
-  margin-top: 8px;
+  padding-top: 0.615rem;
+  margin-top: 0.615rem;
 }
 .q:first-of-type {
   border-top: 0;
@@ -292,8 +292,8 @@ label.field {
 .saved {
   background: var(--surface-2);
   border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 12px;
+  padding: 0.462rem 0.615rem;
+  font-size: 0.923rem;
 }
 .error {
   color: var(--bad);
@@ -314,25 +314,25 @@ details[open] > summary h2::before {
 }
 svg.spark {
   width: 100%;
-  height: 14px;
+  height: 1.08rem;
   display: block;
 }
 
 body.options {
-  max-width: 560px;
-  margin: 24px auto;
-  padding: 0 16px;
+  max-width: 43.1rem;
+  margin: 1.85rem auto;
+  padding: 0 1.23rem;
 }
 body.options label {
   display: grid;
-  gap: 4px;
-  margin: 16px 0 4px;
+  gap: 0.308rem;
+  margin: 1.23rem 0 0.308rem;
   font-weight: 600;
 }
 
 .decision {
-  margin: 4px 0 8px;
-  padding: 6px 10px;
+  margin: 0.308rem 0 0.615rem;
+  padding: 0.462rem 0.769rem;
   border-left: 3px solid var(--ink-3);
   border-radius: 4px;
   background: var(--surface-2);
@@ -344,8 +344,8 @@ body.options label {
 .cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin: 4px 0;
+  gap: 0.615rem;
+  margin: 0.308rem 0;
 }
 .ink {
   color: var(--ink);
@@ -355,20 +355,20 @@ button.danger {
 }
 
 .liverun {
-  margin: 6px 0;
-  padding: 8px 10px;
+  margin: 0.462rem 0;
+  padding: 0.615rem 0.769rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface-2) 50%, transparent);
 }
 .liverun .bar {
-  height: 5px;
-  margin: 6px 0 2px;
+  height: 0.385rem;
+  margin: 0.462rem 0 0.154rem;
   border-radius: 999px;
   background: var(--surface-2);
 }
 .liverun .bar > div {
-  height: 5px;
+  height: 0.385rem;
   border-radius: 999px;
   background: var(--accent);
   transition: width 0.3s;
@@ -378,18 +378,18 @@ button.danger {
 }
 .steps {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 0.462rem 0 0;
   padding: 0;
   display: grid;
-  gap: 2px;
-  font-size: 11px;
+  gap: 0.154rem;
+  font-size: 0.846rem;
 }
 .steps li {
   display: flex;
-  gap: 6px;
+  gap: 0.462rem;
 }
 .steps .t {
-  width: 38px;
+  width: 2.92rem;
   flex: none;
   text-align: right;
   color: var(--ink-3);
@@ -399,20 +399,79 @@ button.danger {
   display: block;
 }
 pre.stream {
-  max-height: 220px;
+  max-height: 16.9rem;
   overflow-y: auto;
   white-space: pre-wrap;
-  margin: 6px 0 0;
-  padding: 6px 8px;
+  margin: 0.462rem 0 0;
+  padding: 0.462rem 0.615rem;
   border-radius: 4px;
   background: var(--surface);
   color: var(--ink-2);
   font:
-    11px/1.45 Inter,
+    0.846rem/1.45 Inter,
     ui-sans-serif,
     system-ui,
     sans-serif;
 }
 pre.stream.mono {
   font-family: ui-monospace, Consolas, monospace;
+}
+
+/* Where an application stands — the first thing you see for a tracked job. */
+.banner {
+  margin: 0.15rem 0 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border-left: 4px solid var(--ink-3);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink-3) 12%, transparent);
+}
+.banner .head {
+  font-size: 1.15rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.banner .ic {
+  font-size: 1.05rem;
+}
+.banner .sub {
+  margin-top: 0.1rem;
+  color: var(--ink-2);
+}
+.banner.accent {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.banner.accent .head {
+  color: var(--accent);
+}
+.banner.good {
+  border-left-color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent);
+}
+.banner.good .head {
+  color: var(--good);
+}
+.banner.warn {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.banner.warn .head {
+  color: var(--warn);
+}
+.banner.bad {
+  border-left-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+}
+.banner.bad .head {
+  color: var(--bad);
+}
+.banner.stop {
+  border-left-color: var(--ink-2);
+  background: color-mix(in srgb, var(--ink-2) 16%, transparent);
+}
+button.text-size {
+  font-size: 0.8rem;
+  font-weight: 600;
 }
