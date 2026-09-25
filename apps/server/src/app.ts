@@ -55,7 +55,7 @@ import {
   suggestAnswer,
   templateSchema,
 } from './services/extension.ts';
-import { extensionToken, tokenMatches } from './services/token.ts';
+import { EXTENSION_ORIGIN, extensionToken, tokenMatches } from './services/token.ts';
 import { getCall, getUsageSummary } from './services/usage.ts';
 import { replay, subscribe, type RunEventEnvelope } from './services/aiEvents.ts';
 
@@ -348,6 +348,10 @@ export function buildApp(
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
+      // The extension's side panel shows live progress too; no other site may read it.
+      ...(req.headers.origin === EXTENSION_ORIGIN && {
+        'Access-Control-Allow-Origin': EXTENSION_ORIGIN,
+      }),
     });
     const send = (e: RunEventEnvelope) => res.write(`data: ${JSON.stringify(e)}\n\n`);
     for (const e of replay(applicationId)) send(e);

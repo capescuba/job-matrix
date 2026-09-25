@@ -24,3 +24,6 @@ export function tokenMatches(given: unknown, expected: string): boolean {
   if (typeof given !== 'string' || given.length !== expected.length) return false;
   return timingSafeEqual(Buffer.from(given), Buffer.from(expected));
 }
+
+/** The Job Matrix extension's origin (its ID is fixed by the key in apps/extension/manifest.json). */
+export const EXTENSION_ORIGIN = 'chrome-extension://keiamknmppkefljklkaceniaafephpcf';
