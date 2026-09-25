@@ -88,6 +88,8 @@ export function parsePageTitle(pageTitle: string | null | undefined): {
   if (m) return { company: m[1].trim(), title: m[2].trim() };
   m = t.match(/^Job Application for (.+?) at (.+)$/i); // Greenhouse
   if (m) return { title: m[1].trim(), company: m[2].trim() };
+  m = t.match(/^(.+?)\s+[|–—-]\s+(.+?)\s+(?:Careers?|Jobs)$/i); // "TPM - Walmart Careers"
+  if (m) return { title: m[1].trim(), company: m[2].trim() };
   t = t.replace(SITE_SUFFIX, '').trim();
   m = t.match(/^(.+?) at (.+)$/); // "TPM at Acme"
   if (m) return { title: m[1].trim(), company: m[2].trim() };
@@ -202,7 +204,8 @@ export async function captureJob(
     // Blocked/closed/JS-only pages are expected — the page capture covers them.
   }
   const ld = jobPostingFromJsonLd(input.jsonLd);
-  const fromTitle = parsePageTitle(input.pageTitle);
+  // The browser's tab title, else the one the server read from the page.
+  const fromTitle = parsePageTitle(input.pageTitle ?? fetched?.pageTitle);
   const f = input.fields ?? {};
 
   const desc = (

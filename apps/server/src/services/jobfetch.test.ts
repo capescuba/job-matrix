@@ -130,6 +130,62 @@ describe('fetchJobPosting', () => {
     expect(job).toMatchObject({ location: null, remoteType: 'Remote' });
   });
 
+  it('reads Walmart postings from the page data, using the primary location pay', async () => {
+    const jobDetails = {
+      title: 'Distinguished, Technical Program Manager',
+      active: false,
+      requisitionStatus: { id: 'OPEN' },
+      jobPostingDescription: `<p>${LONG}</p>`,
+      jobPostingStartDate: '2026-09-08T00:00:00.000+00:00',
+      payFrequency: 'Annual',
+      primaryLocation: { locationId: 'US-11656', city: 'SUNNYVALE', stateCode: 'CA' },
+      additionalLocations: [{ locationId: 'US-30094', city: 'BENTONVILLE', stateCode: 'AR' }],
+      payRange: [
+        { location: 'Bentonville, Arkansas', code: 'US-30094', min: '130000.00', max: '260000.00' },
+        { location: 'Sunnyvale, California', code: 'US-11656', min: '169000.00', max: '338000.00' },
+      ],
+    };
+    const next = JSON.stringify({ props: { pageProps: { jobDetails } } });
+    const { f } = fakeFetch({
+      'https://careers.walmart.com/': {
+        body: `<html><script id=__NEXT_DATA__ type="application/json">${next}</script></html>`,
+      },
+    });
+    const job = await fetchJobPosting('https://careers.walmart.com/us/en/jobs/R-2592565', f);
+    expect(job).toMatchObject({
+      title: 'Distinguished, Technical Program Manager',
+      company: 'Walmart',
+      location: 'Sunnyvale, CA; Bentonville, AR',
+      salaryMin: 169_000,
+      salaryMax: 338_000,
+      posted: { date: '2026-09-08', approx: false },
+      closedHint: null,
+      via: 'Walmart careers data',
+    });
+    expect(job.descriptionText).toContain('- Bentonville, Arkansas: $130,000 - $260,000');
+
+    jobDetails.requisitionStatus.id = 'FILLED';
+    const closed = fakeFetch({
+      'https://careers.walmart.com/': {
+        body: `<script id="__NEXT_DATA__">${JSON.stringify({ props: { pageProps: { jobDetails } } })}</script>`,
+      },
+    });
+    expect(
+      (await fetchJobPosting('https://careers.walmart.com/us/en/jobs/R-2592565', closed.f))
+        .closedHint,
+    ).toMatch(/FILLED/);
+  });
+
+  it('passes the page title along when it falls back to page text', async () => {
+    const { f } = fakeFetch({
+      'https://careers.example.com/': {
+        body: `<html><head><meta property="og:title" content="Staff TPM - Example Careers"></head><body><main><p>${LONG}</p><p>${LONG}</p></main></body></html>`,
+      },
+    });
+    const job = await fetchJobPosting('https://careers.example.com/jobs/1', f);
+    expect(job).toMatchObject({ via: 'Page text', pageTitle: 'Staff TPM - Example Careers' });
+  });
+
   it('falls back to the page when a specific API fails', async () => {
     const { f } = fakeFetch({
       'https://boards-api.greenhouse.io/': { status: 404, body: '' },

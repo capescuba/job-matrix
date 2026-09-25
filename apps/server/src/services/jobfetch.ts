@@ -19,6 +19,8 @@ export interface FetchedJob {
   closedHint: string | null;
   /** Which strategy produced it, e.g. "Greenhouse API". */
   via: string;
+  /** The page's own title (og:title or <title>), for guessing title/company when nothing says. */
+  pageTitle?: string | null;
 }
 
 export class JobFetchError extends Error {}
@@ -360,6 +362,67 @@ async function workday(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   });
 }
 
+/** careers.walmart.com (Next.js): the whole requisition sits in the page's __NEXT_DATA__. */
+async function walmart(f: FetchFn, u: URL): Promise<FetchedJob | null> {
+  if (!/\/jobs\/R-\d+/i.test(u.pathname)) return null;
+  const html = await getText(f, u.toString());
+  const json = html.match(/<script[^>]*id=["']?__NEXT_DATA__["']?[^>]*>([\s\S]*?)<\/script>/i)?.[1];
+  if (!json) return null;
+  type Place = { city?: string; stateCode?: string; locationId?: string };
+  let j: {
+    title?: string;
+    jobPostingDescription?: string;
+    description?: string;
+    jobPostingStartDate?: string;
+    requisitionStatus?: { id?: string };
+    active?: boolean;
+    primaryLocation?: Place;
+    additionalLocations?: Place[];
+    payRange?: { location?: string; code?: string; min?: string; max?: string }[];
+    payFrequency?: string;
+  } | null;
+  try {
+    j = JSON.parse(json).props?.pageProps?.jobDetails ?? null;
+  } catch {
+    return null;
+  }
+  const html2 = j?.jobPostingDescription || j?.description;
+  if (!j || !html2) return null;
+  const titleCase = (s: string) => s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  const place = (p?: Place) =>
+    p?.city ? [titleCase(p.city), p.stateCode].filter(Boolean).join(', ') : null;
+  const places = [j.primaryLocation, ...(j.additionalLocations ?? [])].map(place).filter(Boolean);
+  // Pay is listed per location; use the primary location's band and list them all in the text.
+  const bands = (j.payRange ?? [])
+    .map((b) => ({ ...b, lo: Number(b.min), hi: Number(b.max) }))
+    .filter((b) => b.lo > 0 && b.hi > 0);
+  const annual = !j.payFrequency || /annual|year/i.test(j.payFrequency);
+  const primary =
+    bands.find((b) => b.code && b.code === j!.primaryLocation?.locationId) ?? bands[0];
+  const money = (n: number) => `$${n.toLocaleString('en-US')}`;
+  const payText = bands.length
+    ? `\n\nPay range by location (${j.payFrequency ?? 'annual'}):\n${bands
+        .map((b) => `- ${b.location}: ${money(b.lo)} - ${money(b.hi)}`)
+        .join('\n')}`
+    : '';
+  const status = j.requisitionStatus?.id;
+  return finish({
+    title: j.title ? decodeEntities(j.title) : null,
+    company: 'Walmart',
+    location: places.join('; ') || null,
+    remoteType: null,
+    salaryMin: annual && primary ? primary.lo : null,
+    salaryMax: annual && primary ? primary.hi : null,
+    descriptionText: htmlToText(html2) + payText,
+    posted: exact(j.jobPostingStartDate, 'Walmart careers data (jobPostingStartDate)'),
+    // The requisition status is the reliable signal ("active" is false on open postings too).
+    closedHint: (status ? status !== 'OPEN' : j.active === false)
+      ? `Walmart lists the requisition as ${status ?? 'inactive'}`
+      : null,
+    via: 'Walmart careers data',
+  });
+}
+
 async function linkedin(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   const id =
     u.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d+)/)?.[1] ?? u.searchParams.get('currentJobId');
@@ -438,6 +501,14 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
   const visible = html.replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1\s*>/gi, ' ');
   const body = visible.match(/<body[\s\S]*<\/body>/i)?.[0] ?? visible;
   const closedPhrase = htmlToText(body).match(CLOSED_TEXT)?.[0];
+  const meta = (prop: string) =>
+    html.match(
+      new RegExp(`<meta[^>]+property=["']?${prop}["']?[^>]+content=["']([^"']*)["']`, 'i'),
+    )?.[1];
+  const pageTitle =
+    decodeEntities(
+      meta('og:title') ?? html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? '',
+    ).trim() || null;
   for (const block of ldBlocks) {
     let data: unknown;
     try {
@@ -475,6 +546,7 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
           ? `Listing expired ${toDate(jp.validThrough)}`
           : null,
       via: 'Page structured data',
+      pageTitle,
     });
   }
   const main = visible.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? body;
@@ -494,6 +566,7 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
     descriptionText: text,
     closedHint: closedPhrase ? `Page says "${closedPhrase}"` : null,
     via: 'Page text',
+    pageTitle,
   });
 }
 
@@ -516,7 +589,9 @@ export async function fetchJobPosting(url: string, f: FetchFn = fetch): Promise<
           ? workday
           : h.endsWith('linkedin.com')
             ? linkedin
-            : null;
+            : h === 'careers.walmart.com'
+              ? walmart
+              : null;
   if (!specific) return generic(f, u);
   try {
     return (await specific(f, u)) ?? (await generic(f, u));
