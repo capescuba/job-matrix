@@ -274,6 +274,17 @@ function postingSection() {
       : page.liFields?.descriptionText
         ? 'LinkedIn’s job panel'
         : 'the page (Job Matrix reads the posting from its address first)';
+  // Matches a job you already track (or passed on): no add buttons unless you say it's different.
+  if (ctx.similar.length && !state.showAdd)
+    return `<section>
+      <h2>This posting</h2>
+      ${similar}
+      <div class="row">
+        <button class="primary" data-action="open" data-path="/applications/${ctx.similar[0].applicationId}">Open in Job Matrix</button>
+        <button class="link small" data-action="show-add">It’s a different role — add it anyway</button>
+      </div>
+    </section>`;
+
   const cost = (ctx.costs.fit ?? 0) + (ctx.costs.researchNeeded ? ctx.costs.research : 0);
   return `<section>
     <h2>New posting</h2>
