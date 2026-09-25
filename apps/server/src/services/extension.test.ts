@@ -6,6 +6,7 @@ import { buildApp } from '../app.ts';
 import { openDb, type Db } from '../db/client.ts';
 import { companyResearch, profile, resumeVersions } from '../db/schema.ts';
 import { createApplication } from './applications.ts';
+import { assessFit } from './fit.ts';
 import {
   companyKey,
   listAnswers,
@@ -242,6 +243,86 @@ describe('pageContext', () => {
     });
     expect(c.company).toBeNull();
     expect(c.detected).toEqual({ title: 'Principal TPM', company: 'Initech' });
+    expect(c.costs.researchNeeded).toBe(true);
+  });
+});
+
+describe('fit score in the panel', () => {
+  it('shows the latest fit as short labels, without researching the company', async () => {
+    const id = add('Initech', 'Staff TPM', 'https://initech.com/jobs/7', 'Screening');
+    const fit = {
+      verdict: 'Good fit',
+      summary: 'You fit.',
+      whyNotHigher: 'Held back by 5 office days.',
+      parts: {
+        skills: { score: 8, why: 'x' },
+        level: { score: 7, why: 'x' },
+        logistics: { score: 4, why: 'x' },
+        pay: { score: 6, why: 'x' },
+        upside: { score: 7, why: 'x' },
+      },
+      criteria: [],
+      strengths: [
+        { label: 'Platform program depth', point: 'p', evidence: 'e' },
+        { label: 'Agentic AI delivery', point: 'p', evidence: 'e' },
+      ],
+      gaps: [
+        {
+          label: 'Five office days',
+          gap: 'g',
+          theme: 't',
+          severity: 'Major',
+          knownGap: false,
+          mitigation: 'm',
+        },
+        {
+          label: 'Minor tooling gap',
+          gap: 'g',
+          theme: 't',
+          severity: 'Minor',
+          knownGap: false,
+          mitigation: 'm',
+        },
+      ],
+      flags: { levelMismatch: null, outreach: { recommended: false, why: '' } },
+      facts: {
+        officeDaysPerWeek: 5,
+        travelPercent: null,
+        yearsRequired: null,
+        employmentType: 'Full-time',
+      },
+      interviewFocus: [],
+      talkingPoints: ['a', 'b', 'c'],
+    };
+    let calls = 0;
+    const provider: LLMProvider = {
+      name: 'anthropic',
+      defaultModel: 'claude-opus-5-5',
+      complete: async () => '',
+      async completeStructured<S extends z.ZodType>(req: StructuredRequest<S>) {
+        calls++;
+        return {
+          data: req.schema.parse(fit) as z.infer<S>,
+          provider: 'anthropic',
+          model: 'claude-opus-5-5',
+        };
+      },
+    };
+    const before = await pageContext(db, { url: 'https://initech.com/jobs/7' });
+    expect(before.tracked?.fit).toBeNull();
+
+    await assessFit(db, id, { provider });
+    const c = await pageContext(db, { url: 'https://initech.com/jobs/7' });
+    expect(calls).toBe(1); // fit only — no research call
+    expect(db.$client.prepare('SELECT count(*) FROM company_research').pluck().get()).toBe(0);
+    expect(c.tracked?.fit).toMatchObject({
+      verdict: 'Good fit',
+      whyNotHigher: 'Held back by 5 office days.',
+      strengths: ['Platform program depth', 'Agentic AI delivery'],
+      gaps: ['Five office days'],
+      parts: { skills: 8, logistics: 4 },
+    });
+    expect(c.company?.brief).toBeNull();
     expect(c.costs.researchNeeded).toBe(true);
   });
 });

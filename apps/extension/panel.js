@@ -119,6 +119,7 @@ async function refresh() {
       teach: null,
       useApp: null,
       showAdd: false,
+      passing: false,
     }),
   });
   if (!tab?.url || !/^https?:/.test(tab.url)) {
@@ -139,7 +140,10 @@ async function refresh() {
       page,
       template,
       ctx,
-      edits: { title: ctx.detected.title ?? '', company: ctx.detected.company ?? '' },
+      // Keep what you typed if it's still the same page.
+      edits: samePage
+        ? state.edits
+        : { title: ctx.detected.title ?? '', company: ctx.detected.company ?? '' },
     });
     loadSavedAnswers();
   } catch (e) {
@@ -232,6 +236,42 @@ function postingSection() {
   const { ctx, page } = state;
   const t = ctx.tracked;
   if (t) {
+    const f = t.fit;
+    const scoring = state.scoring === t.applicationId;
+    const open = t.decision == null;
+    const list = (items, tone, mark) =>
+      items
+        .map((x) => `<li><span class="${tone}">${mark}</span><span>${esc(x)}</span></li>`)
+        .join('');
+    const PART = {
+      skills: 'Skills',
+      level: 'Level',
+      logistics: 'Logistics',
+      pay: 'Pay',
+      upside: 'Upside',
+    };
+    const fitBlock = f
+      ? `<div class="row">${esc(f.verdict)} ${gateChip(t)}</div>
+         <div class="muted">${esc(f.whyNotHigher)}</div>
+         <div class="cols">
+           <div><div class="small good">Works for you</div><ul class="list">${list(f.strengths, 'good', '✓') || '<li class="faint">—</li>'}</ul></div>
+           <div><div class="small bad">Watch out</div><ul class="list">${list(f.gaps, 'bad', '!') || '<li class="faint">Nothing major</li>'}</ul></div>
+         </div>
+         <div class="small faint">${Object.entries(f.parts)
+           .map(([k, v]) => `${PART[k] ?? k} <strong class="ink">${Number(v).toFixed(1)}</strong>`)
+           .join(' · ')}</div>`
+      : scoring
+        ? `<div class="warn">Scoring your fit… <span id="elapsed">0s</span> <span class="faint">(usually 20–40s)</span></div>`
+        : open
+          ? '<div class="faint">Not scored yet</div>'
+          : '';
+    const passForm = state.passing
+      ? `<div class="row" style="margin-top:8px">
+           <input data-edit="passReason" value="${esc(state.edits.passReason ?? '')}" placeholder="Reason (optional), e.g. 5 days onsite" style="flex:1;min-width:0" />
+           <button class="danger" data-action="pass-confirm">Pass</button>
+           <button class="link small" data-action="pass-cancel">Cancel</button>
+         </div>`
+      : '';
     return `<section>
       <h2>This posting ${statusChip(t.status)}</h2>
       ${decisionBanner(t)}
@@ -243,14 +283,20 @@ function postingSection() {
         ${t.fitScore != null ? `<span class="score ${t.fitGate === 'fail' ? 'fail' : ''}" title="${esc(t.fitVerdict ?? '')}">${t.fitScore.toFixed(1)}</span>` : ''}
       </div>
       <div class="stack small" style="margin-top:6px">
-        ${t.appliedAt ? `<div>Applied <strong>${day(t.appliedAt)}</strong> <span class="faint">(${daysAgo(t.appliedAt)})</span></div>` : t.decision ? '' : '<div class="faint">Not applied yet</div>'}
-        ${t.fitScore != null ? `<div class="row">${esc(t.fitVerdict ?? '')} ${gateChip(t)}</div>` : t.decision ? '' : '<div class="faint">Not scored yet</div>'}
+        ${t.appliedAt ? `<div>Applied <strong>${day(t.appliedAt)}</strong> <span class="faint">(${daysAgo(t.appliedAt)})</span></div>` : ''}
+        ${fitBlock}
         ${t.nextAction ? `<div>Next: ${esc(t.nextAction)}${t.nextActionDate ? ` <span class="faint">by ${day(t.nextActionDate)}</span>` : ''}</div>` : ''}
-        ${t.lastActivityAt ? `<div class="faint">Last activity ${daysAgo(t.lastActivityAt)}</div>` : ''}
       </div>
       <div class="row" style="margin-top:8px">
-        <button class="primary" data-action="open" data-path="/applications/${t.applicationId}">Open in Job Matrix</button>
+        ${
+          open && t.fitScore == null
+            ? `<button class="primary" data-action="score-fit" data-id="${t.applicationId}" ${scoring ? 'disabled' : ''} title="Fit score only — company research stays separate">${scoring ? 'Scoring…' : `Score fit · ~${money(state.ctx.costs.fit)}`}</button>`
+            : ''
+        }
+        ${open && t.status === 'Screening' && !state.passing ? '<button class="danger" data-action="pass">Pass</button>' : ''}
+        <button class="${open && t.fitScore == null ? '' : 'primary'}" data-action="open" data-path="/applications/${t.applicationId}">Open in Job Matrix</button>
       </div>
+      ${passForm}
     </section>`;
   }
 
@@ -285,7 +331,6 @@ function postingSection() {
       </div>
     </section>`;
 
-  const cost = (ctx.costs.fit ?? 0) + (ctx.costs.researchNeeded ? ctx.costs.research : 0);
   return `<section>
     <h2>New posting</h2>
     ${similar}
@@ -295,7 +340,7 @@ function postingSection() {
       <div class="small faint">Description from ${src}. Highlight text on the page to use just that.</div>
       <div class="row">
         <button class="primary" data-action="add" ${state.busy ? 'disabled' : ''}>${state.busy === 'add' ? 'Adding…' : 'Add to Screening'}</button>
-        <button data-action="add-score" ${state.busy ? 'disabled' : ''} title="${ctx.costs.researchNeeded ? 'Fit score + a company brief (web research, made once per company)' : 'Fit score; the company brief already exists'}">${state.busy === 'score' ? 'Adding…' : `Add &amp; score · ~${money(cost)}`}</button>
+        <button data-action="add-score" ${state.busy ? 'disabled' : ''} title="Adds it to Screening and scores your fit here — company research stays separate">${state.busy === 'score' ? 'Adding…' : `Add &amp; score fit · ~${money(ctx.costs.fit)}`}</button>
       </div>
     </div>
   </section>`;
@@ -312,7 +357,9 @@ function companySection() {
     ? `<div style="margin-top:8px"><div class="small muted">Your applications here</div><ul class="apps">${c.applications.slice(0, 6).map(appLine).join('')}</ul></div>`
     : '';
   if (!b)
-    return `<section><h2>${esc(c.name)}</h2><p class="muted" style="margin:0">No company brief yet. Scoring a job here makes one.</p>${others}</section>`;
+    return `<section><h2>${esc(c.name)}</h2><p class="muted" style="margin:0">No company brief yet.</p>
+      <div class="row" style="margin-top:6px"><button data-action="research" data-id="${c.id}" ${state.researching ? 'disabled' : ''} title="Web research on the company: news, culture, stock or funding, red and green flags. Made once, then reused for all its jobs.">${state.researching ? 'Researching… (about 1–2 minutes)' : `Research company · ~${money(state.ctx.costs.research)}`}</button></div>
+      ${others}</section>`;
   const stock = c.stock
     ? `<div class="tile"><div class="k">${esc(c.stock.ticker)}</div><div class="v">${c.stock.price.toLocaleString(undefined, { style: 'currency', currency: c.stock.currency ?? 'USD' })}</div>${spark(c.stock.series, (c.stock.change1yPct ?? 0) >= 0)}<div class="small ${(c.stock.change1yPct ?? 0) >= 0 ? 'good' : 'bad'}">${c.stock.change1yPct == null ? '' : `${c.stock.change1yPct >= 0 ? '+' : ''}${c.stock.change1yPct.toFixed(0)}% 1 yr`}</div></div>`
     : `<div class="tile"><div class="k">${b.ownership === 'Subsidiary' ? 'Ownership' : esc(b.ownership)}</div><div class="v">${esc(b.fundingStage ?? (b.ownership === 'Subsidiary' ? 'Subsidiary' : '—'))}</div><div class="small faint">${esc(b.lastFunding ?? '')}</div></div>`;
@@ -440,17 +487,12 @@ async function add(score) {
       }),
       onStatus: status,
     });
-    if (!r.existing) {
-      await openInApp(`/screening?focus=${r.applicationId}`);
-      // Scoring runs in Job Matrix; its Screening card shows the progress.
-      if (score)
-        api(`/api/applications/${r.applicationId}/analyze`, { method: 'POST' }).then(
-          refresh,
-          refresh,
-        );
-    } else await openInApp(`/applications/${r.applicationId}`);
+    // Add & score: stay here and show the fit in the panel. Add: go to Screening as before.
+    if (r.existing) await openInApp(`/applications/${r.applicationId}`);
+    else if (!score) await openInApp(`/screening?focus=${r.applicationId}`);
     state.busy = null;
     await refresh();
+    if (score && !r.existing) await scoreFit(r.applicationId);
     if (r.existing) {
       state.notice = {
         tone: 'warn',
@@ -463,6 +505,62 @@ async function add(score) {
     state.notice = { tone: 'error', text: e.message || String(e) };
     render();
   }
+}
+
+/** Fit score only (no company research); the panel shows it when it's done. */
+let ticker;
+async function scoreFit(applicationId) {
+  state.scoring = applicationId;
+  state.notice = null;
+  const started = Date.now();
+  clearInterval(ticker);
+  ticker = setInterval(() => {
+    const el = document.getElementById('elapsed');
+    if (el) el.textContent = `${Math.round((Date.now() - started) / 1000)}s`;
+  }, 1000);
+  render();
+  try {
+    await api(`/api/applications/${applicationId}/fit`, { method: 'POST' });
+  } catch (e) {
+    state.notice = { tone: 'error', text: `Scoring failed: ${e.message || e}` };
+  }
+  clearInterval(ticker);
+  state.scoring = null;
+  await refresh();
+}
+
+async function pass() {
+  const t = state.ctx?.tracked;
+  if (!t) return;
+  const reason = (state.edits.passReason ?? '').trim();
+  try {
+    await api(`/api/applications/${t.applicationId}/activities`, {
+      method: 'POST',
+      body: {
+        at: new Date().toLocaleDateString('en-CA'),
+        kind: 'Note',
+        summary: reason ? `Passed: ${reason}` : 'Passed at screening',
+        setStatus: 'Passed',
+      },
+    });
+    state.passing = false;
+    state.edits.passReason = '';
+  } catch (e) {
+    state.notice = { tone: 'error', text: e.message || String(e) };
+  }
+  await refresh();
+}
+
+async function research(companyId) {
+  state.researching = true;
+  render();
+  try {
+    await api(`/api/companies/${companyId}/research?force=1`, { method: 'POST' });
+  } catch (e) {
+    state.notice = { tone: 'error', text: `Research failed: ${e.message || e}` };
+  }
+  state.researching = false;
+  await refresh();
 }
 
 async function suggest(qid) {
@@ -536,6 +634,15 @@ document.addEventListener('click', async (e) => {
     render();
   } else if (a === 'add') add(false);
   else if (a === 'add-score') add(true);
+  else if (a === 'score-fit') scoreFit(Number(el.dataset.id));
+  else if (a === 'pass') {
+    state.passing = true;
+    render();
+  } else if (a === 'pass-cancel') {
+    state.passing = false;
+    render();
+  } else if (a === 'pass-confirm') pass();
+  else if (a === 'research') research(Number(el.dataset.id));
   else if (a === 'use-app') {
     state.useApp = Number(el.dataset.id);
     render();
