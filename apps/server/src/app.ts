@@ -61,6 +61,7 @@ import { EXTENSION_ORIGIN, extensionToken, tokenMatches } from './services/token
 import { getCall, getUsageSummary } from './services/usage.ts';
 import { replay, subscribe, type RunEventEnvelope } from './services/aiEvents.ts';
 import { logEvent } from './services/log.ts';
+import { AliasError, addAlias, listAliases, removeAlias } from './services/aliases.ts';
 import { listLogs, readLog } from './services/logs.ts';
 import {
   INTERVALS,
@@ -74,6 +75,7 @@ import {
 } from './services/mail/sync.ts';
 import {
   UpdateStateError,
+  rematchPending,
   applyInputSchema,
   applyUpdate,
   askAiCostUsd,
@@ -133,6 +135,7 @@ export function buildApp(
       return reply.status(400).send({ error: 'Invalid input', issues: err.issues });
     if (err instanceof NotFoundError) return reply.status(404).send({ error: err.message });
     if (err instanceof UpdateStateError) return reply.status(409).send({ error: err.message });
+    if (err instanceof AliasError) return reply.status(400).send({ error: err.message });
     if (err instanceof NeedsSignIn) return reply.status(401).send({ error: err.message, signIn: true });
     if (err instanceof GraphError) return reply.status(502).send({ error: err.message });
     if (err instanceof FitError || err instanceof LLMError || err instanceof JobFetchError)
@@ -519,6 +522,22 @@ export function buildApp(
   app.post('/api/email-updates/:id/classify', (req) =>
     classifyWithAi(db, mail, idParam.parse(req.params).id),
   );
+
+  // ----- company aliases ("SpaceXAI" is Cursor) -----
+  app.get('/api/companies/:id/aliases', (req) => listAliases(db, idParam.parse(req.params).id));
+  app.post('/api/companies/:id/aliases', (req, reply) => {
+    const { id } = idParam.parse(req.params);
+    const { alias } = z.object({ alias: z.string().trim().min(1).max(200) }).parse(req.body);
+    addAlias(db, id, alias);
+    logEvent('company.alias', `Added “${alias}” as another name for company ${id}`, { companyId: id, alias });
+    rematchPending(db);
+    return reply.status(201).send(listAliases(db, id));
+  });
+  app.delete('/api/aliases/:id', (req, reply) => {
+    removeAlias(db, idParam.parse(req.params).id);
+    rematchPending(db);
+    return reply.status(204).send();
+  });
 
   // ----- log files -----
   app.get('/api/logs', () => ({ dir: DATA_DIR, files: listLogs() }));

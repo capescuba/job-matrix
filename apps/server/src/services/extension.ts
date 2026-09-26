@@ -13,6 +13,7 @@ import {
   siteTemplates,
   statusEvents,
 } from '../db/schema.ts';
+import { allAliases } from './aliases.ts';
 import { NotFoundError, listApplications, type ApplicationRow } from './applications.ts';
 import { latestResearch, isStale } from './research.ts';
 import { getDefaultResume, getProfile } from './resume.ts';
@@ -231,9 +232,13 @@ export async function pageContext(db: Db, input: PageInput, opts: { fetchFn?: ty
     .select({ id: companies.id, name: companies.name, website: companies.website })
     .from(companies)
     .all();
+  const aliases = allAliases(db);
   const byKey = (name: string | null | undefined) => {
     const k = companyKey(name);
-    return k ? all.find((c) => companyKey(c.name) === k) : undefined;
+    if (!k) return undefined;
+    // Its own name, else another name it goes by ("SpaceXAI" → Cursor).
+    const aliasOf = aliases.find((a) => a.key === k)?.companyId;
+    return all.find((c) => companyKey(c.name) === k) ?? all.find((c) => c.id === aliasOf);
   };
   const host = hostOf(url);
   const learnedHosts = new Map<string, Set<number>>();

@@ -6,6 +6,7 @@ import { openDb } from './db/client.ts';
 import { WEB_DIST } from './paths.ts';
 import { logEvent, setLogSink } from './services/log.ts';
 import { scheduleMail } from './services/mail/sync.ts';
+import { rematchPending } from './services/mail/updates.ts';
 
 const port = Number(process.env.API_PORT ?? 5174);
 const db = openDb();
@@ -45,6 +46,8 @@ app
   .then(() => {
     logEvent('app.start', `Job Matrix started on port ${port}`, { port, pid: process.pid });
     // Email checks: manual by default; otherwise as set on the Email page.
+    // Emails waiting for review may match better now (new aliases, jobs added since).
+    rematchPending(db);
     scheduleMail(db, mail, { startup: true });
   })
   .catch((err) => {

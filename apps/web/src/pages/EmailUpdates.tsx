@@ -71,7 +71,10 @@ export default function EmailUpdatesPage() {
   }, [status?.progress.running]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const groups = {
-    suggested: rows.filter((r) => r.kind !== 'unclear' && r.applicationId),
+    possible: rows.filter((r) => r.kind !== 'unclear' && r.matchedBy === 'title-only'),
+    suggested: rows.filter(
+      (r) => r.kind !== 'unclear' && r.applicationId && r.matchedBy !== 'title-only',
+    ),
     pick: rows.filter((r) => r.kind !== 'unclear' && !r.applicationId && r.companyId),
     untracked: rows.filter((r) => r.kind !== 'unclear' && !r.companyId),
     unclear: rows.filter((r) => r.kind === 'unclear'),
@@ -115,6 +118,12 @@ export default function EmailUpdatesPage() {
         </p>
       ) : (
         <>
+          <Group
+            title="Possible matches"
+            hint="The email names a company you don't track, but the job title matches one of your jobs (e.g. after an acquisition or rename). Check it's right."
+            rows={groups.possible}
+            askAiUsd={status?.askAiUsd ?? null}
+          />
           <Group
             title="Suggested updates"
             hint="What each email means for the job it's about. Nothing changes until you apply it."
@@ -381,19 +390,31 @@ function UpdateCard({ row, askAiUsd }: { row: EmailUpdateRow; askAiUsd: number |
   const [status, setStatus] = useState<string>('suggested');
   const [company, setCompany] = useState(row.companyName ?? '');
   const [title, setTitle] = useState(row.jobTitle ?? '');
+  // Title-only matches: remember the email's company name as another name for the job's company.
+  const titleOnly = row.matchedBy === 'title-only';
+  const [remember, setRemember] = useState(true);
+  const { data: companies = [] } = useQuery({
+    queryKey: ['companies'],
+    queryFn: api.companies,
+    enabled: !row.companyId && row.kind !== 'unclear',
+  });
   const opts = { onSuccess: invalidate };
   const apply = useMutation({
     mutationFn: () =>
-      api.applyEmailUpdate(
-        row.id,
-        status === 'suggested' ? {} : { status: status === 'log' ? null : (status as Status) },
-      ),
+      api.applyEmailUpdate(row.id, {
+        ...(status === 'suggested' ? {} : { status: status === 'log' ? null : (status as Status) }),
+        ...(titleOnly && remember && row.companyName ? { rememberAlias: row.companyName } : {}),
+      }),
     ...opts,
   });
   const dismiss = useMutation({ mutationFn: () => api.dismissEmailUpdate(row.id), ...opts });
   const relabel = useMutation({
-    mutationFn: (b: { kind?: EmailKind; applicationId?: number | null }) =>
-      api.relabelEmailUpdate(row.id, b),
+    mutationFn: (b: {
+      kind?: EmailKind;
+      applicationId?: number | null;
+      companyId?: number;
+      rememberAlias?: boolean;
+    }) => api.relabelEmailUpdate(row.id, b),
     ...opts,
   });
   const track = useMutation({
@@ -426,6 +447,12 @@ function UpdateCard({ row, askAiUsd }: { row: EmailUpdateRow; askAiUsd: number |
               )}
             </>
           )}
+          {titleOnly && (
+            <span className="w-full text-xs text-warn">
+              Matched by job title only: the email says “{row.companyName ?? 'another company'}”,
+              and you track this job at {app.company}.
+            </span>
+          )}
           {row.matchedBy === 'only-open' && (
             <span className="text-xs text-ink-3">
               (your only open job there — check it's the right one)
@@ -456,8 +483,26 @@ function UpdateCard({ row, askAiUsd }: { row: EmailUpdateRow; askAiUsd: number |
           </Select>
         )}
 
+        {!row.companyId && !unclear && companies.length > 0 && (
+          <Select
+            className="w-auto max-w-xs"
+            value=""
+            onChange={(e) =>
+              e.target.value &&
+              relabel.mutate({ companyId: Number(e.target.value), rememberAlias: remember })
+            }
+          >
+            <option value="">It's from a company I track…</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        )}
         {!row.companyId && !unclear && (
           <>
+            <span className="text-xs text-ink-3">or</span>
             <Input
               className="w-40"
               value={company}
@@ -525,6 +570,17 @@ function UpdateCard({ row, askAiUsd }: { row: EmailUpdateRow; askAiUsd: number |
               Apply
             </Button>
           </>
+        )}
+        {(titleOnly || (!row.companyId && !unclear)) && row.companyName && (
+          <label className="flex items-center gap-1.5 text-xs text-ink-2">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            Remember “{row.companyName}” as another name for{' '}
+            {titleOnly ? app?.company : 'that company'}
+          </label>
         )}
         <Button variant="ghost" disabled={busy} onClick={() => dismiss.mutate()}>
           Dismiss

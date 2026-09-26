@@ -92,6 +92,13 @@
       "when": 1790374135943,
       "tag": "0012_email_updates",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1790448195739,
+      "tag": "0013_company_aliases",
+      "breakpoints": true
     }
   ]
 }

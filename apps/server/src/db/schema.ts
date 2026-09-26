@@ -341,3 +341,21 @@ export const mailSync = sqliteTable('mail_sync', {
   scanned: integer('scanned').notNull().default(0),
   found: integer('found').notNull().default(0),
 });
+
+/**
+ * Other names a company goes by ("SpaceXAI" for Cursor after an acquisition, a parent brand, an
+ * old name), so emails and pages that use them still match. `aliasKey` is companyKey(alias).
+ */
+export const companyAliases = sqliteTable(
+  'company_aliases',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    companyId: integer('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    alias: text('alias').notNull(),
+    aliasKey: text('alias_key').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('company_aliases_key').on(t.aliasKey), index('company_aliases_company').on(t.companyId)],
+);

@@ -8,6 +8,7 @@ import { NeedsSignIn, type MailClient, type MailMeta } from '@jm/mail';
 import type { Db } from '../../db/client.ts';
 import { emailUpdates, mailSync } from '../../db/schema.ts';
 import { logEvent } from '../log.ts';
+import { rematchPending } from './updates.ts';
 import {
   buildMatchContext,
   classify,
@@ -72,7 +73,8 @@ export function analyze(meta: MailMeta, body: string, ctx: MatchContext) {
     matchedBy: m.matchedBy,
     suggestedStatus: s.status,
     suggestedNextAction: s.nextAction,
-    state: s.noop ? 'noop' : 'pending',
+    // A job-title-only match waits for you to confirm it, even when it would change nothing.
+    state: s.noop && m.matchedBy !== 'title-only' ? 'noop' : 'pending',
   } satisfies typeof emailUpdates.$inferInsert;
 }
 
@@ -118,6 +120,8 @@ async function run(db: Db, client: MailClient, opts: { rescan?: boolean; trigger
     trigger: opts.trigger ?? 'manual',
     rescan: Boolean(opts.rescan),
   });
+  // Emails already waiting may match now (a new alias, a job added since).
+  rematchPending(db);
   const ctx = buildMatchContext(db);
   const known = new Set(
     db
