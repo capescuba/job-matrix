@@ -139,6 +139,30 @@ describe('unconstrained JSON (schemas too large for the API grammar)', () => {
     expect(sent.output_config).toEqual({ effort: 'low' });
   });
 
+  it('sends Haiku 4.5 neither adaptive thinking nor an effort setting', async () => {
+    let sent: Record<string, unknown> = {};
+    const provider = new AnthropicProvider('claude-opus-5');
+    (provider as unknown as { client: unknown }).client = {
+      messages: {
+        stream: (p: Record<string, unknown>) => {
+          sent = p;
+          return fakeStream([], final('{"ok": true}'));
+        },
+      },
+    };
+    await provider.completeStructured({
+      system: 's',
+      prompt: 'p',
+      schema: z.object({ ok: z.boolean() }),
+      model: 'claude-haiku-4-5',
+      effort: 'low',
+    });
+    expect(sent.model).toBe('claude-haiku-4-5');
+    expect(sent.thinking).toBeUndefined();
+    expect(sent.output_config).not.toHaveProperty('effort');
+    expect(sent.output_config).toHaveProperty('format');
+  });
+
   it('repairs a reply that does not match the schema with one small follow-up call', async () => {
     const provider = new AnthropicProvider('claude-opus-5');
     let repairPrompt = '';

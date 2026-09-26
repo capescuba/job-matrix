@@ -30,7 +30,7 @@ import { getUsageSummary, recordUsage } from './usage.ts';
 // ---------- matching a page to what you already track ----------
 
 /** Hosts that serve many companies' jobs — a hostname there says nothing about the company. */
-const SHARED_HOSTS =
+export const SHARED_HOSTS =
   /(^|\.)(linkedin\.com|indeed\.com|glassdoor\.com|greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|workable\.com|wellfound\.com|builtin\.com|ziprecruiter\.com|google\.com|dice\.com|monster\.com|simplyhired\.com|otta\.com|welcometothejungle\.com)$/i;
 
 /** "DocuSign, Inc." and "Docusign" → "docusign". */
@@ -72,13 +72,18 @@ function titleWords(title: string): Set<string> {
   return new Set(t.split(/\s+/).filter((w) => w && !TITLE_STOP.has(w)));
 }
 
-/** Same role, near enough: most words shared (Jaccard ≥ 0.75). */
-export function similarTitles(a: string, b: string): boolean {
+/** Share of title words in common (Jaccard, 0–1). */
+export function titleOverlap(a: string, b: string): number {
   const x = titleWords(a);
   const y = titleWords(b);
-  if (!x.size || !y.size) return false;
+  if (!x.size || !y.size) return 0;
   const shared = [...x].filter((w) => y.has(w)).length;
-  return shared / (x.size + y.size - shared) >= 0.75;
+  return shared / (x.size + y.size - shared);
+}
+
+/** Same role, near enough: most words shared (Jaccard ≥ 0.75). */
+export function similarTitles(a: string, b: string): boolean {
+  return titleOverlap(a, b) >= 0.75;
 }
 
 const hostOf = (url: string | null | undefined) => {

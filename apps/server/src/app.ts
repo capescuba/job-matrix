@@ -1,8 +1,9 @@
-import Fastify from 'fastify';
+import Fastify, { LogController } from 'fastify';
 import multipart from '@fastify/multipart';
 import { asc, eq } from 'drizzle-orm';
 import { ZodError, z } from 'zod';
 import { EFFORTS, LLMError } from '@jm/ai';
+import { GraphError, NeedsSignIn, createMailClient, type MailClient } from '@jm/mail';
 import {
   STATUSES,
   activitySchema,
@@ -15,6 +16,7 @@ import {
 } from '@jm/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Db } from './db/client.ts';
+import { DATA_DIR } from './paths.ts';
 import { companies, contacts, resumeVersions } from './db/schema.ts';
 import {
   NotFoundError,
@@ -58,13 +60,46 @@ import {
 import { EXTENSION_ORIGIN, extensionToken, tokenMatches } from './services/token.ts';
 import { getCall, getUsageSummary } from './services/usage.ts';
 import { replay, subscribe, type RunEventEnvelope } from './services/aiEvents.ts';
+import { logEvent } from './services/log.ts';
+import { listLogs, readLog } from './services/logs.ts';
+import {
+  INTERVALS,
+  mailState,
+  nextSyncAt,
+  pendingCount,
+  scheduleMail,
+  syncMail,
+  syncProgress,
+  updateMailSettings,
+} from './services/mail/sync.ts';
+import {
+  UpdateStateError,
+  applyInputSchema,
+  applyUpdate,
+  askAiCostUsd,
+  classifyWithAi,
+  dismissUpdate,
+  listUpdates,
+  relabelSchema,
+  relabelUpdate,
+  restoreUpdate,
+  trackFromUpdate,
+  trackSchema,
+} from './services/mail/updates.ts';
 
 const idParam = z.object({ id: z.coerce.number().int() });
 
 export function buildApp(
   db: Db,
-  opts: { logger?: boolean; extensionToken?: string; fetchFn?: typeof fetch } = {},
+  opts: {
+    logger?: boolean;
+    extensionToken?: string;
+    fetchFn?: typeof fetch;
+    /** Outlook access (tests pass a fake). */
+    mail?: MailClient;
+  } = {},
 ) {
+  const mail = opts.mail ?? createMailClient({ clientId: process.env.OUTLOOK_CLIENT_ID || null });
   const token = () => opts.extensionToken ?? extensionToken();
   /** Extension routes: the shared token must be in X-JM-Token (blocks other web pages). */
   const requireToken = async (req: FastifyRequest, reply: FastifyReply) => {
@@ -72,13 +107,34 @@ export function buildApp(
       return reply.status(401).send({ error: 'Missing or wrong extension token' });
   };
 
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 5 * 1024 * 1024 });
+  // Fastify's two-lines-per-request logging is replaced by one line per API call (below).
+  const app = Fastify({
+    logger: opts.logger ?? false,
+    logController: new LogController({ disableRequestLogging: true }),
+    bodyLimit: 5 * 1024 * 1024,
+  });
+
+  /** Polled or streamed routes that would drown the log. */
+  const QUIET = /^\/api\/(health|ai\/events|logs|mail\/status)(\/|\?|$)/;
+  app.addHook('onResponse', async (req, reply) => {
+    if (!req.url.startsWith('/api/') || QUIET.test(req.url)) return;
+    const status = reply.statusCode;
+    const ms = Math.round(reply.elapsedTime);
+    const line = { event: 'http', method: req.method, url: req.url, status, ms };
+    const msg = `${req.method} ${req.url} → ${status} (${ms} ms)`;
+    if (status >= 500) req.log.error(line, msg);
+    else if (status >= 400) req.log.warn(line, msg);
+    else req.log.info(line, msg);
+  });
   app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError)
       return reply.status(400).send({ error: 'Invalid input', issues: err.issues });
     if (err instanceof NotFoundError) return reply.status(404).send({ error: err.message });
+    if (err instanceof UpdateStateError) return reply.status(409).send({ error: err.message });
+    if (err instanceof NeedsSignIn) return reply.status(401).send({ error: err.message, signIn: true });
+    if (err instanceof GraphError) return reply.status(502).send({ error: err.message });
     if (err instanceof FitError || err instanceof LLMError || err instanceof JobFetchError)
       return reply.status(422).send({ error: err.message });
     app.log.error(err);
@@ -376,6 +432,7 @@ export function buildApp(
         anthropicApiKey: z.string().max(500).nullable().optional(),
         aiModel: z.string().max(100).nullable().optional(),
         aiResearchModel: z.string().max(100).nullable().optional(),
+        aiEmailModel: z.string().max(100).nullable().optional(),
         aiEffort: z.enum(EFFORTS).nullable().optional(),
       })
       .parse(req.body);
@@ -383,8 +440,96 @@ export function buildApp(
       ...(body.anthropicApiKey !== undefined && { ANTHROPIC_API_KEY: body.anthropicApiKey }),
       ...(body.aiModel !== undefined && { AI_MODEL: body.aiModel }),
       ...(body.aiResearchModel !== undefined && { AI_RESEARCH_MODEL: body.aiResearchModel }),
+      ...(body.aiEmailModel !== undefined && { AI_EMAIL_MODEL: body.aiEmailModel }),
       ...(body.aiEffort !== undefined && { AI_EFFORT: body.aiEffort }),
     });
+  });
+
+  // ----- email: Outlook connection, checking, and the review queue -----
+  const mailStatus = async () => {
+    const s = mailState(db);
+    const conn = await mail.status();
+    return {
+      ...conn,
+      enabled: s.enabled,
+      intervalMinutes: s.intervalMinutes,
+      intervals: INTERVALS,
+      lastSyncAt: s.lastSyncAt,
+      lastError: s.lastError ?? conn.lastError,
+      scanned: s.scanned,
+      found: s.found,
+      watermark: s.watermark,
+      nextSyncAt: nextSyncAt(),
+      pending: pendingCount(db),
+      progress: syncProgress(),
+      askAiUsd: askAiCostUsd(db),
+    };
+  };
+  app.get('/api/mail/status', mailStatus);
+  app.post('/api/mail/connect', async () => {
+    const s = await mail.startSignIn();
+    logEvent('mail.signin.start', 'Outlook sign-in started (waiting for the code)');
+    s.done.then(
+      async () => logEvent('mail.signin.done', `Connected to Outlook as ${(await mail.status()).account}`),
+      (e: Error) => logEvent('mail.signin.error', `Outlook sign-in failed: ${e.message}`, {}, 'warn'),
+    );
+    return { userCode: s.userCode, verificationUri: s.verificationUri, expiresAt: s.expiresAt };
+  });
+  app.post('/api/mail/settings', async (req) => {
+    const body = z
+      .object({
+        enabled: z.boolean().optional(),
+        intervalMinutes: z
+          .number()
+          .int()
+          .refine((v) => (INTERVALS as readonly number[]).includes(v), 'Unknown interval')
+          .optional(),
+      })
+      .parse(req.body);
+    updateMailSettings(db, body);
+    scheduleMail(db, mail);
+    logEvent('mail.settings', 'Email check settings changed', body);
+    return mailStatus();
+  });
+  // Starts a check and returns at once; the page follows progress through /api/mail/status.
+  const startSync = (rescan: boolean) => {
+    syncMail(db, mail, { rescan, trigger: rescan ? 'rescan' : 'manual' })
+      .catch(() => {}) // recorded in mail_sync.last_error and the log
+      .finally(() => scheduleMail(db, mail));
+    return mailStatus();
+  };
+  app.post('/api/mail/sync', () => startSync(false));
+  app.post('/api/mail/rescan', () => startSync(true));
+
+  app.get('/api/email-updates', (req) => {
+    const { state } = z.object({ state: z.enum(['pending', 'done']).default('pending') }).parse(req.query);
+    return listUpdates(db, state);
+  });
+  app.post('/api/email-updates/:id/apply', (req) =>
+    applyUpdate(db, idParam.parse(req.params).id, applyInputSchema.parse(req.body ?? {})),
+  );
+  app.post('/api/email-updates/:id/dismiss', (req) => dismissUpdate(db, idParam.parse(req.params).id));
+  app.post('/api/email-updates/:id/restore', (req) => restoreUpdate(db, idParam.parse(req.params).id));
+  app.post('/api/email-updates/:id/relabel', (req) =>
+    relabelUpdate(db, idParam.parse(req.params).id, relabelSchema.parse(req.body)),
+  );
+  app.post('/api/email-updates/:id/track', (req) =>
+    trackFromUpdate(db, idParam.parse(req.params).id, trackSchema.parse(req.body)),
+  );
+  app.post('/api/email-updates/:id/classify', (req) =>
+    classifyWithAi(db, mail, idParam.parse(req.params).id),
+  );
+
+  // ----- log files -----
+  app.get('/api/logs', () => ({ dir: DATA_DIR, files: listLogs() }));
+  app.get('/api/logs/:name', (req, reply) => {
+    const { name } = z.object({ name: z.string() }).parse(req.params);
+    const { lines } = z.object({ lines: z.coerce.number().int().min(1).max(20_000).default(2000) }).parse(req.query);
+    try {
+      return readLog(name, lines);
+    } catch {
+      return reply.status(404).send({ error: 'No such log file' });
+    }
   });
 
   // ----- dashboard -----

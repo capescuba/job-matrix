@@ -51,13 +51,16 @@ export class AnthropicProvider implements LLMProvider {
   ): Promise<StructuredResponse<z.infer<S>>> {
     const model = req.model ?? this.defaultModel;
     const constrained = req.constrained !== false;
+    // Older, smaller models (Haiku 4.5) take neither adaptive thinking nor an effort setting.
+    const basic = /haiku-4/.test(model);
+    const effort = basic ? undefined : req.effort;
     const format = zodOutputFormat(req.schema);
     const jsonSchema = JSON.stringify(z.toJSONSchema(req.schema));
     const messages: Anthropic.MessageParam[] = [{ role: 'user', content: req.prompt }];
     const params = {
       model,
       max_tokens: req.maxTokens ?? 16000,
-      thinking: { type: 'adaptive' as const, display: 'summarized' as const },
+      ...(!basic && { thinking: { type: 'adaptive' as const, display: 'summarized' as const } }),
       system: constrained
         ? req.system
         : `${req.system}\n\nOutput format: when you are done, reply with ONLY a JSON object — no prose before or after, no code fences — matching this JSON Schema:\n${jsonSchema}`,
@@ -72,11 +75,11 @@ export class AnthropicProvider implements LLMProvider {
         ],
       }),
       ...(constrained
-        ? { output_config: { format, ...(req.effort && { effort: req.effort }) } }
-        : req.effort && { output_config: { effort: req.effort } }),
+        ? { output_config: { format, ...(effort && { effort }) } }
+        : effort && { output_config: { effort } }),
     };
     const started = Date.now();
-    req.onEvent?.({ type: 'request', model, effort: req.effort ?? null });
+    req.onEvent?.({ type: 'request', model, effort: effort ?? null });
 
     const usage = {
       inputTokens: 0,

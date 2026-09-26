@@ -1,11 +1,17 @@
 import fs from 'node:fs';
 import fastifyStatic from '@fastify/static';
+import { createMailClient } from '@jm/mail';
 import { buildApp } from './app.ts';
 import { openDb } from './db/client.ts';
 import { WEB_DIST } from './paths.ts';
+import { logEvent, setLogSink } from './services/log.ts';
+import { scheduleMail } from './services/mail/sync.ts';
 
 const port = Number(process.env.API_PORT ?? 5174);
-const app = buildApp(openDb(), { logger: true });
+const db = openDb();
+const mail = createMailClient({ clientId: process.env.OUTLOOK_CLIENT_ID || null });
+const app = buildApp(db, { logger: true, mail });
+setLogSink(app.log);
 
 // Serve the built web app (used by the desktop launcher; dev uses Vite on :5173 instead).
 if (fs.existsSync(`${WEB_DIST}/index.html`)) {
@@ -27,14 +33,21 @@ if (idleMinutes > 0) {
   });
   setInterval(() => {
     if (Date.now() - last > idleMinutes * 60_000) {
-      app.log.info(`No activity for ${idleMinutes} min, shutting down`);
+      logEvent('app.idle-exit', `No activity for ${idleMinutes} min, shutting down`);
       app.close().finally(() => process.exit(0));
     }
   }, 30_000).unref();
 }
 
 // Bind to loopback only — this app holds personal data and has no auth.
-app.listen({ host: '127.0.0.1', port }).catch((err) => {
-  app.log.error(err);
-  process.exit(1);
-});
+app
+  .listen({ host: '127.0.0.1', port })
+  .then(() => {
+    logEvent('app.start', `Job Matrix started on port ${port}`, { port, pid: process.pid });
+    // Email checks: manual by default; otherwise as set on the Email page.
+    scheduleMail(db, mail, { startup: true });
+  })
+  .catch((err) => {
+    app.log.error(err);
+    process.exit(1);
+  });

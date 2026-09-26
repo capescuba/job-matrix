@@ -278,3 +278,66 @@ export const applicationAnswers = sqliteTable(
   },
   (t) => [index('application_answers_app').on(t.applicationId)],
 );
+
+/**
+ * Job-related emails found in your mailbox, each with what it seems to mean for an application.
+ * Nothing changes until you apply one; emails that aren't job-related are never stored.
+ */
+export const emailUpdates = sqliteTable(
+  'email_updates',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    messageId: text('message_id').notNull(),
+    receivedAt: text('received_at').notNull(),
+    fromName: text('from_name'),
+    fromAddr: text('from_addr'),
+    subject: text('subject').notNull(),
+    webLink: text('web_link'),
+    /** The start of the email (plain text, a few hundred characters). */
+    excerpt: text('excerpt'),
+    /** confirmation | rejection | interview | assessment | offer | viewed | unclear */
+    kind: text('kind').notNull(),
+    confidence: text('confidence').notNull().default('medium'),
+    /** The sentence that gave the kind away. */
+    evidence: text('evidence'),
+    /** Company and job title as the email names them. */
+    companyName: text('company_name'),
+    jobTitle: text('job_title'),
+    companyId: integer('company_id').references(() => companies.id, { onDelete: 'set null' }),
+    applicationId: integer('application_id').references(() => applications.id, {
+      onDelete: 'set null',
+    }),
+    /** How the application was found: title | only | only-open | ai | you */
+    matchedBy: text('matched_by'),
+    suggestedStatus: text('suggested_status'),
+    suggestedNextAction: text('suggested_next_action'),
+    /** 'rules' or 'ai'. */
+    classifiedBy: text('classified_by').notNull().default('rules'),
+    /** pending | applied | dismissed | noop (nothing to change) */
+    state: text('state').notNull().default('pending'),
+    activityId: integer('activity_id'),
+    usageId: integer('usage_id'),
+    createdAt: createdAt(),
+    resolvedAt: text('resolved_at'),
+  },
+  (t) => [
+    uniqueIndex('email_updates_message').on(t.messageId),
+    index('email_updates_state').on(t.state),
+    index('email_updates_app').on(t.applicationId),
+  ],
+);
+
+/** One row (id 1): mailbox checking settings and progress. */
+export const mailSync = sqliteTable('mail_sync', {
+  id: integer('id').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  /** -1 manual only (default), 0 when the app opens, else minutes between checks. */
+  intervalMinutes: integer('interval_minutes').notNull().default(-1),
+  /** Checked up to here (receivedDateTime of the newest message seen). */
+  watermark: text('watermark'),
+  lastSyncAt: text('last_sync_at'),
+  lastError: text('last_error'),
+  /** Last check: messages looked at, job-related ones found. */
+  scanned: integer('scanned').notNull().default(0),
+  found: integer('found').notNull().default(0),
+});

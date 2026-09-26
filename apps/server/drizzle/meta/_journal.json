@@ -85,6 +85,13 @@
       "when": 1790350490448,
       "tag": "0011_extension",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790374135943,
+      "tag": "0012_email_updates",
+      "breakpoints": true
     }
   ]
 }
