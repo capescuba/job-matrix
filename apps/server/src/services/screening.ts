@@ -5,6 +5,7 @@ import {
   type CaptureInput,
   type PostedInfo,
   type Status,
+  looksLikeCompanyName,
 } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import { applications, companies, contacts, jobs } from '../db/schema.ts';
@@ -96,6 +97,42 @@ export function parsePageTitle(pageTitle: string | null | undefined): {
   const parts = t.split(/\s+[|]\s+/);
   if (parts.length >= 2) return { title: parts[0].trim(), company: parts[1].trim() }; // "TPM | Acme"
   return { title: t, company: null };
+}
+
+/** Hosts that serve many companies' jobs — a hostname there says nothing about the company. */
+export const SHARED_HOSTS =
+  /(^|\.)(linkedin\.com|indeed\.com|glassdoor\.com|greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|workable\.com|wellfound\.com|builtin\.com|ziprecruiter\.com|google\.com|dice\.com|monster\.com|simplyhired\.com|otta\.com|welcometothejungle\.com|myworkdayjobs\.com)$/i;
+
+/** Job platforms where each company gets its own subdomain: githubinc.icims.com, x.eightfold.ai. */
+const TENANT_HOSTS =
+  /(^|\.)(icims\.com|eightfold\.ai|avature\.net|taleo\.net|jobvite\.com|bamboohr\.com|recruitee\.com|breezy\.hr|applytojob\.com|teamtailor\.com|pinpointhq\.com|rippling\.com|successfactors\.(com|eu))$/i;
+
+/** Words careers sites put around the company's name in their address. */
+const HOST_WORDS = /^(careers?|jobs?|apply|hiring|recruiting|talent|work|join|www\d*|en|us|global|external)$/i;
+
+/**
+ * Company from a careers site's own address: careers.oracle.com → "Oracle",
+ * jobs.netflix.com → "Netflix", metacareers.com → "Meta", careers-githubinc.icims.com →
+ * "Githubinc". Null on shared job boards (LinkedIn, Greenhouse, …).
+ */
+export function companyFromHost(url: string): string | null {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (SHARED_HOSTS.test(host)) return null;
+  const labels = host.split('.');
+  const twoLevelTld = /^(co|com|org|net|ac|gov)\.[a-z]{2}$/.test(labels.slice(-2).join('.'));
+  let name = TENANT_HOSTS.test(host)
+    ? labels.length > 2
+      ? labels[0]!
+      : ''
+    : (labels.at(twoLevelTld ? -3 : -2) ?? '');
+  name = name.replace(/^(careers?|jobs?)[-_]/i, '').replace(/[-_]?(careers?|jobs?)$/i, '');
+  if (!name || name.length < 2 || HOST_WORDS.test(name)) return null;
+  return name.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /** Company from an ATS board slug, e.g. jobs.ashbyhq.com/haydenai → "Haydenai". */
@@ -225,12 +262,15 @@ export async function captureJob(
     typeof ld?.hiringOrganization === 'string'
       ? ld.hiringOrganization
       : ld?.hiringOrganization?.name;
+  // A template pick that caught a heading ("About Us") rather than the name doesn't count; the
+  // careers site's own address (careers.oracle.com → Oracle) is a fallback.
   const company =
-    clean(f.company) ??
+    (looksLikeCompanyName(f.company) ? clean(f.company) : null) ??
     clean(orgName) ??
     clean(fetched?.company) ??
     fromTitle.company ??
     companyFromBoardUrl(url) ??
+    companyFromHost(url) ??
     'Unknown';
   const title =
     clean(f.title) ??

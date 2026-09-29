@@ -1,7 +1,13 @@
 import { and, desc, eq, like } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProvider, type LLMProvider } from '@jm/ai';
-import { shortText, type CompanyResearch, type FitResult, type Status } from '@jm/shared';
+import {
+  looksLikeCompanyName,
+  shortText,
+  type CompanyResearch,
+  type FitResult,
+  type Status,
+} from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import {
   activities,
@@ -17,7 +23,9 @@ import { NotFoundError, listApplications, type ApplicationRow } from './applicat
 import { latestResearch, isStale } from './research.ts';
 import { getDefaultResume, getProfile } from './resume.ts';
 import {
+  SHARED_HOSTS,
   companyFromBoardUrl,
+  companyFromHost,
   findTrackedByUrl,
   jobPostingFromJsonLd,
   normalizeUrl,
@@ -29,9 +37,7 @@ import { getUsageSummary, recordUsage } from './usage.ts';
 
 // ---------- matching a page to what you already track ----------
 
-/** Hosts that serve many companies' jobs — a hostname there says nothing about the company. */
-export const SHARED_HOSTS =
-  /(^|\.)(linkedin\.com|indeed\.com|glassdoor\.com|greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|workable\.com|wellfound\.com|builtin\.com|ziprecruiter\.com|google\.com|dice\.com|monster\.com|simplyhired\.com|otta\.com|welcometothejungle\.com)$/i;
+export { SHARED_HOSTS };
 
 /** "DocuSign, Inc." and "Docusign" → "docusign". */
 export function companyKey(name: string | null | undefined): string {
@@ -229,7 +235,12 @@ export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: type
       : ld?.hiringOrganization?.name;
   const detected = {
     title: input.fields?.title?.trim() || ld?.title?.trim() || fromTitle.title || null,
-    company: input.fields?.company?.trim() || ldOrg?.trim() || null,
+    // A template pick that caught a heading ("About Us") rather than the name doesn't count; the
+    // page title or the careers site's address (careers.oracle.com → Oracle) is used instead.
+    company:
+      (looksLikeCompanyName(input.fields?.company) ? input.fields!.company!.trim() : null) ||
+      ldOrg?.trim() ||
+      null,
   };
 
   // Which company: the tracked job's, then names the page states, then what the address says.
@@ -258,9 +269,16 @@ export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: type
     hostCompany ??
     byKey(companyFromBoardUrl(url)) ??
     (host ? all.find((c) => hostOf(c.website) === host) : undefined) ??
+    // The careers site's own address: careers.oracle.com → Oracle.
+    byKey(companyFromHost(url)) ??
     byKey(fromTitle.company);
   if (!detected.company)
-    detected.company = company?.name ?? fromTitle.company ?? companyFromBoardUrl(url) ?? null;
+    detected.company =
+      company?.name ??
+      fromTitle.company ??
+      companyFromBoardUrl(url) ??
+      companyFromHost(url) ??
+      null;
 
   // The same role under another address (e.g. the LinkedIn copy of a company-site posting).
   const similar =

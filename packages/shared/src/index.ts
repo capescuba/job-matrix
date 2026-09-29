@@ -294,6 +294,18 @@ export function shortField(v: string | null | undefined, max = 200): string | nu
   if (!line) return null;
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 }
+/** Headings a "Company" template pick can land on instead of the name. */
+const NOT_A_COMPANY =
+  /^(about( us| the (company|team|role|job))?|overview|job (details|description|summary)|description|details|summary|careers?|jobs?|home|apply( now)?|company|location|responsibilities|qualifications|who we are|our company|benefits)$/i;
+
+/** Whether a template's "Company" text is plausibly a company name (short, not a heading). */
+export function looksLikeCompanyName(v: string | null | undefined): v is string {
+  const s = shortField(v, 200);
+  return Boolean(
+    s && s.length <= 60 && s.split(' ').length <= 6 && !NOT_A_COMPANY.test(s.replace(/[:.]$/, '')),
+  );
+}
+
 /** Optional short text, trimmed to one line (see shortField); never rejected for length. */
 export const shortText = (max = 200) =>
   z
