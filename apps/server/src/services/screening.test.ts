@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.ts';
 import { openDb, type Db } from '../db/client.ts';
+import { createApplication } from './applications.ts';
 import { unscoredApplicationIds } from './fit.ts';
 import {
   captureJob,
   companyFromBoardUrl,
+  findTrackedByUrl,
   normalizeUrl,
   parseApplicants,
   parsePageTitle,
@@ -55,11 +57,54 @@ describe('normalizeUrl', () => {
       'https://job-boards.greenhouse.io/acme/jobs/123',
     ],
     ['https://jobs.lever.co/zoox/5c37/', 'https://jobs.lever.co/zoox/5c37'],
+    ['https://jobs.lever.co/zoox/5c37/apply?lever-origin=applied', 'https://jobs.lever.co/zoox/5c37'],
+    // Greenhouse: every form of one job is the same job.
     [
       'https://boards.greenhouse.io/embed/job_app?for=acme&token=99',
-      'https://boards.greenhouse.io/embed/job_app?for=acme&token=99',
+      'https://job-boards.greenhouse.io/acme/jobs/99',
+    ],
+    ['https://boards.greenhouse.io/Acme/jobs/99?t=abc', 'https://job-boards.greenhouse.io/acme/jobs/99'],
+    [
+      'https://www.acme.com/careers/job?gh_jid=99&utm_source=li&foo=bar',
+      'https://www.acme.com/careers/job?gh_jid=99',
+    ],
+    // Oracle: the job page (with its search parameters) and the preview after applying.
+    [
+      'https://careers.oracle.com/en/sites/jobsearch/job/334011?keyword=Principal%20TPM&location=United%20States',
+      'https://careers.oracle.com/en/sites/jobsearch/job/334011',
+    ],
+    [
+      'https://careers.oracle.com/en/sites/jobsearch/my-profile/preview/334011',
+      'https://careers.oracle.com/en/sites/jobsearch/job/334011',
+    ],
+    [
+      'https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/2001/?utm_medium=x',
+      'https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/2001',
+    ],
+    [
+      'https://jobs.ashbyhq.com/openai/ad958934-fd89-4033-8b13-1a4871d8073c/application?utm_source=x',
+      'https://jobs.ashbyhq.com/openai/ad958934-fd89-4033-8b13-1a4871d8073c',
+    ],
+    [
+      'https://adobe.wd5.myworkdayjobs.com/external_experienced/job/San-Jose/Principal-TPM_R170800/apply/applyManually',
+      'https://adobe.wd5.myworkdayjobs.com/external_experienced/job/San-Jose/Principal-TPM_R170800',
     ],
   ])('%s', (input, expected) => expect(normalizeUrl(input)).toBe(expected));
+});
+
+describe('findTrackedByUrl', () => {
+  it('finds a job from another address for it (Oracle preview after applying)', () => {
+    const id = createApplication(db, {
+      company: 'Oracle',
+      title: 'Senior Principal Technical Program Manager',
+      status: 'Screening',
+      url: 'https://careers.oracle.com/en/sites/jobsearch/job/334011?keyword=Principal%20Technical%20Program%20Manager&location=United%20States',
+    });
+    expect(
+      findTrackedByUrl(db, 'https://careers.oracle.com/en/sites/jobsearch/my-profile/preview/334011'),
+    ).toMatchObject({ applicationId: id, status: 'Screening' });
+    expect(findTrackedByUrl(db, 'https://careers.oracle.com/en/sites/jobsearch/job/334012')).toBeNull();
+  });
 });
 
 describe('title/company without AI', () => {

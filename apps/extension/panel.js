@@ -373,6 +373,7 @@ function postingSection() {
             ? `<button class="${early ? 'primary' : ''}" data-action="score-fit" data-id="${t.applicationId}" ${scoring ? 'disabled' : ''} title="Fit score only — company research stays separate">${scoring ? 'Scoring…' : `Score fit · ~${money(state.ctx.costs.fit)}`}</button>`
             : ''
         }
+        ${early && open ? `<button class="${t.fitScore != null ? 'primary' : ''}" data-action="mark-applied" ${state.busy === 'applied' ? 'disabled' : ''} title="Move it to Applied, dated today">✓ I applied</button>` : ''}
         ${open && t.status === 'Screening' && !state.passing ? '<button class="danger" data-action="pass">Pass</button>' : ''}
         <button class="${open && t.fitScore == null && early ? '' : 'primary'}" data-action="open" data-path="/applications/${t.applicationId}">Open in Job Matrix</button>
       </div>
@@ -629,6 +630,29 @@ async function pass() {
   await refresh();
 }
 
+/** You applied on this site: move the job to Applied, dated today, with a note in its timeline. */
+async function markApplied() {
+  const t = state.ctx?.tracked;
+  if (!t) return;
+  state.busy = 'applied';
+  render();
+  try {
+    await api(`/api/applications/${t.applicationId}/activities`, {
+      method: 'POST',
+      body: {
+        at: new Date().toLocaleDateString('en-CA'),
+        kind: 'Applied',
+        summary: 'Applied (marked from the Chrome extension)',
+        setStatus: 'Applied',
+      },
+    });
+  } catch (e) {
+    state.notice = { tone: 'error', text: e.message || String(e) };
+  }
+  state.busy = null;
+  await refresh();
+}
+
 async function research(companyId) {
   state.researching = true;
   render();
@@ -721,6 +745,7 @@ document.addEventListener('click', async (e) => {
   } else if (a === 'add') add(false);
   else if (a === 'add-score') add(true);
   else if (a === 'score-fit') scoreFit(Number(el.dataset.id));
+  else if (a === 'mark-applied') markApplied();
   else if (a === 'pass') {
     state.passing = true;
     render();
