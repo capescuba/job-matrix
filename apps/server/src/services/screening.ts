@@ -27,18 +27,49 @@ const TRACKING_PARAM =
 
 /**
  * One canonical URL per posting, so a re-capture is recognised: drops tracking parameters and
- * the fragment, and turns LinkedIn search/collection links into /jobs/view/<id>/.
+ * the fragment, and maps the different addresses job sites use for one job onto one:
+ * - LinkedIn search/collection links → /jobs/view/<id>/
+ * - Oracle Recruiting Cloud (careers.oracle.com, *.oraclecloud.com): the job page, the
+ *   "my profile" preview after applying, search parameters → …/sites/<site>/job/<id>
+ * - Greenhouse: boards / job-boards / the embedded form → job-boards.greenhouse.io/<co>/jobs/<id>;
+ *   a company site's ?gh_jid=<id> keeps just that parameter
+ * - Lever /apply, Ashby /application and Workday /apply pages → the job itself
  */
 export function normalizeUrl(raw: string): string {
   const u = new URL(raw.trim());
   u.hash = '';
   u.hostname = u.hostname.toLowerCase();
-  if (u.hostname.endsWith('linkedin.com')) {
+  const host = u.hostname;
+  if (host.endsWith('linkedin.com')) {
     const id =
       u.searchParams.get('currentJobId') ??
       u.pathname.match(/\/jobs\/view\/(?:[^/]*?-)?(\d+)/)?.[1];
     if (id) return `https://www.linkedin.com/jobs/view/${id}/`;
   }
+  // Oracle Recruiting Cloud: …/sites/<site>/job/<id>, …/my-profile/preview/<id>, …/requisitions/preview/<id>.
+  const oracle = u.pathname.match(
+    /^(.*?\/sites\/[^/]+)\/(?:job|my-profile\/preview|requisitions\/preview)\/(\d+)(?:\/|$)/i,
+  );
+  if (oracle && (host === 'careers.oracle.com' || host.endsWith('.oraclecloud.com')))
+    return `https://${host}${oracle[1]}/job/${oracle[2]}`;
+  if (host.endsWith('greenhouse.io')) {
+    const embed = u.pathname.startsWith('/embed/')
+      ? [u.searchParams.get('for'), u.searchParams.get('token')]
+      : null;
+    const path = u.pathname.match(/^\/([^/]+)\/jobs\/(\d+)/);
+    const [co, id] = embed ?? [path?.[1], path?.[2]];
+    if (co && id) return `https://job-boards.greenhouse.io/${co.toLowerCase()}/jobs/${id}`;
+  }
+  // A company's own careers page embedding Greenhouse: the job is ?gh_jid=<id>.
+  const ghJid = u.searchParams.get('gh_jid');
+  if (ghJid && /^\d+$/.test(ghJid)) {
+    u.search = '';
+    u.searchParams.set('gh_jid', ghJid);
+  }
+  if (host === 'jobs.lever.co') u.pathname = u.pathname.replace(/\/apply\/?$/, '');
+  if (host === 'jobs.ashbyhq.com') u.pathname = u.pathname.replace(/\/application\/?$/, '');
+  if (host.endsWith('myworkdayjobs.com'))
+    u.pathname = u.pathname.replace(/\/(apply(\/[^/]*)?|autofillWithResume|applyManually)\/?$/i, '');
   for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM.test(k)) u.searchParams.delete(k);
   let s = u.toString();
   if (s.endsWith('/') && u.pathname !== '/' && !u.search) s = s.slice(0, -1);
