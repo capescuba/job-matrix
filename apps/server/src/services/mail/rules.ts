@@ -6,6 +6,7 @@ import { CLOSED_STATUSES, type ActivityKind, type Status } from '@jm/shared';
 import type { MailMeta } from '@jm/mail';
 import type { Db } from '../../db/client.ts';
 import { companies } from '../../db/schema.ts';
+import { allAliases } from '../aliases.ts';
 import { listApplications } from '../applications.ts';
 import { SHARED_HOSTS, companyKey, titleOverlap } from '../extension.ts';
 
@@ -54,6 +55,7 @@ export function rootDomain(host: string): string {
 }
 
 export interface MatchContext {
+  /** Tracked companies by their names and aliases (an alias entry carries the company's own name). */
   companies: { id: number; name: string; key: string; compact: string }[];
   apps: {
     id: number;
@@ -91,9 +93,18 @@ export function buildMatchContext(db: Db): MatchContext {
   for (const r of rows) learn(r.url, r.companyId);
   for (const [k, v] of domains) if (v === -1) domains.delete(k);
   return {
-    companies: all
-      .map((c) => ({ id: c.id, name: c.name, key: companyKey(c.name), compact: compact(c.name) }))
-      .filter((c) => c.compact.length >= 2),
+    companies: [
+      ...all.map((c) => ({
+        id: c.id,
+        name: c.name,
+        key: companyKey(c.name),
+        compact: compact(c.name),
+      })),
+      ...allAliases(db).flatMap((a) => {
+        const c = all.find((x) => x.id === a.companyId);
+        return c ? [{ id: c.id, name: c.name, key: a.key, compact: a.key.replace(/ /g, '') }] : [];
+      }),
+    ].filter((c) => c.compact.length >= 2),
     apps: rows.map((r) => ({
       id: r.id,
       companyId: r.companyId,
@@ -333,7 +344,31 @@ export interface Match {
   jobTitle: string | null;
   companyId: number | null;
   applicationId: number | null;
-  matchedBy: 'title' | 'only' | 'only-open' | null;
+  /** title-only: no company matched, but exactly one tracked job has this title — check it. */
+  matchedBy: 'title' | 'only' | 'only-open' | 'title-only' | null;
+}
+
+/** A job title close enough to count as the same role when nothing else links them. */
+const SAME_TITLE = 0.85;
+
+/** Which of a company's applications the email is about, if that can be told. */
+export function pickApplication(
+  ctx: MatchContext,
+  companyId: number,
+  jobTitle: string | null,
+): Pick<Match, 'applicationId' | 'matchedBy'> {
+  const apps = ctx.apps.filter((a) => a.companyId === companyId);
+  if (jobTitle && apps.length) {
+    const scored = apps
+      .map((a) => ({ a, s: titleOverlap(a.title, jobTitle) }))
+      .sort((x, y) => y.s - x.s);
+    if (scored[0]!.s >= 0.5 && (scored.length === 1 || scored[0]!.s > scored[1]!.s))
+      return { applicationId: scored[0]!.a.id, matchedBy: 'title' };
+  }
+  if (apps.length === 1) return { applicationId: apps[0]!.id, matchedBy: 'only' };
+  const open = apps.filter((a) => !CLOSED_STATUSES.includes(a.status) && a.status !== 'Passed');
+  if (open.length === 1) return { applicationId: open[0]!.id, matchedBy: 'only-open' };
+  return { applicationId: null, matchedBy: null };
 }
 
 /** Which tracked company, then which of its applications, the email is about. */
@@ -366,42 +401,37 @@ export function matchApplication(meta: MailMeta, body: string, ctx: MatchContext
     // A tracked company named in the subject.
     company = companiesNamedIn(meta.subject, ctx)[0];
   }
-  const companyName = company?.name ?? names[0] ?? null;
-  if (!company)
-    return { companyName, jobTitle, companyId: null, applicationId: null, matchedBy: null };
-
-  const apps = ctx.apps.filter((a) => a.companyId === company.id);
-  if (jobTitle && apps.length) {
-    const scored = apps
-      .map((a) => ({ a, s: titleOverlap(a.title, jobTitle) }))
-      .sort((x, y) => y.s - x.s);
-    if (scored[0]!.s >= 0.5 && (scored.length === 1 || scored[0]!.s > scored[1]!.s))
-      return {
-        companyName,
-        jobTitle,
-        companyId: company.id,
-        applicationId: scored[0]!.a.id,
-        matchedBy: 'title',
-      };
+  if (!company) {
+    // Renamed or acquired companies (e.g. an email from "SpaceXAI" about a job you track at
+    // Cursor): the same job title at exactly one tracked job is a possible match to confirm.
+    if (jobTitle) {
+      const scored = ctx.apps
+        .map((a) => ({ a, s: titleOverlap(a.title, jobTitle) }))
+        .filter((x) => x.s >= SAME_TITLE)
+        .sort((x, y) => y.s - x.s);
+      if (scored.length && (scored.length === 1 || scored[0]!.s > scored[1]!.s))
+        return {
+          companyName: names[0] ?? null,
+          jobTitle,
+          companyId: scored[0]!.a.companyId,
+          applicationId: scored[0]!.a.id,
+          matchedBy: 'title-only',
+        };
+    }
+    return {
+      companyName: names[0] ?? null,
+      jobTitle,
+      companyId: null,
+      applicationId: null,
+      matchedBy: null,
+    };
   }
-  if (apps.length === 1)
-    return {
-      companyName,
-      jobTitle,
-      companyId: company.id,
-      applicationId: apps[0]!.id,
-      matchedBy: 'only',
-    };
-  const open = apps.filter((a) => !CLOSED_STATUSES.includes(a.status) && a.status !== 'Passed');
-  if (open.length === 1)
-    return {
-      companyName,
-      jobTitle,
-      companyId: company.id,
-      applicationId: open[0]!.id,
-      matchedBy: 'only-open',
-    };
-  return { companyName, jobTitle, companyId: company.id, applicationId: null, matchedBy: null };
+  return {
+    companyName: company.name,
+    jobTitle,
+    companyId: company.id,
+    ...pickApplication(ctx, company.id, jobTitle),
+  };
 }
 
 // ---------- what to suggest ----------

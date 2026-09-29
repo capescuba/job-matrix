@@ -14,6 +14,7 @@ import { api, type ApplicationDetail, type FitAssessment } from '../api.ts';
 import { StatusBadge, postedOf } from '../components/badges.tsx';
 import { ActivityLog } from '../components/ActivityLog.tsx';
 import { ApplicationAnswers } from '../components/ApplicationAnswers.tsx';
+import { CompanyAliases } from '../components/CompanyAliases.tsx';
 import { CompanyInsights } from '../components/CompanyInsights.tsx';
 import { useDecisionData } from '../components/Decision.tsx';
 import { FitDetails, FitSummary, InterviewPrep } from '../components/FitPanel.tsx';
@@ -149,7 +150,10 @@ function Detail({ data }: { data: ApplicationDetail }) {
             </>
           )}
           {tab === 'company' && (
-            <CompanyInsights companyId={company.id} companyName={company.name} />
+            <>
+              <CompanyInsights companyId={company.id} companyName={company.name} />
+              <CompanyAliases companyId={company.id} companyName={company.name} />
+            </>
           )}
           {tab === 'job' && <JobCard data={data} onSaved={invalidate} />}
         </div>

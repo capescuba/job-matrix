@@ -12,6 +12,7 @@ import {
   createApplication,
   updateApplication,
 } from '../applications.ts';
+import { addAlias } from '../aliases.ts';
 import { logEvent } from '../log.ts';
 import { getSettings } from '../settings.ts';
 import { recordUsage, repricedAverage, type Feature } from '../usage.ts';
@@ -19,6 +20,8 @@ import {
   EMAIL_KINDS,
   activityKindFor,
   buildMatchContext,
+  matchApplication,
+  pickApplication,
   suggest,
   type EmailKind,
 } from './rules.ts';
@@ -90,6 +93,8 @@ export const applyInputSchema = z.object({
   /** Override the suggested status; null = only log the email. */
   status: z.enum(STATUSES).nullable().optional(),
   nextAction: z.string().trim().max(300).nullable().optional(),
+  /** Remember this name (as the email gave it) as another name for the job's company. */
+  rememberAlias: z.string().trim().max(200).nullable().optional(),
 });
 
 const summaryOf = (u: typeof emailUpdates.$inferSelect) => {
@@ -134,6 +139,7 @@ export function applyUpdate(db: Db, id: number, raw: z.input<typeof applyInputSc
     applicationId,
     status: status ?? null,
   });
+  if (input.rememberAlias) rememberAlias(db, applicationId, input.rememberAlias);
   return { ...getUpdate(db, id), activity };
 }
 
@@ -160,8 +166,83 @@ export function restoreUpdate(db: Db, id: number) {
   return getUpdate(db, id);
 }
 
+/** Saves an alias for the application's company, then re-matches what's waiting for review. */
+function rememberAlias(db: Db, applicationId: number, alias: string) {
+  const c = db
+    .select({ companyId: jobs.companyId, name: companies.name })
+    .from(applications)
+    .innerJoin(jobs, eq(jobs.id, applications.jobId))
+    .innerJoin(companies, eq(companies.id, jobs.companyId))
+    .where(eq(applications.id, applicationId))
+    .get();
+  if (!c) return;
+  try {
+    if (addAlias(db, c.companyId, alias))
+      logEvent('company.alias', `Remembered “${alias}” as another name for ${c.name}`, {
+        companyId: c.companyId,
+        alias,
+      });
+  } catch {
+    // e.g. it's another tracked company's name: nothing to remember
+  }
+  rematchPending(db);
+}
+
+/**
+ * After an alias is added or removed: re-matches emails still waiting for review that have no
+ * job yet (or only a job-title guess), using what was saved of them.
+ */
+export function rematchPending(db: Db): number {
+  const ctx = buildMatchContext(db);
+  const rows = db.select().from(emailUpdates).where(eq(emailUpdates.state, 'pending')).all();
+  let changed = 0;
+  for (const u of rows) {
+    if (u.applicationId && u.matchedBy !== 'title-only') continue;
+    const m = matchApplication(
+      {
+        id: u.messageId,
+        subject: u.subject,
+        from: { name: u.fromName, address: u.fromAddr },
+        replyTo: [],
+        receivedAt: u.receivedAt,
+        preview: '',
+        folderId: null,
+        webLink: u.webLink,
+        conversationId: null,
+      },
+      u.excerpt ?? '',
+      ctx,
+    );
+    if (
+      m.applicationId === u.applicationId &&
+      m.companyId === u.companyId &&
+      m.matchedBy === u.matchedBy
+    )
+      continue;
+    refreshSuggestion(
+      db,
+      u.id,
+      {
+        companyId: m.companyId,
+        applicationId: m.applicationId,
+        matchedBy: m.matchedBy,
+        companyName: m.companyName ?? u.companyName,
+        jobTitle: m.jobTitle ?? u.jobTitle,
+      },
+      { allowNoop: true },
+    );
+    changed++;
+  }
+  return changed;
+}
+
 /** Re-reads the suggestion for a (possibly changed) kind and application. */
-function refreshSuggestion(db: Db, id: number, patch: Partial<typeof emailUpdates.$inferInsert>) {
+function refreshSuggestion(
+  db: Db,
+  id: number,
+  patch: Partial<typeof emailUpdates.$inferInsert>,
+  opts: { allowNoop?: boolean } = {},
+) {
   const u = { ...getUpdate(db, id), ...patch };
   const app = u.applicationId
     ? (db
@@ -179,7 +260,12 @@ function refreshSuggestion(db: Db, id: number, patch: Partial<typeof emailUpdate
       ...patch,
       suggestedStatus: s.status,
       suggestedNextAction: s.nextAction,
-      state: u.state === 'applied' ? 'applied' : 'pending',
+      state:
+        u.state === 'applied'
+          ? 'applied'
+          : opts.allowNoop && s.noop && u.matchedBy !== 'title-only'
+            ? 'noop'
+            : 'pending',
     })
     .where(eq(emailUpdates.id, id))
     .run();
@@ -190,6 +276,10 @@ function refreshSuggestion(db: Db, id: number, patch: Partial<typeof emailUpdate
 export const relabelSchema = z.object({
   kind: z.enum(EMAIL_KINDS).optional(),
   applicationId: z.number().int().nullable().optional(),
+  /** "It's from a company I track": that company (then its job is picked by title if it can be). */
+  companyId: z.number().int().optional(),
+  /** With companyId: remember the email's company name as another name for it. */
+  rememberAlias: z.boolean().optional(),
 });
 export function relabelUpdate(db: Db, id: number, raw: z.input<typeof relabelSchema>) {
   const input = relabelSchema.parse(raw);
@@ -208,6 +298,33 @@ export function relabelUpdate(db: Db, id: number, raw: z.input<typeof relabelSch
       if (!c) throw new NotFoundError(`Application ${input.applicationId} not found`);
       patch.companyId = c.companyId;
     }
+  }
+  if (input.companyId !== undefined && input.applicationId === undefined) {
+    const u = getUpdate(db, id);
+    const company = db.select().from(companies).where(eq(companies.id, input.companyId)).get();
+    if (!company) throw new NotFoundError(`Company ${input.companyId} not found`);
+    if (input.rememberAlias && u.companyName) {
+      try {
+        if (addAlias(db, company.id, u.companyName))
+          logEvent(
+            'company.alias',
+            `Remembered “${u.companyName}” as another name for ${company.name}`,
+            {
+              companyId: company.id,
+              alias: u.companyName,
+            },
+          );
+      } catch {
+        // another tracked company's name
+      }
+    }
+    Object.assign(patch, {
+      companyId: company.id,
+      ...pickApplication(buildMatchContext(db), company.id, u.jobTitle),
+    });
+    const row = refreshSuggestion(db, id, patch);
+    if (input.rememberAlias) rematchPending(db);
+    return row;
   }
   return refreshSuggestion(db, id, patch);
 }

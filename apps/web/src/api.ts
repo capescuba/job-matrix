@@ -195,15 +195,36 @@ export const api = {
     request<EmailUpdateRow[]>('GET', `/api/email-updates?state=${state}`),
   applyEmailUpdate: (
     id: number,
-    body: { applicationId?: number; status?: Status | null; nextAction?: string | null } = {},
+    body: {
+      applicationId?: number;
+      status?: Status | null;
+      nextAction?: string | null;
+      rememberAlias?: string | null;
+    } = {},
   ) => request('POST', `/api/email-updates/${id}/apply`, body),
   dismissEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/dismiss`),
   restoreEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/restore`),
-  relabelEmailUpdate: (id: number, body: { kind?: EmailKind; applicationId?: number | null }) =>
+  relabelEmailUpdate: (
+    id: number,
+    body: {
+      kind?: EmailKind;
+      applicationId?: number | null;
+      companyId?: number;
+      rememberAlias?: boolean;
+    },
+  ) =>
     request('POST', `/api/email-updates/${id}/relabel`, body),
   trackEmailUpdate: (id: number, body: { company: string; title: string }) =>
     request('POST', `/api/email-updates/${id}/track`, body),
   classifyEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/classify`),
+
+  // ----- companies and the other names they go by -----
+  companies: () => request<{ id: number; name: string }[]>('GET', '/api/companies'),
+  aliases: (companyId: number) =>
+    request<{ id: number; alias: string; createdAt: string }[]>('GET', `/api/companies/${companyId}/aliases`),
+  addAlias: (companyId: number, alias: string) =>
+    request('POST', `/api/companies/${companyId}/aliases`, { alias }),
+  removeAlias: (id: number) => request<void>('DELETE', `/api/aliases/${id}`),
 
   // ----- logs -----
   logs: () => request<{ dir: string; files: LogFile[] }>('GET', '/api/logs'),
