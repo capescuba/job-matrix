@@ -281,6 +281,39 @@ export interface GateReason {
 
 const optText = z.string().trim().max(200_000).nullable().optional();
 
+/**
+ * A short field (title, company, location, salary) as a page gave it: its first non-empty line,
+ * spaces tidied, at most `max` characters. A site template that points at a big block of the
+ * page then still yields something sensible instead of an error.
+ */
+export function shortField(v: string | null | undefined, max = 200): string | null {
+  const line = (v ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .find(Boolean);
+  if (!line) return null;
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+}
+/** Headings a "Company" template pick can land on instead of the name. */
+const NOT_A_COMPANY =
+  /^(about( us| the (company|team|role|job))?|overview|job (details|description|summary)|description|details|summary|careers?|jobs?|home|apply( now)?|company|location|responsibilities|qualifications|who we are|our company|benefits)$/i;
+
+/** Whether a template's "Company" text is plausibly a company name (short, not a heading). */
+export function looksLikeCompanyName(v: string | null | undefined): v is string {
+  const s = shortField(v, 200);
+  return Boolean(
+    s && s.length <= 60 && s.split(' ').length <= 6 && !NOT_A_COMPANY.test(s.replace(/[:.]$/, '')),
+  );
+}
+
+/** Optional short text, trimmed to one line (see shortField); never rejected for length. */
+export const shortText = (max = 200) =>
+  z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => (v == null ? v : shortField(v, max)));
+
 /** What the Chrome extension (or "Screen a URL") sends to capture a job. */
 export const captureSchema = z.object({
   url: z.string().trim().url(),
@@ -294,9 +327,10 @@ export const captureSchema = z.object({
   /** Fields read by a site template (selectors). */
   fields: z
     .object({
-      title: optText,
-      company: optText,
-      location: optText,
+      title: shortText(),
+      company: shortText(),
+      location: shortText(),
+      // A pay range can sit a few lines into a block; the server parses it out of this.
       salaryText: optText,
       descriptionText: optText,
     })

@@ -351,7 +351,8 @@ describe('screening routes & inbox behaviour', () => {
       await app.inject({
         method: 'POST',
         url: '/api/screen/url',
-        payload: { url: 'https://careers.example.com/j/5' },
+        // An address that names no company (careers.example.com would now give "Example").
+        payload: { url: 'https://www.jobs.com/j/5' },
       })
     ).json();
     expect(a.company).toBe('Unknown');
