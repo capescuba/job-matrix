@@ -280,11 +280,34 @@ function draw() {
   }
   root.innerHTML = [
     state.notice ? `<section class="${state.notice.tone}">${esc(state.notice.text)}</section>` : '',
+    linkedinProfileSection(),
     postingSection(),
     companySection(),
     helperSection(),
     teachSection(),
   ].join('');
+}
+
+/** On a linkedin.com/in/ profile: import it as your LinkedIn profile (for the career profile). */
+function linkedinProfileSection() {
+  if (!/^https:\/\/[^/]*linkedin\.com\/in\/[^/]+/.test(state.tab?.url ?? '')) return '';
+  const busy = state.busy === 'linkedin';
+  return `<section><h2>LinkedIn profile</h2>
+    <p class="small muted">If this is your profile, Job Matrix can read it (about, every role in full, projects, skills, certifications, recommendations) to build your career profile for fit scoring. A tab opens, pages through it and closes.</p>
+    <div class="row"><button class="primary" data-action="import-linkedin" ${busy ? 'disabled' : ''}>${busy ? 'Importing…' : 'Import my LinkedIn profile'}</button></div>
+  </section>`;
+}
+
+async function importMyLinkedIn() {
+  state.busy = 'linkedin';
+  state.notice = null;
+  render();
+  const r = await chrome.runtime.sendMessage({ type: 'jm-import-linkedin', url: state.tab.url });
+  state.busy = null;
+  state.notice = r?.ok
+    ? { tone: 'good', text: `Imported your LinkedIn profile (${(r.summary?.chars ?? 0).toLocaleString()} characters). Build your career profile on Job Matrix's Profile page.` }
+    : { tone: 'error', text: r?.error || 'The import failed.' };
+  render();
 }
 
 function appLine(a) {
@@ -746,6 +769,7 @@ document.addEventListener('click', async (e) => {
   else if (a === 'add-score') add(true);
   else if (a === 'score-fit') scoreFit(Number(el.dataset.id));
   else if (a === 'mark-applied') markApplied();
+  else if (a === 'import-linkedin') importMyLinkedIn();
   else if (a === 'pass') {
     state.passing = true;
     render();

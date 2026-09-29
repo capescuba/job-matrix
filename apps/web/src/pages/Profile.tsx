@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { api } from '../api.ts';
 import { AiSettings } from '../components/AiSettings.tsx';
+import { CareerProfileCard } from '../components/CareerProfileCard.tsx';
+import { LinkedInCard } from '../components/LinkedInCard.tsx';
 import { CriteriaEditor } from '../components/CriteriaEditor.tsx';
 import { Button, Card, ErrorText, Field, Input } from '../components/ui.tsx';
 
@@ -114,6 +116,8 @@ export default function ProfilePage() {
         </Card>
         <AiSettings />
       </div>
+      <LinkedInCard summary={data?.linkedin} />
+      <CareerProfileCard />
       <CriteriaEditor profile={data?.profile} />
     </div>
   );

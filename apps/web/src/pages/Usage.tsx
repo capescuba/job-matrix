@@ -20,6 +20,7 @@ const FEATURE_LABELS: Record<string, string> = {
   research: 'Company research',
   answer: 'Application answers',
   email: 'Email updates',
+  profile: 'Career profile',
 };
 
 export default function UsagePage() {

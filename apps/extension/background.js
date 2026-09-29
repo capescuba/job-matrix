@@ -2,6 +2,7 @@
 // right-click menu.
 import { api, openInApp } from './api.js';
 import { captureBody, readTab } from './capture.js';
+import { importLinkedIn } from './linkedin.js';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -29,4 +30,40 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   } catch (e) {
     console.error('Job Matrix: could not add the selection', e);
   }
+});
+
+// ---------- LinkedIn profile import ----------
+// Started from Job Matrix's Profile page (an external message from the app's own origin, see
+// externally_connectable) or from the side panel on your own profile. One import at a time.
+let importing = null;
+
+async function runImport(url) {
+  importing ??= (async () => {
+    try {
+      const read = await importLinkedIn(url);
+      const summary = await api('/api/linkedin', { method: 'POST', body: read });
+      return { ok: true, summary };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    } finally {
+      importing = null;
+    }
+  })();
+  return importing;
+}
+
+chrome.runtime.onMessageExternal.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === 'jm-ping') {
+    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+    return false;
+  }
+  if (msg?.type !== 'jm-import-linkedin') return false;
+  runImport(msg.url).then(sendResponse);
+  return true; // answers later
+});
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type !== 'jm-import-linkedin') return false;
+  runImport(msg.url).then(sendResponse);
+  return true;
 });

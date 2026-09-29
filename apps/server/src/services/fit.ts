@@ -23,17 +23,17 @@ import { currentEffort } from './settings.ts';
 import { recordUsage } from './usage.ts';
 
 /** Bump when the prompt or schema changes so cached assessments are recomputed. */
-export const FIT_PROMPT_VERSION = 'tpm-v4';
+export const FIT_PROMPT_VERSION = 'tpm-v5';
 
 export const FIT_SYSTEM_PROMPT = `You are a seasoned Technical Program Manager hiring manager and recruiter who has hired TPMs at large tech companies and startups. You assess how well a specific candidate fits a specific job posting, honestly and specifically, the way a trusted advisor would.
 
 How to assess:
 - Read the posting for what the role truly needs: program scope and scale, the technical domain, the level (TPM, Senior, Staff, Principal, Director), years required, office days, travel, employment type and hard requirements.
-- Compare against evidence in the resume only. Do not invent experience the resume doesn't show. Quote or closely paraphrase resume lines as evidence.
+- Compare against the candidate's record only: the resume and, when given, the career profile (a fuller inventory built from their LinkedIn profile and resume — prefer its specifics: scope, numbers, domains). Do not invent experience neither shows. Quote or closely paraphrase lines from them as evidence.
 - Use the candidate's profile: target roles, must-haves, deal-breakers, strong pluses, nice-to-haves and known gaps.
 
 Scoring — five parts, each 0-10 (one decimal allowed):
-- skills: program types, domain and technical depth vs. the resume.
+- skills: program types, domain and technical depth vs. the resume and career profile.
 - level: title, years and scope vs. the candidate's target level. A mid-level role for a Principal-level candidate scores low here.
 - logistics: location, office days per week, commute from the candidate's home base, travel.
 - pay: the posted range vs. the candidate's minimum base and how high the top end goes; equity. If no range is posted, say so; you may note typical pay for the company and level, but the score is capped at 6.
@@ -64,6 +64,8 @@ export interface FitInputs {
   salaryMax: number | null;
   descriptionText: string;
   resumeText: string;
+  /** Built from resume + LinkedIn and edited by you; null until built. */
+  careerProfile: string | null;
   profile: {
     background: string | null;
     minBase: number | null;
@@ -99,7 +101,15 @@ ${i.descriptionText}
 <resume>
 ${i.resumeText}
 </resume>
-
+${
+  i.careerProfile?.trim()
+    ? `
+<career_profile>
+${i.careerProfile.trim()}
+</career_profile>
+`
+    : ''
+}
 <candidate_profile>
 <background_and_target>
 ${p.background?.trim() || 'None stated.'}
@@ -185,11 +195,8 @@ function existingThemes(db: Db): string[] {
     .all() as string[];
 }
 
-export async function assessFit(
-  db: Db,
-  applicationId: number,
-  opts: { force?: boolean; provider?: LLMProvider } = {},
-) {
+/** Everything a score is based on, and its cache key — no AI call. */
+export function fitInputsFor(db: Db, applicationId: number, model: string, effort: string) {
   const row = db
     .select({ job: jobs, company: companies })
     .from(applications)
@@ -204,10 +211,6 @@ export async function assessFit(
   if (!resume) throw new FitError('Upload a resume on the Profile page before scoring.');
 
   const range = payRangeOf(row.job);
-
-  const provider = opts.provider ?? getProvider();
-  const model = provider.defaultModel;
-  const effort = currentEffort();
   const prof = getProfile(db);
   const inputs: FitInputs = {
     company: row.company.name,
@@ -218,6 +221,7 @@ export async function assessFit(
     salaryMax: range?.max ?? null,
     descriptionText: row.job.descriptionText,
     resumeText: resume.rawText,
+    careerProfile: prof.careerProfile?.trim() || null,
     profile: {
       background: prof.goals,
       minBase: prof.minBase,
@@ -237,6 +241,23 @@ export async function assessFit(
   };
   // The theme list changes as jobs are scored; keep it out of the cache key.
   const inputHash = sha256(JSON.stringify([FIT_PROMPT_VERSION, model, effort, inputs]));
+  return { row, resume, range, prof, inputs, inputHash };
+}
+
+export async function assessFit(
+  db: Db,
+  applicationId: number,
+  opts: { force?: boolean; provider?: LLMProvider } = {},
+) {
+  const provider = opts.provider ?? getProvider();
+  const model = provider.defaultModel;
+  const effort = currentEffort();
+  const { row, resume, range, prof, inputs, inputHash } = fitInputsFor(
+    db,
+    applicationId,
+    model,
+    effort,
+  );
   inputs.existingGapThemes = existingThemes(db);
 
   const run = startRun(`${row.company.name} — ${row.job.title}`, applicationId);
@@ -265,6 +286,9 @@ export async function assessFit(
     `Built the prompt: ~${tokensApprox(FIT_SYSTEM_PROMPT + prompt).toLocaleString()} tokens of text + the answer schema`,
     [
       `resume ${tokensApprox(inputs.resumeText).toLocaleString()} tok`,
+      inputs.careerProfile
+        ? `career profile ${tokensApprox(inputs.careerProfile).toLocaleString()} tok`
+        : 'no career profile',
       `job ${tokensApprox(inputs.descriptionText).toLocaleString()} tok`,
       `${p.mustHaves.length} must-haves, ${p.dealBreakers.length} deal-breakers`,
       `${inputs.existingGapThemes.length} gap themes to reuse`,
@@ -418,6 +442,31 @@ export function unscoredApplicationIds(db: Db, status?: Status): number[] {
 }
 
 /**
+ * Open jobs (not Rejected, Withdrawn, Ghosted or Passed) whose latest score was made from
+ * different inputs than they'd get now — e.g. before your career profile was built or edited.
+ */
+export function staleOpenApplicationIds(db: Db, model: string, effort: string): number[] {
+  const rows = db.$client
+    .prepare(
+      `SELECT a.id, f.input_hash AS hash FROM applications a
+       JOIN jobs j ON j.id = a.job_id
+       JOIN fit_assessments f ON f.id = (SELECT id FROM fit_assessments WHERE job_id = j.id ORDER BY created_at DESC, id DESC LIMIT 1)
+       WHERE length(coalesce(j.description_text, '')) > 0
+         AND a.status NOT IN ('Rejected', 'Withdrawn', 'Ghosted', 'Passed')`,
+    )
+    .all() as { id: number; hash: string }[];
+  return rows
+    .filter((r) => {
+      try {
+        return fitInputsFor(db, r.id, model, effort).inputHash !== r.hash;
+      } catch {
+        return false;
+      }
+    })
+    .map((r) => r.id);
+}
+
+/**
  * Recurring gap themes across the latest assessment of each job — tells you what to prepare
  * or build next.
  */
@@ -498,12 +547,17 @@ export function startFitBatch(
     concurrency?: number;
     provider?: LLMProvider;
     status?: Status;
+    /** Re-score open jobs whose score is out of date (e.g. a new career profile). */
+    stale?: boolean;
     /** What to run per application; defaults to the fit score alone. */
     task?: (applicationId: number) => Promise<unknown>;
   } = {},
 ): FitBatchStatus {
   if (batch?.running) return batch;
-  const ids = unscoredApplicationIds(db, opts.status);
+  const provider = opts.provider ?? getProvider();
+  const ids = opts.stale
+    ? staleOpenApplicationIds(db, provider.defaultModel, currentEffort())
+    : unscoredApplicationIds(db, opts.status);
   const state: FitBatchStatus = {
     running: ids.length > 0,
     total: ids.length,
@@ -519,7 +573,9 @@ export function startFitBatch(
     while (next < ids.length) {
       const id = ids[next++];
       try {
-        await (opts.task ? opts.task(id) : assessFit(db, id, { provider: opts.provider }));
+        await (opts.task
+          ? opts.task(id)
+          : assessFit(db, id, { provider: opts.provider, force: opts.stale }));
         state.scored++;
       } catch (e) {
         state.failed.push({ applicationId: id, error: (e as Error).message });
