@@ -70,6 +70,13 @@ const EMPTY_PROFILE = {
   niceToHaves: null,
   knownGaps: null,
   updatedAt: null,
+  linkedinUrl: null,
+  linkedinSections: null,
+  linkedinText: null,
+  linkedinImportedAt: null,
+  careerProfile: null,
+  careerProfileAt: null,
+  careerProfileUsageId: null,
 } satisfies typeof profile.$inferSelect;
 
 export function getProfile(db: Db): typeof profile.$inferSelect {

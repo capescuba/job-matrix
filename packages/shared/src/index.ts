@@ -167,6 +167,8 @@ export const profilePatchSchema = z.object({
   strongPluses: z.string().nullable().optional(),
   niceToHaves: z.string().nullable().optional(),
   knownGaps: z.string().nullable().optional(),
+  /** The career profile (built from resume + LinkedIn), as you've edited it. */
+  careerProfile: z.string().nullable().optional(),
 });
 export type ProfilePatch = z.infer<typeof profilePatchSchema>;
 
@@ -202,7 +204,9 @@ export const fitResultSchema = z.object({
     .string()
     .describe('The main things holding the total back from a higher score, concretely'),
   parts: z.object({
-    skills: part.describe('Program types, domain and technical depth vs. the resume'),
+    skills: part.describe(
+      'Program types, domain and technical depth vs. the resume and career profile',
+    ),
     level: part.describe('Title/level/years/scope vs. Principal/Staff target'),
     logistics: part.describe('Location, office days per week, commute from home base, travel'),
     pay: part.describe('Posted range vs. the minimum base and a high top end; equity'),
@@ -224,7 +228,9 @@ export const fitResultSchema = z.object({
     z.object({
       label: z.string().describe('3-6 word label for a list, e.g. "Led 12-team K8s migration"'),
       point: z.string(),
-      evidence: z.string().describe('Specific line or fact from the resume that supports it'),
+      evidence: z
+        .string()
+        .describe('Specific line or fact from the resume or career profile that supports it'),
     }),
   ),
   gaps: z.array(

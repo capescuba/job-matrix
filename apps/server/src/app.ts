@@ -29,7 +29,25 @@ import {
   updateApplication,
   updateJob,
 } from './services/applications.ts';
-import { FitError, assessFit, fitBatchStatus, startFitBatch } from './services/fit.ts';
+import {
+  FitError,
+  assessFit,
+  fitBatchStatus,
+  staleOpenApplicationIds,
+  startFitBatch,
+} from './services/fit.ts';
+import {
+  CareerProfileError,
+  buildCareerProfile,
+  careerProfileCostUsd,
+} from './services/careerProfile.ts';
+import {
+  clearLinkedIn,
+  linkedinImportSchema,
+  linkedinSummary,
+  saveLinkedIn,
+  setLinkedInUrl,
+} from './services/linkedin.ts';
 import {
   JobFetchError,
   applyFetchedJob,
@@ -37,8 +55,14 @@ import {
   fetchJobPosting,
   fetchMissingDescriptions,
 } from './services/jobfetch.ts';
-import { addResume, getProfile, setDefaultResume, updateProfile } from './services/resume.ts';
-import { getSettings, updateSettings } from './services/settings.ts';
+import {
+  addResume,
+  getDefaultResume,
+  getProfile,
+  setDefaultResume,
+  updateProfile,
+} from './services/resume.ts';
+import { currentEffort, getSettings, updateSettings } from './services/settings.ts';
 import { analyzeApplication } from './services/analyze.ts';
 import { ensureResearch, isStale, latestResearch } from './services/research.ts';
 import { captureJob, findTrackedByUrl } from './services/screening.ts';
@@ -144,7 +168,12 @@ export function buildApp(
     if (err instanceof AliasError) return reply.status(400).send({ error: err.message });
     if (err instanceof NeedsSignIn) return reply.status(401).send({ error: err.message, signIn: true });
     if (err instanceof GraphError) return reply.status(502).send({ error: err.message });
-    if (err instanceof FitError || err instanceof LLMError || err instanceof JobFetchError)
+    if (
+      err instanceof FitError ||
+      err instanceof LLMError ||
+      err instanceof JobFetchError ||
+      err instanceof CareerProfileError
+    )
       return reply.status(422).send({ error: err.message });
     app.log.error(err);
     const status = (err as { statusCode?: number }).statusCode ?? 500;
@@ -194,15 +223,15 @@ export function buildApp(
   });
   // Starts (or reports) a background batch; the UI polls GET for progress.
   app.post('/api/fit/batch', (req) => {
-    const { status, research } = z
-      .object({
-        status: z.enum(STATUSES).optional(),
-        research: z
-          .string()
-          .optional()
-          .transform((v) => v === '1' || v === 'true'),
-      })
+    const flag = z
+      .string()
+      .optional()
+      .transform((v) => v === '1' || v === 'true');
+    const { status, research, stale } = z
+      .object({ status: z.enum(STATUSES).optional(), research: flag, stale: flag })
       .parse(req.query);
+    // stale: re-score open jobs whose score predates your current profile (on request only).
+    if (stale) return startFitBatch(db, { stale: true });
     return startFitBatch(db, {
       status,
       ...(research && { task: (id: number) => analyzeApplication(db, id) }),
@@ -345,7 +374,9 @@ export function buildApp(
 
   // ----- profile & resumes -----
   app.get('/api/profile', () => ({
-    profile: getProfile(db),
+    // The LinkedIn text is fetched on its own (/api/linkedin/text); it can be large.
+    profile: (({ linkedinText: _t, linkedinSections: _s, ...rest }) => rest)(getProfile(db)),
+    linkedin: linkedinSummary(db),
     resumes: db
       .select({
         id: resumeVersions.id,
@@ -364,6 +395,45 @@ export function buildApp(
     updateProfile(db, profilePatchSchema.parse(req.body));
     return getProfile(db);
   });
+  // ----- LinkedIn profile (read by the Chrome extension) and the career profile -----
+  app.get('/api/linkedin', () => linkedinSummary(db));
+  app.get('/api/linkedin/text', () => ({ text: getProfile(db).linkedinText ?? '' }));
+  app.put('/api/linkedin/url', (req) => {
+    const { url } = z.object({ url: z.string().trim().max(500).nullable() }).parse(req.body);
+    try {
+      return setLinkedInUrl(db, url || null);
+    } catch (e) {
+      throw Object.assign(new Error((e as Error).message), { statusCode: 400 });
+    }
+  });
+  app.post('/api/linkedin', { preHandler: requireToken }, (req) => {
+    try {
+      return saveLinkedIn(db, linkedinImportSchema.parse(req.body));
+    } catch (e) {
+      if (e instanceof ZodError) throw e;
+      throw Object.assign(new Error((e as Error).message), { statusCode: 400 });
+    }
+  });
+  app.delete('/api/linkedin', () => clearLinkedIn(db));
+  app.get('/api/career-profile', () => {
+    const p = getProfile(db);
+    const { model } = getSettings();
+    const stale = staleOpenApplicationIds(db, model, currentEffort()).length;
+    return {
+      careerProfile: p.careerProfile ?? null,
+      builtAt: p.careerProfileAt ?? null,
+      buildUsd: careerProfileCostUsd(db),
+      hasResume: Boolean(getDefaultResume(db)),
+      hasLinkedIn: Boolean(p.linkedinText),
+      linkedinNewer: Boolean(
+        p.linkedinImportedAt && (!p.careerProfileAt || p.linkedinImportedAt > p.careerProfileAt),
+      ),
+      staleJobs: stale,
+      rescoreUsd: (getUsageSummary(db).forecast.perCallUsd ?? 0) * stale,
+    };
+  });
+  app.post('/api/career-profile', async () => buildCareerProfile(db));
+
   app.get('/api/resumes/:id', (req) => {
     const row = db
       .select()

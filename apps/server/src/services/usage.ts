@@ -8,7 +8,7 @@ import { getDefaultResume, getProfile } from './resume.ts';
 import { logEvent } from './log.ts';
 import { getSettings } from './settings.ts';
 
-export type Feature = 'fit' | 'research' | 'answer' | 'email';
+export type Feature = 'fit' | 'research' | 'answer' | 'email' | 'profile';
 
 /** Output tokens (incl. thinking) a fit assessment typically uses, for forecasts before any history exists. */
 const FIT_OUTPUT_TOKENS_GUESS = 4_000;
@@ -222,6 +222,7 @@ function forecastFitBatch(db: Db, rows: UsageRow[]) {
       FIT_SYSTEM_PROMPT.length +
       (getDefaultResume(db)?.rawText.length ?? 6_000) +
       (getProfile(db).goals?.length ?? 0) +
+      (getProfile(db).careerProfile?.length ?? 0) +
       avgJd;
     perCallUsd = estimateCostUsd(model, {
       inputTokens: Math.round(chars / CHARS_PER_TOKEN),

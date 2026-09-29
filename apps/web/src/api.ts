@@ -20,6 +20,7 @@ import type {
 } from '../../server/src/services/jobfetch.ts';
 import type { FitBatchStatus } from '../../server/src/services/fit.ts';
 import type { getProfile } from '../../server/src/services/resume.ts';
+import type { linkedinSummary } from '../../server/src/services/linkedin.ts';
 import type { analyzeApplication } from '../../server/src/services/analyze.ts';
 import type { ResearchRow } from '../../server/src/services/research.ts';
 import type { CaptureResult } from '../../server/src/services/screening.ts';
@@ -60,8 +61,20 @@ export type FitAssessment = Omit<ApplicationDetail['fits'][number], 'result' | '
 export type Stats = ReturnType<typeof getStats>;
 export type Contact = ApplicationDetail['contacts'][number];
 export type Activity = ApplicationDetail['activities'][number];
+export type LinkedInSummary = ReturnType<typeof linkedinSummary>;
+export interface CareerProfileInfo {
+  careerProfile: string | null;
+  builtAt: string | null;
+  buildUsd: number | null;
+  hasResume: boolean;
+  hasLinkedIn: boolean;
+  linkedinNewer: boolean;
+  staleJobs: number;
+  rescoreUsd: number;
+}
 export interface ProfileResponse {
-  profile: ReturnType<typeof getProfile>;
+  profile: Omit<ReturnType<typeof getProfile>, 'linkedinText' | 'linkedinSections'>;
+  linkedin: LinkedInSummary;
   resumes: { id: number; label: string; isDefault: boolean; createdAt: string; chars: number }[];
   aiConfigured: boolean;
 }
@@ -136,6 +149,16 @@ export const api = {
   /** Add a job to the Screening inbox from its URL (server-side fetch). */
   screenUrl: (url: string) => request<CaptureResult>('POST', '/api/screen/url', { url }),
   scoreAllStatus: () => request<FitBatchStatus | null>('GET', '/api/fit/batch'),
+  /** Re-score open jobs whose score predates your current profile. */
+  rescoreStale: () => request<FitBatchStatus>('POST', '/api/fit/batch?stale=1'),
+  // ----- LinkedIn profile and career profile -----
+  setLinkedInUrl: (url: string | null) =>
+    request<LinkedInSummary>('PUT', '/api/linkedin/url', { url }),
+  linkedinText: () => request<{ text: string }>('GET', '/api/linkedin/text'),
+  clearLinkedIn: () => request<LinkedInSummary>('DELETE', '/api/linkedin'),
+  careerProfile: () => request<CareerProfileInfo>('GET', '/api/career-profile'),
+  buildCareerProfile: () =>
+    request<{ careerProfile: string; conflicts: string[] }>('POST', '/api/career-profile'),
   /** Fetch a posting's details from its URL without saving (for forms). */
   fetchJob: (url: string) => request<FetchedJob>('POST', '/api/fetch-job', { url }),
   /** Fetch and save descriptions for every job with a URL but no description. */

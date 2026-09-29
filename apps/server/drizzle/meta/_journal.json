@@ -99,6 +99,13 @@
       "when": 1790448195739,
       "tag": "0013_company_aliases",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1790716542346,
+      "tag": "0014_linkedin_profile",
+      "breakpoints": true
     }
   ]
 }

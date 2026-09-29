@@ -404,7 +404,7 @@ export const ANSWER_SYSTEM_PROMPT = `You draft answers to job application questi
 
 Rules:
 - First person, as the applicant ("I led…"). Warm, direct and specific; no clichés ("I'm passionate about", "I'm excited to", "fast-paced environment"), no flattery, no filler.
-- Use only facts from the resume, profile and fit notes for claims about the applicant — never invent employers, numbers or projects. Use the company brief and job description for why this company and role; name concrete things (a product, a program, a stated priority) rather than generic praise.
+- Use only facts from the resume, career profile, LinkedIn profile, goals and fit notes for claims about the applicant — never invent employers, numbers or projects. Use the company brief and job description for why this company and role; name concrete things (a product, a program, a stated priority) rather than generic praise.
 - Tie the applicant's strongest relevant evidence to what this role needs.
 - Fit the length: stay under the character limit when one is given (aim for ~85% of it); otherwise 80–150 words for "why" questions, 1–3 sentences for short factual ones.
 - If the question asks for something the inputs don't cover (salary expectations, visa status, start date, references), give a short, sensible answer with a [fill in] placeholder instead of guessing.
@@ -420,6 +420,10 @@ export function buildAnswerPrompt(i: {
   title: string;
   description: string | null;
   resume: string | null;
+  /** Built from resume + LinkedIn (see careerProfile.ts). */
+  careerProfile?: string | null;
+  /** The full LinkedIn profile text, for detail the resume leaves out. */
+  linkedin?: string | null;
   goals: string | null;
   fit: FitResult | null;
   brief: CompanyResearch | null;
@@ -451,6 +455,14 @@ ${clip(i.description, 12_000)}
 <applicant_resume>
 ${clip(i.resume, 15_000)}
 </applicant_resume>
+
+<applicant_career_profile>
+${clip(i.careerProfile, 15_000) || 'none'}
+</applicant_career_profile>
+
+<applicant_linkedin>
+${clip(i.linkedin, 20_000) || 'none'}
+</applicant_linkedin>
 
 <applicant_goals>
 ${clip(i.goals, 3_000) || 'none'}
@@ -500,6 +512,8 @@ export async function suggestAnswer(
       title: row.job.title,
       description: row.job.descriptionText,
       resume: getDefaultResume(db)?.rawText ?? null,
+      careerProfile: getProfile(db).careerProfile,
+      linkedin: getProfile(db).linkedinText,
       goals: getProfile(db).goals,
       fit: (fit?.result as FitResult | undefined)?.parts ? (fit!.result as FitResult) : null,
       brief: (research?.result as CompanyResearch | undefined) ?? null,

@@ -78,6 +78,17 @@ export const profile = sqliteTable('profile', {
   niceToHaves: text('nice_to_haves'),
   knownGaps: text('known_gaps'),
   updatedAt: text('updated_at'),
+  /** Your LinkedIn profile, read by the Chrome extension (you're signed in there; the server can't be). */
+  linkedinUrl: text('linkedin_url'),
+  /** { about?, experience?, … } → the text of each section. */
+  linkedinSections: text('linkedin_sections', { mode: 'json' }),
+  /** All sections under headings, as the AI sees them. */
+  linkedinText: text('linkedin_text'),
+  linkedinImportedAt: text('linkedin_imported_at'),
+  /** Detailed career inventory built from the resume + LinkedIn (AI, on request), editable. */
+  careerProfile: text('career_profile'),
+  careerProfileAt: text('career_profile_at'),
+  careerProfileUsageId: integer('career_profile_usage_id'),
 });
 
 export const applications = sqliteTable(
