@@ -1,7 +1,7 @@
 import { and, desc, eq, like } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProvider, type LLMProvider } from '@jm/ai';
-import type { CompanyResearch, FitResult, Status } from '@jm/shared';
+import { shortText, type CompanyResearch, type FitResult, type Status } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import {
   activities,
@@ -96,18 +96,23 @@ const hostOf = (url: string | null | undefined) => {
 
 export const pageInputSchema = z.object({
   url: z.string().trim().url(),
-  pageTitle: z.string().max(2000).nullable().optional(),
-  jsonLd: z.array(z.string().max(200_000)).max(20).nullable().optional(),
-  /** Read by a site template or the LinkedIn reader. */
+  pageTitle: shortText(2000),
+  // Oversized or surplus blocks are dropped rather than failing the whole request.
+  jsonLd: z
+    .array(z.string())
+    .nullable()
+    .optional()
+    .transform((a) => a?.filter((s) => s.length <= 200_000).slice(0, 20)),
+  /** Read by a site template or the LinkedIn reader (first line, clipped). */
   fields: z
     .object({
-      title: z.string().max(500).nullable().optional(),
-      company: z.string().max(500).nullable().optional(),
+      title: shortText(),
+      company: shortText(),
     })
     .nullable()
     .optional(),
 });
-export type PageInput = z.infer<typeof pageInputSchema>;
+export type PageInput = z.input<typeof pageInputSchema>;
 
 /** What the side panel shows about one application. */
 /**
@@ -207,7 +212,8 @@ function briefSummary(r: NonNullable<ReturnType<typeof latestResearch>>) {
  * Everything the side panel needs for the page you're on: is this posting tracked (or one very
  * like it), which company is it, what do we know about that company, and what would scoring cost.
  */
-export async function pageContext(db: Db, input: PageInput, opts: { fetchFn?: typeof fetch } = {}) {
+export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: typeof fetch } = {}) {
+  const input = pageInputSchema.parse(raw);
   const url = normalizeUrl(input.url);
   const rows = listApplications(db);
   const byId = new Map(rows.map((r) => [r.id, r]));

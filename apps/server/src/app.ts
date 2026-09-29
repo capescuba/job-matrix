@@ -129,8 +129,14 @@ export function buildApp(
   app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
   app.setErrorHandler((err, _req, reply) => {
-    if (err instanceof ZodError)
-      return reply.status(400).send({ error: 'Invalid input', issues: err.issues });
+    if (err instanceof ZodError) {
+      // Say which field, so "Invalid input" is never a dead end.
+      const detail = err.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join('.') || 'input'}: ${i.message}`)
+        .join('; ');
+      return reply.status(400).send({ error: `Invalid input (${detail})`, issues: err.issues });
+    }
     if (err instanceof NotFoundError) return reply.status(404).send({ error: err.message });
     if (err instanceof UpdateStateError) return reply.status(409).send({ error: err.message });
     if (err instanceof NeedsSignIn) return reply.status(401).send({ error: err.message, signIn: true });

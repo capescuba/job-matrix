@@ -206,7 +206,7 @@ export async function captureJob(
   const ld = jobPostingFromJsonLd(input.jsonLd);
   // The browser's tab title, else the one the server read from the page.
   const fromTitle = parsePageTitle(input.pageTitle ?? fetched?.pageTitle);
-  const f = input.fields ?? {};
+  const f: Partial<NonNullable<typeof input.fields>> = input.fields ?? {};
 
   const desc = (
     [

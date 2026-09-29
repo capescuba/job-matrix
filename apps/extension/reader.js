@@ -18,13 +18,22 @@ export function readPage(selectors) {
     }
   };
 
+  // Short fields: the first line of what the template points at, so picking a big block (e.g.
+  // a whole section for "Company") still gives one line rather than the section.
+  const short = (sel, max = 200) => {
+    const line = (pick(sel) ?? '')
+      .split('\n')
+      .map((l) => l.replace(/\s+/g, ' ').trim())
+      .find(Boolean);
+    return line ? line.slice(0, max) : null;
+  };
   // Site template fields.
   const fields = selectors
     ? {
-        title: pick(selectors.title),
-        company: pick(selectors.company),
-        location: pick(selectors.location),
-        salaryText: pick(selectors.salary),
+        title: short(selectors.title),
+        company: short(selectors.company),
+        location: short(selectors.location),
+        salaryText: pick(selectors.salary)?.slice(0, 2000) ?? null,
         descriptionText: pick(selectors.description),
       }
     : null;
@@ -251,6 +260,9 @@ export function startPicker(field) {
       field,
       selector: selectorFor(el),
       sample: (el.innerText || el.textContent || '').trim().slice(0, 200),
+      // How big the pick is: a one-line field that's long or multi-line is probably too big.
+      chars: (el.innerText || el.textContent || '').trim().length,
+      lines: (el.innerText || '').trim().split('\n').filter((l) => l.trim()).length,
     });
   };
   const key = (e) => {

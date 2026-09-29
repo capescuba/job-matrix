@@ -542,7 +542,11 @@ function teachSection() {
         ([k, label]) => `<div class="row">
           <button data-action="pick" data-field="${k}" style="min-width:96px">${t.selectors[k] ? '✓ ' : ''}${label}</button>
           <span class="small faint" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.selectors[k] ?? '')}">${esc(t.samples[k] ?? (t.selectors[k] ? t.selectors[k] : 'Click, then click it on the page'))}</span>
-        </div>`,
+        </div>${
+          t.big?.[k]
+            ? `<div class="small warn">That's a big block of the page, so only its first line will be used: “${esc((t.samples[k] ?? '').split('\n').find((l) => l.trim())?.trim().slice(0, 80) ?? '')}”. If that's not the ${esc(label.toLowerCase())}, pick again and aim at the text itself.</div>`
+            : ''
+        }`,
       ).join('')}
       <div class="row">
         <button class="primary" data-action="teach-save" ${Object.keys(t.selectors).length && state.busy !== 'save-template' ? '' : 'disabled'}>Save template</button>
@@ -776,6 +780,11 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.selector) {
     state.teach.selectors[msg.field] = msg.selector;
     state.teach.samples[msg.field] = msg.sample || msg.selector;
+    // Title, company and location are one line; a big pick is probably the wrong element.
+    state.teach.big ??= {};
+    state.teach.big[msg.field] =
+      !['description', 'salary'].includes(msg.field) &&
+      ((msg.chars ?? 0) > 150 || (msg.lines ?? 1) > 3);
   }
   render();
 });
