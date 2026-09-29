@@ -32,6 +32,7 @@ import {
   normalizeUrl,
   parsePageTitle,
 } from './screening.ts';
+import { embeddedJobId, fetchJobPosting, type FetchedJob } from './jobfetch.ts';
 import { currentEffort, getSettings } from './settings.ts';
 import { getStock, type StockQuote } from './stock.ts';
 import { getUsageSummary, recordUsage } from './usage.ts';
@@ -219,6 +220,24 @@ function briefSummary(r: NonNullable<ReturnType<typeof latestResearch>>) {
  * Everything the side panel needs for the page you're on: is this posting tracked (or one very
  * like it), which company is it, what do we know about that company, and what would scoring cost.
  */
+const boardCache = new Map<string, { at: number; job: FetchedJob | null }>();
+/** The posting behind an embedded job board on a careers page, or null (not one, or it failed). */
+async function boardPosting(url: string, fetchFn?: typeof fetch) {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!embeddedJobId(u)) return null;
+  const hit = boardCache.get(url);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.job;
+  const job = await fetchJobPosting(url, fetchFn).catch(() => null);
+  const found = job && /API/.test(job.via) ? job : null;
+  boardCache.set(url, { at: Date.now(), job: found });
+  return found;
+}
+
 export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: typeof fetch } = {}) {
   const input = pageInputSchema.parse(raw);
   const url = normalizeUrl(input.url);
@@ -234,12 +253,21 @@ export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: type
     typeof ld?.hiringOrganization === 'string'
       ? ld.hiringOrganization
       : ld?.hiringOrganization?.name;
+  // A careers page embedding a job board (?ashby_jid=, ?gh_jid=): the page is only a shell, so
+  // ask the board what the job is (cached briefly; no AI).
+  const board = tracked ? null : await boardPosting(url, opts.fetchFn);
   const detected = {
-    title: input.fields?.title?.trim() || ld?.title?.trim() || fromTitle.title || null,
+    title:
+      board?.title?.trim() ||
+      input.fields?.title?.trim() ||
+      ld?.title?.trim() ||
+      fromTitle.title ||
+      null,
     // A template pick that caught a heading ("About Us") rather than the name doesn't count; the
     // page title or the careers site's address (careers.oracle.com → Oracle) is used instead.
     company:
       (looksLikeCompanyName(input.fields?.company) ? input.fields!.company!.trim() : null) ||
+      board?.company?.trim() ||
       ldOrg?.trim() ||
       null,
   };

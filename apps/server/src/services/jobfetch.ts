@@ -570,6 +570,38 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
   });
 }
 
+/**
+ * The job-board posting behind a company careers page that embeds Ashby or Greenhouse:
+ * example.com/careers?ashby_jid=<id> or ?gh_jid=<id>. The job itself lives in an embedded frame,
+ * so the page's own text is just the careers shell; the board's name is in the page (its embed
+ * script), and the board's API has the posting. Null when the address isn't one of these.
+ */
+export function embeddedJobId(u: URL): { ats: 'ashby' | 'greenhouse'; id: string } | null {
+  const ashby = u.searchParams.get('ashby_jid');
+  if (ashby && /^[\w-]{8,}$/.test(ashby)) return { ats: 'ashby', id: ashby };
+  const gh = u.searchParams.get('gh_jid');
+  if (gh && /^\d+$/.test(gh)) return { ats: 'greenhouse', id: gh };
+  return null;
+}
+
+async function embedded(f: FetchFn, u: URL): Promise<FetchedJob | null> {
+  const job = embeddedJobId(u);
+  if (!job) return null;
+  const html = await getText(f, u.toString());
+  if (job.ats === 'ashby') {
+    const org = html.match(/jobs\.ashbyhq\.com\/([\w.-]+)\/embed/i)?.[1];
+    if (!org) return null;
+    const r = await ashby(f, new URL(`https://jobs.ashbyhq.com/${org}/${job.id}`));
+    return r && { ...r, via: `Ashby API (embedded on ${u.hostname})` };
+  }
+  const board = html.match(
+    /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/embed\/job_board(?:\/js)?\?for=([\w-]+)/i,
+  )?.[1];
+  if (!board) return null;
+  const r = await greenhouse(f, new URL(`https://job-boards.greenhouse.io/${board}/jobs/${job.id}`));
+  return r && { ...r, via: `Greenhouse API (embedded on ${u.hostname})` };
+}
+
 export async function fetchJobPosting(url: string, f: FetchFn = fetch): Promise<FetchedJob> {
   let u: URL;
   try {
@@ -592,7 +624,14 @@ export async function fetchJobPosting(url: string, f: FetchFn = fetch): Promise<
             : h === 'careers.walmart.com'
               ? walmart
               : null;
-  if (!specific) return generic(f, u);
+  if (!specific) {
+    // A careers page embedding Ashby/Greenhouse: read the posting from the board, not the shell.
+    if (embeddedJobId(u)) {
+      const viaBoard = await embedded(f, u).catch(() => null);
+      if (viaBoard) return viaBoard;
+    }
+    return generic(f, u);
+  }
   try {
     return (await specific(f, u)) ?? (await generic(f, u));
   } catch (e) {

@@ -323,6 +323,8 @@ function appLine(a) {
 /** A posting has job data, a template/LinkedIn description, your selection, or reads like a JD. */
 function looksLikeJob(page) {
   return (
+    // A careers page embedding an Ashby/Greenhouse job (Job Matrix reads it from the board).
+    /[?&](ashby_jid|gh_jid)=/.test(page.url ?? '') ||
     page.jsonLd.some((b) => /JobPosting/.test(b)) ||
     !!page.fields?.descriptionText ||
     !!page.liFields?.descriptionText ||
@@ -826,6 +828,17 @@ document.addEventListener('input', (e) => {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type !== 'jm-picked' || !state.teach) return;
   status('');
+  if (msg.frame) {
+    // Can't point inside an embedded frame (another site's page shown in this one).
+    state.notice = {
+      tone: 'warn',
+      text: /[?&](ashby_jid|gh_jid)=/.test(state.tab?.url ?? '')
+        ? 'That part of the page is an embedded job board. Job Matrix reads this job straight from the board, so this site doesn’t need teaching.'
+        : 'That part of the page is an embedded frame (another site shown inside this one), which can’t be picked. Open the frame’s own page, or select the text and use “Add selection to Job Matrix”.',
+    };
+    render();
+    return;
+  }
   if (msg.selector) {
     state.teach.selectors[msg.field] = msg.selector;
     state.teach.samples[msg.field] = msg.sample || msg.selector;

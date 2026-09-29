@@ -60,11 +60,14 @@ export function normalizeUrl(raw: string): string {
     const [co, id] = embed ?? [path?.[1], path?.[2]];
     if (co && id) return `https://job-boards.greenhouse.io/${co.toLowerCase()}/jobs/${id}`;
   }
-  // A company's own careers page embedding Greenhouse: the job is ?gh_jid=<id>.
-  const ghJid = u.searchParams.get('gh_jid');
-  if (ghJid && /^\d+$/.test(ghJid)) {
-    u.search = '';
-    u.searchParams.set('gh_jid', ghJid);
+  // A company's own careers page embedding Greenhouse or Ashby: the job is ?gh_jid=<id> or
+  // ?ashby_jid=<id>, and that's all that identifies it.
+  for (const key of ['gh_jid', 'ashby_jid']) {
+    const jid = u.searchParams.get(key);
+    if (jid && /^[\w-]+$/.test(jid)) {
+      u.search = '';
+      u.searchParams.set(key, jid);
+    }
   }
   if (host === 'jobs.lever.co') u.pathname = u.pathname.replace(/\/apply\/?$/, '');
   if (host === 'jobs.ashbyhq.com') u.pathname = u.pathname.replace(/\/application\/?$/, '');

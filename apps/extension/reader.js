@@ -255,6 +255,10 @@ export function startPicker(field) {
     e.stopPropagation();
     const el = current || e.target;
     stop();
+    if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
+      chrome.runtime.sendMessage({ type: 'jm-picked', field, selector: null, frame: true });
+      return;
+    }
     chrome.runtime.sendMessage({
       type: 'jm-picked',
       field,
