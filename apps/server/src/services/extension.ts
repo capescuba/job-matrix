@@ -603,10 +603,18 @@ const questionWords = (q: string) =>
       ),
   );
 
-/** Your earlier answers to questions like this one, best match first (free to reuse). */
-export function similarAnswers(db: Db, question: string, limit = 3) {
+/** Whether `text` names the company whose key is `key` ("Character.AI" → "character ai"). */
+const names = (text: string, key: string) => !!key && ` ${companyKey(text)} `.includes(` ${key} `);
+
+/**
+ * Your earlier answers to questions like this one, best match first (free to reuse). An answer
+ * that names the company it was written for ("Character.AI is building…") is only offered for
+ * that company: the one you're applying to (`company`), or the one the question names.
+ */
+export function similarAnswers(db: Db, question: string, limit = 3, company?: string | null) {
   const q = questionWords(question);
   if (!q.size) return [];
+  const current = companyKey(company);
   return db
     .select({
       id: applicationAnswers.id,
@@ -622,6 +630,10 @@ export function similarAnswers(db: Db, question: string, limit = 3) {
     .innerJoin(jobs, eq(jobs.id, applications.jobId))
     .innerJoin(companies, eq(companies.id, jobs.companyId))
     .all()
+    .filter((a) => {
+      const key = companyKey(a.company);
+      return !names(a.answer, key) || key === current || names(question, key);
+    })
     .map((a) => {
       const w = questionWords(a.question);
       const shared = [...q].filter((x) => w.has(x)).length;
