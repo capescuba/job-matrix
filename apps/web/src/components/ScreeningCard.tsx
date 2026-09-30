@@ -115,6 +115,7 @@ export function ScreeningCard({
             <Title row={r} onChanged={onChanged} />
             <span className="text-ink-3"> · </span>
             <span className="text-ink-2">{metaLine(r).join(' · ')}</span>
+            <WatchlistChips row={r} />
           </div>
           {!r.hasDescription && <span className="text-xs text-warn">No description captured</span>}
           {scoreButton}
@@ -146,6 +147,36 @@ export function ScreeningCard({
         scoreButton={scoreButton}
       />
     </div>
+  );
+}
+
+/**
+ * Where the watchlist found this job, and the pre-screen's answer (its rough 0–10 match, with
+ * the reason on hover). Jobs you added yourself show nothing.
+ */
+export function WatchlistChips({ row: r }: { row: ApplicationRow }) {
+  if (!r.foundBy) return null;
+  return (
+    <span className="ml-2 inline-flex flex-wrap items-center gap-1 align-middle text-xs">
+      <span
+        className="rounded bg-accent/10 px-1.5 py-0.5 text-accent"
+        title="Found by the watchlist"
+      >
+        Watchlist · {r.foundBy}
+      </span>
+      {r.prescreenVerdict && (
+        <span
+          className={cx(
+            'rounded px-1.5 py-0.5',
+            r.prescreenVerdict === 'yes' ? 'bg-good/10 text-good' : 'bg-warn/10 text-warn',
+          )}
+          title={`Pre-screen by ${r.prescreenModel}: ${r.prescreenReason ?? ''}`}
+        >
+          Pre-screen {r.prescreenScore != null ? `${r.prescreenScore}/10 · ` : ''}
+          {r.prescreenVerdict}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -207,6 +238,7 @@ function Scored({
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-ink-3">
             <span>{metaLine(r).join(' · ')}</span>
+            <WatchlistChips row={r} />
             {r.url && (
               <a
                 href={r.url}

@@ -1,0 +1,1 @@
+ALTER TABLE `crawl_leads` ADD `score` real;

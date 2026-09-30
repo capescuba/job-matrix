@@ -191,6 +191,7 @@ describe('results from the extension', () => {
     expect(inbox.map((a) => `${a.company} — ${a.title}`)).toEqual([
       'LinkedIn — Staff Technical Program Manager',
     ]);
+    expect(inbox[0]!.foundBy).toBe('search “LinkedIn: technical program manager in San Francisco Bay Area”');
     // LinkedIn postings are read by the server, so the inbox card has the description.
     const detail = getApplicationDetail(db, inbox[0]!.id);
     expect(detail.job.url).toBe('https://www.linkedin.com/jobs/view/111/');

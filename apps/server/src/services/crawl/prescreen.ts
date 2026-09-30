@@ -23,11 +23,18 @@ Rules:
 - Judge only from what the posting says. Missing information is never a reason for "no".
 - Known gaps, nice-to-haves and an imperfect match are not reasons for "no".
 - When in doubt between "no" and "maybe", answer "maybe". A wrongly rejected job costs the candidate far more than a wrongly kept one.
-- reason: one short sentence, in plain words, quoting or pointing at what in the posting decided it.`;
+- reason: one short sentence, in plain words, quoting or pointing at what in the posting decided it.
+- score: a rough 0–10 for how well the role matches the candidate's target: 9–10 squarely the target role, level and place; 6–8 a good match with something to check; 4–5 plausible but unclear; 0–3 a poor match or a different kind of job. The verdict, not the score, decides what the candidate sees.`;
 
 export const prescreenSchema = z.object({
   verdict: z.enum(['yes', 'maybe', 'no']),
   reason: z.string().describe('One short sentence: what in the posting decided it'),
+  score: z
+    .number()
+    .min(0)
+    .max(10)
+    .optional()
+    .describe('Rough 0–10 match with the target (not a deal-breaker check)'),
   dealBreaker: z
     .string()
     .nullable()

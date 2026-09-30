@@ -443,6 +443,8 @@ export const crawlLeads = sqliteTable(
     /** yes | maybe (in the inbox) · no-rules | no-ai | duplicate (filtered out) · waiting | error (try again) */
     verdict: text('verdict').notNull(),
     reason: text('reason'),
+    /** The pre-screen's rough 0–10 match (not the fit score). */
+    score: real('score'),
     /** The model that judged it, when one did. */
     model: text('model'),
     usageId: integer('usage_id'),

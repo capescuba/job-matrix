@@ -40,7 +40,16 @@ export default function ScreeningPage() {
   const passed = data
     .filter((r) => r.status === 'Passed')
     .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
-  const rows = tab === 'inbox' ? inbox : passed;
+  // Inbox: everything, only what the watchlist found (best pre-screen score first), or only yours.
+  const origin = (['watchlist', 'you'] as const).find((o) => o === params.get('from')) ?? 'all';
+  const fromWatchlist = inbox.filter((r) => r.foundBy);
+  const shown =
+    origin === 'watchlist'
+      ? [...fromWatchlist].sort((a, b) => (b.prescreenScore ?? -1) - (a.prescreenScore ?? -1))
+      : origin === 'you'
+        ? inbox.filter((r) => !r.foundBy)
+        : inbox;
+  const rows = tab === 'inbox' ? shown : passed;
   const unscored = inbox.filter((r) => r.hasDescription && r.fitScore == null);
   const { data: usage } = useQuery({ queryKey: ['usage'], queryFn: api.usage });
   const costs = {
@@ -88,6 +97,28 @@ export default function ScreeningPage() {
             </button>
           ))}
         </div>
+        {tab === 'inbox' && fromWatchlist.length > 0 && (
+          <div className="flex rounded-md border border-border p-0.5 text-sm">
+            {(
+              [
+                ['all', 'All'],
+                ['watchlist', `Watchlist (${fromWatchlist.length})`],
+                ['you', 'Added by you'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setParams(key === 'all' ? {} : { from: key })}
+                className={cx(
+                  'rounded px-2.5 py-1',
+                  origin === key ? 'bg-surface-2 font-medium' : 'text-ink-2',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {tab !== 'filtered' && rows.some((r) => r.fitScore != null) && (
           <Button variant="ghost" onClick={() => setExpandAll((v) => !v)} aria-pressed={expandAll}>
             {expandAll ? 'Collapse all' : 'Expand all'}

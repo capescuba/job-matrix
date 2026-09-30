@@ -4,7 +4,7 @@ import { RateLimitError, LLMError, type LLMProvider, type StructuredRequest } fr
 import { buildApp } from '../../app.ts';
 import { openDb, type Db } from '../../db/client.ts';
 import { aiUsage, crawlLeads, resumeVersions } from '../../db/schema.ts';
-import { getApplicationDetail, listApplications } from '../applications.ts';
+import { createApplication, getApplicationDetail, listApplications } from '../applications.ts';
 import { updateProfile } from '../resume.ts';
 import { getSettings } from '../settings.ts';
 import { buildPrescreenPrompt, type PrescreenResult } from './prescreen.ts';
@@ -272,5 +272,48 @@ describe('pre-screen settings', () => {
       model: 'llama3.2',
       baseUrl: 'http://localhost:11434/v1',
     });
+  });
+});
+
+describe('telling watchlist jobs apart in the inbox', () => {
+  it('each row says where the watchlist found it and what the pre-screen said', async () => {
+    const f = await follow();
+    updateProfile(db, { minBase: 100_000 });
+    const { screener } = fakeScreener((title) =>
+      /Compute/.test(title) ? { ...yes, score: 8.46 } : maybe,
+    );
+    await runCrawl(db, { fetchFn: f, prescreen: screener, ...fast });
+    createApplication(db, { company: 'Acme', title: 'TPM I added', status: 'Screening' });
+
+    const rows = Object.fromEntries(
+      listApplications(db).map((a) => [
+        a.title,
+        [a.foundBy, a.prescreenVerdict, a.prescreenScore, a.prescreenReason, a.prescreenModel],
+      ]),
+    );
+    expect(rows).toEqual({
+      'Staff Technical Program Manager, Compute': [
+        'Anthropic board',
+        'yes',
+        8.5,
+        'Infra TPM role in SF',
+        'fake-small',
+      ],
+      'Technical Program Manager, Finance Systems': [
+        'Anthropic board',
+        'maybe',
+        null,
+        'Office days not stated',
+        'fake-small',
+      ],
+      'TPM I added': [null, null, null, null, null],
+    });
+  });
+
+  it('without a pre-screen, only where it was found', async () => {
+    const f = await follow();
+    await runCrawl(db, { fetchFn: f, prescreen: null });
+    const row = listApplications(db).find((a) => /Compute/.test(a.title))!;
+    expect(row).toMatchObject({ foundBy: 'Anthropic board', prescreenVerdict: null, prescreenScore: null });
   });
 });
