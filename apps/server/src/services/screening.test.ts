@@ -282,6 +282,7 @@ describe('captureJob', () => {
       { skipFetch: true },
     );
     expect(row(first.applicationId).d).toBeNull();
+    expect(db.$client.prepare('SELECT source FROM jobs').pluck().get()).toBe('Indeed');
 
     const filled = await captureJob(
       db,

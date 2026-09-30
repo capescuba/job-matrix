@@ -52,6 +52,10 @@ export const SOURCES = [
   'Lever',
   'Ashby',
   'Workday',
+  'Indeed',
+  'Glassdoor',
+  'ZipRecruiter',
+  'Dice',
   'Referral',
   'Company site',
   'Other',
@@ -78,6 +82,10 @@ export function guessSource(url: string | null | undefined): (typeof SOURCES)[nu
   if (u.includes('lever.co')) return 'Lever';
   if (u.includes('ashbyhq.com')) return 'Ashby';
   if (u.includes('myworkdayjobs.com') || u.includes('workday')) return 'Workday';
+  if (u.includes('indeed.com')) return 'Indeed';
+  if (/glassdoor\.[a-z.]+\//.test(u)) return 'Glassdoor';
+  if (u.includes('ziprecruiter.com')) return 'ZipRecruiter';
+  if (u.includes('dice.com')) return 'Dice';
   return 'Company site';
 }
 
