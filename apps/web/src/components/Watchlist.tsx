@@ -560,7 +560,7 @@ export function JobSites() {
           <Input
             type="url"
             className="min-w-72 flex-1"
-            placeholder="Paste a results page from LinkedIn, Indeed, Glassdoor or ZipRecruiter"
+            placeholder="Paste a results page from LinkedIn, Indeed, Glassdoor, ZipRecruiter or Dice"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />

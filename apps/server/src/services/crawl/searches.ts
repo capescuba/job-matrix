@@ -9,7 +9,7 @@ import { parseSalaryRange, remoteFrom } from '../jobfetch.ts';
 import { normalizeUrl } from '../screening.ts';
 import type { FoundJob } from './run.ts';
 
-export const SEARCH_SITES = ['linkedin', 'indeed', 'glassdoor', 'ziprecruiter'] as const;
+export const SEARCH_SITES = ['linkedin', 'indeed', 'glassdoor', 'ziprecruiter', 'dice'] as const;
 export type SearchSite = (typeof SEARCH_SITES)[number];
 
 export const SEARCH_SITE_LABEL: Record<SearchSite, string> = {
@@ -17,6 +17,7 @@ export const SEARCH_SITE_LABEL: Record<SearchSite, string> = {
   indeed: 'Indeed',
   glassdoor: 'Glassdoor',
   ziprecruiter: 'ZipRecruiter',
+  dice: 'Dice',
 };
 
 /** Which site a results-page address is on; null for anything else. */
@@ -32,6 +33,7 @@ export function searchSiteOf(raw: string): SearchSite | null {
   if (/(^|\.)indeed\.com$/.test(h)) return 'indeed';
   if (/(^|\.)glassdoor\.[a-z.]+$/.test(h)) return 'glassdoor';
   if (/(^|\.)ziprecruiter\.com$/.test(h)) return 'ziprecruiter';
+  if (/(^|\.)dice\.com$/.test(h) && u.pathname.startsWith('/jobs')) return 'dice';
   return null;
 }
 
@@ -69,6 +71,13 @@ export function buildSearchUrl(site: SearchSite, keywords: string, location: str
       q.set('location', location);
       q.set('days', '7');
       return `https://www.ziprecruiter.com/jobs-search?${q}`;
+    case 'dice':
+      q.set('q', keywords);
+      q.set('location', location);
+      q.set('radius', '30');
+      q.set('radiusUnit', 'mi');
+      q.set('filters.postedDate', 'SEVEN');
+      return `https://www.dice.com/jobs?${q}`;
   }
 }
 
@@ -97,6 +106,8 @@ export const listingSchema = z.object({
   pay: z.string().trim().max(200).nullable().optional(),
   /** A line or two of the description, when the results page shows one. */
   snippet: z.string().trim().max(2000).nullable().optional(),
+  /** As the card words it: "Full-time", "Contract", "Third Party, Contract" (Dice). */
+  employmentType: z.string().trim().max(200).nullable().optional(),
 });
 export type SearchListing = z.infer<typeof listingSchema>;
 
@@ -106,10 +117,20 @@ export const searchResultsSchema = z.object({
   problem: z.string().trim().max(500).nullable().optional(),
 });
 
-/** "San Francisco, CA (Hybrid)" / "San Francisco, CA · On-site" → the place, and how. */
+/**
+ * "San Francisco, CA (Hybrid)" / "San Francisco, CA · On-site" / Dice's "Hybrid in Pleasanton,
+ * California" and "Remote or Reston, Virginia" → the place, and how.
+ */
 function place(raw: string | null | undefined) {
   const text = raw?.replace(/\s+/g, ' ').trim() || null;
   if (!text) return { location: null, remoteType: null };
+  const lead = text.match(/^(remote|hybrid|on-?site)(?:\s+(in|or)\s+(.+))?$/i);
+  if (lead) {
+    const [, how, joiner, where] = lead;
+    // "Remote or X": either; keep both so the place rules see the remote option.
+    const location = !where ? how! : /or/i.test(joiner!) ? `${how} | ${where}` : where;
+    return { location, remoteType: remoteFrom(how) };
+  }
   const how = text.match(/\((remote|hybrid|on-?site)\)|·\s*(remote|hybrid|on-?site)\b/i);
   const location =
     text
@@ -128,7 +149,8 @@ function pay(raw: string | null | undefined) {
   if (!text || /\best(imate|\.)?\b/i.test(text)) return { min: null, max: null, hourly: false };
   if (/\/\s*h(ou)?r\b|an hour|per hour|hourly/i.test(text))
     return { min: null, max: null, hourly: true };
-  const r = parseSalaryRange(text.replace(/\/\s*yr\b/gi, '/year'));
+  // "USD 180,200.00 - 225,200.00 per year" (Dice) reads like "$180,200.00 - …".
+  const r = parseSalaryRange(text.replace(/\/\s*yr\b/gi, '/year').replace(/\bUSD\s*(?=\d)/g, '$'));
   if (r) return { ...r, hourly: false };
   // "Up to $250K/yr", "$180K/yr": one figure.
   const one = text.match(/\$\s?(\d{2,3}(?:\.\d+)?)\s?[kK]\b|\$\s?(\d{2,3}(?:,\d{3})+)/);
@@ -164,7 +186,9 @@ export function listingToJob(l: SearchListing): FoundJob | null {
     salaryMin: p.min,
     salaryMax: p.max,
     hourly: p.hourly,
-    employmentType: /\bcontract\b/i.test(`${l.title} ${l.pay ?? ''}`) ? 'Contract' : null,
+    employmentType:
+      l.employmentType?.trim() ||
+      (/\bcontract\b/i.test(`${l.title} ${l.pay ?? ''}`) ? 'Contract' : null),
     postedAt: null,
     descriptionText: null,
     snippet: l.snippet ?? null,

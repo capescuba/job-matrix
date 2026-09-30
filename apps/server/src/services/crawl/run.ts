@@ -548,8 +548,8 @@ export async function ingestSearch(
   const watched = await judge(check, jobs, {
     searchId,
     note: `Found by your saved search “${search.label}”`,
-    // LinkedIn postings can be read by the server; the other sites block it.
-    fetchable: search.site === 'linkedin',
+    // LinkedIn and Dice postings can be read by the server; the other sites block it.
+    fetchable: search.site === 'linkedin' || search.site === 'dice',
   });
   db.update(crawlSearches)
     .set({
