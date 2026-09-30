@@ -154,19 +154,59 @@ function waitForLoad(tabId, timeoutMs = 30_000) {
   });
 }
 
+/**
+ * Runs in a Glassdoor tab: Glassdoor takes a place only by its own id, so look the typed place up
+ * with Glassdoor's own place search. Returns { locT, locId, name } or null.
+ */
+export async function findGlassdoorPlace(term) {
+  try {
+    const r = await fetch(
+      `/autocomplete/location?locationTypeFilters=CITY,STATE,COUNTRY&caller=jobs&term=${encodeURIComponent(term)}`,
+      { credentials: 'include' },
+    );
+    const [hit] = await r.json();
+    return hit
+      ? { locT: hit.locationType, locId: hit.locationId ?? hit.id, name: hit.label }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A Glassdoor search saved with the place as text: the address with Glassdoor's id for it. */
+async function glassdoorAddress(tabId, url) {
+  const u = new URL(url);
+  const term = u.searchParams.get('locKeyword');
+  if (!term) return null;
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: findGlassdoorPlace,
+    args: [term],
+  });
+  if (!result?.locId) return { problem: `Glassdoor doesn't know the place “${term}”.` };
+  u.searchParams.delete('locKeyword');
+  u.searchParams.set('locT', result.locT);
+  u.searchParams.set('locId', String(result.locId));
+  return { url: u.toString() };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 let running = null;
 
 /**
- * Runs every enabled saved search, one at a time. The results tab is brought to the front while
- * it is read (sites only fill in their lists for a visible page), then closed, and the tab you
- * were on is brought back. Returns { ok, ran, errors }.
+ * Runs the enabled saved searches (or just `ids`), one at a time. The results tab is brought to
+ * the front while it is read (sites only fill in their lists for a visible page), then closed,
+ * and the tab you were on is brought back. Returns { ok, ran, errors }.
  */
-export function runSearches() {
+export function runSearches(ids = null) {
   running ??= (async () => {
     const errors = [];
     let ran = 0;
     try {
-      const searches = (await api('/api/crawl/searches')).filter((s) => s.enabled);
+      const searches = (await api('/api/crawl/searches')).filter((s) =>
+        ids ? ids.includes(s.id) : s.enabled,
+      );
       if (!searches.length) return { ok: true, ran: 0, errors };
       await api('/api/crawl/searches/started', { method: 'POST', body: {} });
       const [before] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -175,7 +215,29 @@ export function runSearches() {
         try {
           tab = await chrome.tabs.create({ url: s.url, active: true });
           await waitForLoad(tab.id);
-          await new Promise((r) => setTimeout(r, 2000));
+          await sleep(2000);
+          if (s.site === 'glassdoor') {
+            const fixed = await glassdoorAddress(tab.id, s.url);
+            if (fixed?.problem) {
+              await api(`/api/crawl/searches/${s.id}/results`, {
+                method: 'POST',
+                body: { listings: [], problem: fixed.problem },
+              });
+              errors.push(`${s.label}: ${fixed.problem}`);
+              continue;
+            }
+            if (fixed?.url) {
+              // Remembered, so the lookup happens once.
+              await api(`/api/crawl/searches/${s.id}`, {
+                method: 'PATCH',
+                body: { url: fixed.url },
+              });
+              const loaded = waitForLoad(tab.id);
+              await chrome.tabs.update(tab.id, { url: fixed.url });
+              await loaded;
+              await sleep(2000);
+            }
+          }
           const [{ result }] = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: readSearchPage,
@@ -193,7 +255,7 @@ export function runSearches() {
           if (before?.id) await chrome.tabs.update(before.id, { active: true }).catch(() => {});
         }
         // A pause between sites, like a person would take.
-        await new Promise((r) => setTimeout(r, 2500));
+        await sleep(2500);
       }
       return { ok: true, ran, errors };
     } catch (e) {

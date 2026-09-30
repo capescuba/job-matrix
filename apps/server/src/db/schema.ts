@@ -409,6 +409,8 @@ export const crawlSearches = sqliteTable('crawl_searches', {
   /** The results page, as you had it in Chrome. */
   url: text('url').notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  /** True for the built-in search on each site (made from your keywords and place); false for one you pasted. */
+  preset: integer('preset', { mode: 'boolean' }).notNull().default(false),
   lastRunAt: text('last_run_at'),
   lastError: text('last_error'),
   /** Last run: listings read, how many had a title you watch for, and how many were added. */
@@ -473,4 +475,7 @@ export const crawlState = sqliteTable('crawl_state', {
   filtered: integer('filtered').notNull().default(0),
   /** When the extension last started running the saved searches. */
   searchRunAt: text('search_run_at'),
+  /** What the built-in job-site searches look for, and where; null = the defaults. */
+  searchKeywords: text('search_keywords'),
+  searchLocation: text('search_location'),
 });

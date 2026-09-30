@@ -10,11 +10,14 @@ import { listingToJob, searchLabel, searchSiteOf } from './searches.ts';
 import {
   addSearch,
   getSearch,
+  jobSites,
   listFiltered,
   markSearchRun,
   removeSearch,
   searchesDue,
+  setJobSiteSearch,
   updateCrawlSettings,
+  updateSearch,
 } from './watchlist.ts';
 
 const TOKEN = 't'.repeat(48);
@@ -305,5 +308,51 @@ describe('when the searches are due', () => {
 
     updateCrawlSettings(db, { intervalMinutes: -1 });
     expect(searchesDue(db, later)).toBe(false);
+  });
+});
+
+describe('the built-in job-site searches', () => {
+  it('lists all four sites, searching your keywords and place, newest first', () => {
+    const { keywords, location, sites } = jobSites(db);
+    expect([keywords, location]).toEqual(['technical program manager', 'San Francisco Bay Area']);
+    expect(sites.map((s) => [s.site, s.label, s.enabled, s.preset])).toEqual([
+      ['linkedin', 'LinkedIn', true, true],
+      ['indeed', 'Indeed', true, true],
+      ['glassdoor', 'Glassdoor', true, true],
+      ['ziprecruiter', 'ZipRecruiter', true, true],
+    ]);
+    expect(sites.map((s) => s.url)).toEqual([
+      'https://www.linkedin.com/jobs/search/?keywords=technical+program+manager&location=San+Francisco+Bay+Area&sortBy=DD&f_TPR=r604800',
+      'https://www.indeed.com/jobs?q=technical+program+manager&l=San+Francisco+Bay+Area&sort=date&fromage=7',
+      'https://www.glassdoor.com/Job/jobs.htm?sc.keyword=technical+program+manager&locKeyword=San+Francisco+Bay+Area&sortBy=date_desc',
+      'https://www.ziprecruiter.com/jobs-search?search=technical+program+manager&location=San+Francisco+Bay+Area&days=7',
+    ]);
+    // Asking again doesn't add more.
+    expect(jobSites(db).sites).toHaveLength(4);
+  });
+
+  it('new keywords remake every site search; switches are kept', () => {
+    const linkedin = jobSites(db).sites[0]!;
+    updateSearch(db, linkedin.id, { enabled: false });
+    const after = setJobSiteSearch(db, { keywords: 'staff tpm', location: 'Oakland, CA' });
+    expect(after.sites[0]).toMatchObject({ enabled: false });
+    expect(after.sites[0]!.url).toContain('keywords=staff+tpm&location=Oakland%2C+CA');
+    expect(after.sites[3]!.url).toContain('search=staff+tpm&location=Oakland%2C+CA');
+  });
+
+  it('the extension may store Glassdoor’s own address for the place, on the same site only', () => {
+    const glassdoor = jobSites(db).sites[2]!;
+    const fixed =
+      'https://www.glassdoor.com/Job/jobs.htm?sc.keyword=technical+program+manager&sortBy=date_desc&locT=C&locId=1147401';
+    expect(updateSearch(db, glassdoor.id, { url: fixed }).url).toBe(fixed);
+    expect(() => updateSearch(db, glassdoor.id, { url: LI_SEARCH })).toThrow(
+      /not a Glassdoor search/,
+    );
+  });
+
+  it('with the schedule on manual, nothing is ever due', () => {
+    jobSites(db);
+    updateCrawlSettings(db, { intervalMinutes: -1 });
+    expect(searchesDue(db, new Date(Date.now() + 86_400_000))).toBe(false);
   });
 });

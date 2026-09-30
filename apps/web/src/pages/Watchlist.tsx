@@ -1,9 +1,9 @@
 import {
+  JobSites,
   PrescreenSettings,
   WatchlistCompanies,
   WatchlistHeader,
   WatchlistRules,
-  WatchlistSearches,
   useCrawlStatus,
 } from '../components/Watchlist.tsx';
 
@@ -16,8 +16,8 @@ export default function WatchlistPage() {
   return (
     <div className="space-y-4">
       <WatchlistHeader status={status} />
+      <JobSites />
       <WatchlistCompanies />
-      <WatchlistSearches />
       <WatchlistRules status={status} />
       <PrescreenSettings />
     </div>

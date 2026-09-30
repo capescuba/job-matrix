@@ -312,6 +312,18 @@ export const api = {
   crawlSearches: () => request<SearchRow[]>('GET', '/api/crawl/searches'),
   addCrawlSearch: (url: string, label?: string | null) =>
     request<SearchRow>('POST', '/api/crawl/searches', { url, label }),
+  /** The built-in search on each job site, and the keywords and place they use. */
+  jobSites: () =>
+    request<{ keywords: string; location: string; sites: SearchRow[] }>(
+      'GET',
+      '/api/crawl/job-sites',
+    ),
+  setJobSites: (keywords: string, location: string) =>
+    request<{ keywords: string; location: string; sites: SearchRow[] }>(
+      'PUT',
+      '/api/crawl/job-sites',
+      { keywords, location },
+    ),
   updateCrawlSearch: (id: number, patch: { enabled?: boolean; label?: string }) =>
     request<SearchRow>('PATCH', `/api/crawl/searches/${id}`, patch),
   removeCrawlSearch: (id: number) => request<void>('DELETE', `/api/crawl/searches/${id}`),

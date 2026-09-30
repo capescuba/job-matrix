@@ -125,6 +125,8 @@ import {
   CRAWL_INTERVALS,
   addSearch,
   addSource,
+  jobSites,
+  setJobSiteSearch,
   crawlSettings,
   listSearches,
   markSearchRun,
@@ -416,6 +418,21 @@ export function buildApp(
   );
 
   // ----- saved searches: read by the Chrome extension in your signed-in Chrome -----
+  // The built-in search on each job site: one set of keywords and a place.
+  app.get('/api/crawl/job-sites', () => jobSites(db));
+  app.put('/api/crawl/job-sites', (req) => {
+    const body = z
+      .object({
+        keywords: z.string().trim().min(1).max(200),
+        location: z.string().trim().min(1).max(200),
+      })
+      .parse(req.body);
+    logEvent(
+      'crawl.search.sites',
+      `Job sites now search for “${body.keywords}” in ${body.location}`,
+    );
+    return setJobSiteSearch(db, body);
+  });
   app.get('/api/crawl/searches', () => listSearches(db));
   app.post('/api/crawl/searches', (req, reply) => {
     const body = z
@@ -436,6 +453,7 @@ export function buildApp(
         .object({
           enabled: z.boolean().optional(),
           label: z.string().trim().min(1).max(200).optional(),
+          url: z.string().trim().url().max(2000).optional(),
         })
         .parse(req.body),
     ),

@@ -35,6 +35,43 @@ export function searchSiteOf(raw: string): SearchSite | null {
   return null;
 }
 
+/** What the built-in site searches look for when you haven't said. */
+export const DEFAULT_SEARCH_KEYWORDS = 'technical program manager';
+export const DEFAULT_SEARCH_LOCATION = 'San Francisco Bay Area';
+
+/**
+ * The results page for keywords and a place on each site, newest first (the last week where the
+ * site allows it). Glassdoor only takes a place by its own id, so its address carries the place
+ * as text (locKeyword); the extension looks the id up inside Glassdoor on the first run.
+ */
+export function buildSearchUrl(site: SearchSite, keywords: string, location: string): string {
+  const q = new URLSearchParams();
+  switch (site) {
+    case 'linkedin':
+      q.set('keywords', keywords);
+      q.set('location', location);
+      q.set('sortBy', 'DD');
+      q.set('f_TPR', 'r604800');
+      return `https://www.linkedin.com/jobs/search/?${q}`;
+    case 'indeed':
+      q.set('q', keywords);
+      q.set('l', location);
+      q.set('sort', 'date');
+      q.set('fromage', '7');
+      return `https://www.indeed.com/jobs?${q}`;
+    case 'glassdoor':
+      q.set('sc.keyword', keywords);
+      q.set('locKeyword', location);
+      q.set('sortBy', 'date_desc');
+      return `https://www.glassdoor.com/Job/jobs.htm?${q}`;
+    case 'ziprecruiter':
+      q.set('search', keywords);
+      q.set('location', location);
+      q.set('days', '7');
+      return `https://www.ziprecruiter.com/jobs-search?${q}`;
+  }
+}
+
 /** A default name for a search: its keywords and place, read from the address. */
 export function searchLabel(raw: string): string {
   const u = new URL(raw.trim());
