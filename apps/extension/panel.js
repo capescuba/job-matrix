@@ -235,8 +235,10 @@ async function refresh() {
 }
 
 async function loadSavedAnswers() {
+  // The company this form is for, so answers written about another company aren't offered.
+  const company = (state.ctx && helperApp()?.company) || state.ctx?.detected?.company || '';
   for (const q of state.page?.questions ?? []) {
-    api(`/api/ext/answers?q=${encodeURIComponent(q.label)}`)
+    api(`/api/ext/answers?q=${encodeURIComponent(q.label)}&company=${encodeURIComponent(company)}`)
       .then((rows) => {
         if (rows?.length) {
           state.saved[q.id] = rows;

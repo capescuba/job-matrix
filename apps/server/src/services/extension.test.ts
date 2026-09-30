@@ -4,7 +4,7 @@ import type { LLMProvider, StructuredRequest } from '@jm/ai';
 import type { CompanyResearch } from '@jm/shared';
 import { buildApp } from '../app.ts';
 import { openDb, type Db } from '../db/client.ts';
-import { companyResearch, profile, resumeVersions } from '../db/schema.ts';
+import { applicationAnswers, companyResearch, profile, resumeVersions } from '../db/schema.ts';
 import { createApplication } from './applications.ts';
 import { assessFit } from './fit.ts';
 import {
@@ -471,5 +471,26 @@ describe('application answers', () => {
     );
     expect(similarAnswers(db, 'Why do you want to work at Walmart?')).toHaveLength(1);
     expect(similarAnswers(db, 'What is your notice period?')).toHaveLength(0);
+  });
+
+  it("doesn't offer an answer that names another company", async () => {
+    const other = add('Character.AI', 'Staff TPM', 'https://jobs.ashbyhq.com/character/1');
+    db.insert(applicationAnswers)
+      .values({
+        applicationId: other,
+        question: 'Why are you interested in working at Character.AI?',
+        answer: 'Character.AI is building a new kind of entertainment with AI, and this role fits.',
+      })
+      .run();
+    const q = 'Why are you interested in working at Suno?';
+    expect(similarAnswers(db, q)).toHaveLength(0);
+    expect(similarAnswers(db, q, 3, 'Suno')).toHaveLength(0);
+    // Still offered for that company: named in the question, or the one you're applying to.
+    expect(similarAnswers(db, 'Why are you interested in working at Character.AI?')).toHaveLength(
+      1,
+    );
+    expect(
+      similarAnswers(db, 'Why are you interested in working here?', 3, 'Character AI'),
+    ).toHaveLength(1);
   });
 });

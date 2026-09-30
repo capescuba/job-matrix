@@ -519,9 +519,12 @@ export function buildApp(
   app.post('/api/ext/answer', { preHandler: requireToken }, (req) =>
     suggestAnswer(db, answerRequestSchema.parse(req.body)),
   );
-  app.get('/api/ext/answers', { preHandler: requireToken }, (req) =>
-    similarAnswers(db, z.object({ q: z.string().max(2000) }).parse(req.query).q),
-  );
+  app.get('/api/ext/answers', { preHandler: requireToken }, (req) => {
+    const { q, company } = z
+      .object({ q: z.string().max(2000), company: z.string().max(200).optional() })
+      .parse(req.query);
+    return similarAnswers(db, q, 3, company);
+  });
   // Saved answers on the job page.
   app.get('/api/applications/:id/answers', (req) => listAnswers(db, idParam.parse(req.params).id));
   app.delete('/api/answers/:id', (req, reply) => {
