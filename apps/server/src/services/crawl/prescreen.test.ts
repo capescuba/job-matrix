@@ -255,7 +255,7 @@ describe('pre-screen settings', () => {
     expect(getSettings().prescreen).toMatchObject({
       provider: 'groq',
       baseUrl: 'https://api.groq.com/openai/v1',
-      model: 'llama-3.3-70b-versatile',
+      model: 'openai/gpt-oss-120b',
       ready: false,
       apiKeyHint: null,
     });
@@ -314,7 +314,11 @@ describe('telling watchlist jobs apart in the inbox', () => {
     const f = await follow();
     await runCrawl(db, { fetchFn: f, prescreen: null });
     const row = listApplications(db).find((a) => /Compute/.test(a.title))!;
-    expect(row).toMatchObject({ foundBy: 'Anthropic board', prescreenVerdict: null, prescreenScore: null });
+    expect(row).toMatchObject({
+      foundBy: 'Anthropic board',
+      prescreenVerdict: null,
+      prescreenScore: null,
+    });
   });
 });
 

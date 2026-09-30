@@ -147,3 +147,23 @@ describe('OpenAICompatProvider', () => {
     expect(local.sent[0]!.auth).toBeNull();
   });
 });
+
+describe('a model the account cannot use', () => {
+  it('says to pick another model name, not just "404"', async () => {
+    const api = fakeApi([
+      {
+        status: 404,
+        body: {
+          error: {
+            message:
+              'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.',
+            code: 'model_not_found',
+          },
+        },
+      },
+    ]);
+    await expect(
+      provider(api.fetchFn).completeStructured({ system: 's', prompt: 'p', schema }),
+    ).rejects.toThrow(/Groq doesn't offer that model to your account .*Pick another model name/);
+  });
+});
