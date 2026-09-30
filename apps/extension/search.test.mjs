@@ -22,6 +22,8 @@ let missing = [];
 const local = {};
 const captures = [];
 const opened = [];
+let keptAlive = 0;
+let slowResults = false;
 let nextTab = 1;
 const tabUrls = {};
 const listeners = new Set();
@@ -37,7 +39,13 @@ globalThis.chrome = {
       },
     },
   },
-  runtime: { sendNativeMessage: async () => null },
+  runtime: {
+    sendNativeMessage: async () => null,
+    getPlatformInfo: async () => {
+      keptAlive++;
+      return { os: 'win' };
+    },
+  },
   tabs: {
     query: async () => [{ id: 99 }],
     create: async ({ url, active }) => {
@@ -90,6 +98,8 @@ globalThis.fetch = vi.fn(async (url, init) => {
     captures.push(body);
     return json({ existing: true, descriptionAdded: !!body.fields?.descriptionText });
   }
+  // A results page with many matches: the server's pre-screen takes a minute.
+  if (slowResults && path.endsWith('/results')) await new Promise((r) => setTimeout(r, 60_000));
   if (path === '/api/crawl/searches/1/results')
     return json({ seen: 1, matched: 1, added: 1, filtered: 0, screened: 0, waiting: 0 });
   if (path === '/api/crawl/searches/2/results')
@@ -109,7 +119,7 @@ beforeEach(() => {
 
 /** Runs the searches with the pauses skipped. */
 async function run() {
-  vi.useFakeTimers({ toFake: ['setTimeout'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearInterval'] });
   const running = runSearches();
   await vi.runAllTimersAsync();
   const r = await running;
@@ -186,5 +196,21 @@ describe('reading the descriptions the server cannot', () => {
     await run();
     expect(captures).toEqual([]);
     expect(reports.at(-1).descriptions).toBeNull();
+  });
+});
+
+describe('a long run', () => {
+  it('keeps the extension worker awake while the server works, and stops after', async () => {
+    slowResults = true;
+    keptAlive = 0;
+    await run();
+    slowResults = false;
+    // Two searches, a minute each: a call at least every 20 seconds.
+    expect(keptAlive).toBeGreaterThanOrEqual(6);
+    const after = keptAlive;
+    vi.useFakeTimers({ toFake: ['setInterval'] });
+    await vi.advanceTimersByTimeAsync(60_000);
+    vi.useRealTimers();
+    expect(keptAlive).toBe(after);
   });
 });
