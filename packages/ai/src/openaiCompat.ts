@@ -86,6 +86,14 @@ export class OpenAICompatProvider implements LLMProvider {
         Number.isFinite(after) && after > 0 ? after : null,
       );
     }
+    // A model the account can't use: say what to do, not just the code.
+    if (res.status === 404 && /model/i.test(detail))
+      throw Object.assign(
+        new LLMError(
+          `${this.name} doesn't offer that model to your account (${detail}). Pick another model name on the Watchlist page.`,
+        ),
+        { status: res.status },
+      );
     throw Object.assign(new LLMError(`${this.name} API error ${res.status}: ${detail}`.trim()), {
       status: res.status,
     });

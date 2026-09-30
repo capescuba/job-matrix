@@ -50,7 +50,8 @@ export const PRESCREEN_PRESETS: Record<
   groq: {
     label: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
-    model: 'llama-3.3-70b-versatile',
+    // Groq's free tier no longer includes its Llama models (404 model_not_found); GPT-OSS is.
+    model: 'openai/gpt-oss-120b',
     needsKey: true,
     keyUrl: 'https://console.groq.com/keys',
   },

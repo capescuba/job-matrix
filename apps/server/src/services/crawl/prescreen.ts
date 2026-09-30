@@ -107,7 +107,8 @@ export async function prescreenJob(
     prompt: buildPrescreenPrompt(db, job),
     schema: prescreenSchema,
     model: screener.model,
-    maxTokens: 400,
+    // Room for a reasoning model (GPT-OSS thinks before it answers, ~350 tokens here).
+    maxTokens: 1500,
   });
   const usageId = recordUsage(db, {
     feature: 'prescreen',

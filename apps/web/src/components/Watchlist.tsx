@@ -690,7 +690,7 @@ type Provider = Settings['prescreen']['provider'];
 
 const PROVIDER_OPTION: Record<Provider, string> = {
   off: 'Off — rules only',
-  groq: 'Groq — Llama 3.3 70B, free (recommended)',
+  groq: 'Groq — GPT-OSS 120B, free (recommended)',
   gemini: 'Google Gemini — Flash-Lite, free, fastest',
   openrouter: 'OpenRouter — a free model',
   ollama: 'Ollama — a model running on this PC',
@@ -700,7 +700,7 @@ const PROVIDER_OPTION: Record<Provider, string> = {
 
 const PROVIDER_NOTE: Record<Provider, string> = {
   off: 'Every job the rules let through goes to the inbox.',
-  groq: 'Free: 1,000 jobs a day, about 7 a minute, so a first check of a big board takes a few minutes. Groq does not train on what it is sent.',
+  groq: 'Free, with per-minute and per-day limits, so a first check of a big board can take a few minutes. Groq does not train on what it is sent. Other free Groq models: openai/gpt-oss-20b, qwen/qwen3.8-27b.',
   gemini:
     'Free: about 1,000 jobs a day, 15 a minute. On the free tier Google may use what it is sent to improve its models.',
   openrouter:
