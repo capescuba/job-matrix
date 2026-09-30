@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
+import { parseLooseJson } from './json.ts';
 import {
   LLMError,
   type LLMProvider,
@@ -218,19 +219,6 @@ export class AnthropicProvider implements LLMProvider {
   }
 }
 
-/** JSON from a reply that may wrap it in prose or code fences. */
-export function parseLooseJson(text: string): unknown {
-  const t = text.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
-  const start = t.indexOf('{');
-  const end = t.lastIndexOf('}');
-  if (start < 0 || end < start) return undefined;
-  try {
-    return JSON.parse(t.slice(start, end + 1));
-  } catch {
-    return undefined;
-  }
-}
-
 /** Anthropic API errors → LLMError with the API's own message (shown in the UI as-is). */
 function apiError(e: unknown): Error {
   if (e instanceof Anthropic.APIError) {
@@ -240,3 +228,5 @@ function apiError(e: unknown): Error {
   }
   return e as Error;
 }
+
+export { parseLooseJson };

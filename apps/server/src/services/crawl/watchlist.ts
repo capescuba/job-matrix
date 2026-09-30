@@ -30,9 +30,9 @@ import {
 /** Manual, when the app opens, then hours. Boards change slowly; there is no need to hurry. */
 export const CRAWL_INTERVALS = [-1, 0, 60, 180, 360] as const;
 
-/** Verdicts that put a job in the inbox, and ones that keep it out. */
+/** Verdicts that put a job in the inbox, and ones that keep it out (for now, if waiting). */
 export const ADDED_VERDICTS = ['yes', 'maybe'] as const;
-export const FILTERED_VERDICTS = ['no-rules', 'no-ai', 'duplicate', 'error'] as const;
+export const FILTERED_VERDICTS = ['no-rules', 'no-ai', 'duplicate', 'error', 'waiting'] as const;
 
 function stateRow(db: Db) {
   const row = db.select().from(crawlState).where(eq(crawlState.id, 1)).get();
@@ -195,6 +195,14 @@ export const listFiltered = (db: Db, limit = 500) =>
     .orderBy(desc(crawlLeads.createdAt), desc(crawlLeads.id))
     .limit(limit)
     .all();
+
+/** Jobs the rules let through that the pre-screen hasn't answered yet. */
+export const waitingCount = (db: Db) =>
+  db
+    .select({ n: sql<number>`count(*)` })
+    .from(crawlLeads)
+    .where(eq(crawlLeads.verdict, 'waiting'))
+    .get()?.n ?? 0;
 
 export const filteredCount = (db: Db) =>
   db

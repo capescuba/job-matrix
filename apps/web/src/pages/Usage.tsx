@@ -21,6 +21,7 @@ const FEATURE_LABELS: Record<string, string> = {
   answer: 'Application answers',
   email: 'Email updates',
   profile: 'Career profile',
+  prescreen: 'Watchlist pre-screen',
 };
 
 export default function UsagePage() {

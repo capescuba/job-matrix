@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { EFFORTS, resetProvider, type Effort } from '@jm/ai';
+import { EFFORTS, PRESCREEN_PRESETS, prescreenConfig, resetProvider, type Effort } from '@jm/ai';
 import { ENV_FILE } from '../paths.ts';
 
 /** Keys the Settings UI may write to .env. */
@@ -9,6 +9,10 @@ const EDITABLE = [
   'AI_RESEARCH_MODEL',
   'AI_EMAIL_MODEL',
   'AI_EFFORT',
+  'PRESCREEN_PROVIDER',
+  'PRESCREEN_BASE_URL',
+  'PRESCREEN_API_KEY',
+  'PRESCREEN_MODEL',
 ] as const;
 type Key = (typeof EDITABLE)[number];
 
@@ -21,6 +25,12 @@ export const DEFAULT_EFFORT: Effort = 'low';
 export function currentEffort(): Effort {
   const e = process.env.AI_EFFORT as Effort | undefined;
   return e && EFFORTS.includes(e) ? e : DEFAULT_EFFORT;
+}
+
+/** Pre-screen settings for the UI: never the key itself, just enough to recognise it. */
+function prescreenSettings() {
+  const { apiKey, ...c } = prescreenConfig();
+  return { ...c, apiKeyHint: apiKey ? `…${apiKey.slice(-4)}` : null, presets: PRESCREEN_PRESETS };
 }
 
 export function getSettings() {
@@ -37,6 +47,8 @@ export function getSettings() {
     /** Ask AI on an unclear email (Email page). */
     emailModel: process.env.AI_EMAIL_MODEL || DEFAULT_EMAIL_MODEL,
     effort: currentEffort(),
+    /** The model that pre-screens watchlist jobs (a free one, by default off). */
+    prescreen: prescreenSettings(),
   };
 }
 
