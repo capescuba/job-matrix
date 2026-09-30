@@ -116,6 +116,9 @@ export function ScreeningCard({
             <span className="text-ink-3"> · </span>
             <span className="text-ink-2">{metaLine(r).join(' · ')}</span>
             <WatchlistChips row={r} />
+            <span className="ml-2 inline-flex gap-x-2 text-xs">
+              <JobLinks row={r} />
+            </span>
           </div>
           {!r.hasDescription && <span className="text-xs text-warn">No description captured</span>}
           <PrescreenButton row={r} onChanged={onChanged} />
@@ -224,6 +227,22 @@ function metaLine(r: ApplicationRow): string[] {
   ].filter((x): x is string => !!x);
 }
 
+/** The posting on its own site, and the job's page in Job Matrix. */
+function JobLinks({ row: r }: { row: ApplicationRow }) {
+  return (
+    <>
+      {r.url && (
+        <a href={r.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+          posting ↗
+        </a>
+      )}
+      <Link to={`/applications/${r.id}`} className="text-accent hover:underline">
+        job page
+      </Link>
+    </>
+  );
+}
+
 function Title({ row: r, onChanged }: { row: ApplicationRow; onChanged: () => void }) {
   return (
     <>
@@ -273,19 +292,7 @@ function Scored({
           <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-ink-3">
             <span>{metaLine(r).join(' · ')}</span>
             <WatchlistChips row={r} />
-            {r.url && (
-              <a
-                href={r.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent hover:underline"
-              >
-                posting ↗
-              </a>
-            )}
-            <Link to={`/applications/${r.id}`} className="text-accent hover:underline">
-              job page
-            </Link>
+            <JobLinks row={r} />
           </div>
         </div>
         <Verdict
