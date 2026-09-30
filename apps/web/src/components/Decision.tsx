@@ -55,11 +55,14 @@ export function Verdict({
   verdict,
   gate,
   reasons,
+  compact,
 }: {
   score: number;
   verdict: string | null;
   gate: Gate | null;
   reasons: GateReason[];
+  /** A smaller ring, for one-line rows. */
+  compact?: boolean;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -81,7 +84,8 @@ export function Verdict({
       </div>
       <div
         className={cx(
-          'flex size-13 items-center justify-center rounded-full border-[3px] text-lg font-semibold tabular-nums',
+          'flex shrink-0 items-center justify-center rounded-full font-semibold tabular-nums',
+          compact ? 'size-10 border-2 text-sm' : 'size-13 border-[3px] text-lg',
           gate === 'fail' ? 'border-bad/50 text-ink-3' : 'border-accent/60',
         )}
         title="Fit score (0–10)"

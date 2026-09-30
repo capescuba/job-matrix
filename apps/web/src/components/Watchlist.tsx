@@ -54,57 +54,42 @@ function useCheckNow() {
 
 /** What the last check found, in words. */
 function lastCheck(s: CrawlStatus) {
-  if (!s.lastRunAt) return 'Not checked yet.';
+  if (!s.lastRunAt) return 'Not checked yet';
   const { matched, added, filtered, boards } = s.last;
-  return `Last checked ${when(s.lastRunAt)}: ${plural(matched, 'matching job')} on ${plural(boards, 'board')}, ${added} added to the inbox, ${filtered} filtered out.`;
+  return `Checked ${when(s.lastRunAt)} · ${plural(matched, 'matching job')} on ${plural(boards, 'board')} · ${added} added · ${filtered} filtered out`;
 }
 
-/** Screening page: one line on the watchlist, with Check now. */
+/** Screening page: one quiet line on the watchlist, once a company is followed. */
 export function WatchlistStrip({ status }: { status: CrawlStatus | undefined }) {
   const check = useCheckNow();
-  if (!status) return null;
-  if (status.sources === 0)
-    return (
-      <p className="text-sm text-ink-3">
-        Want jobs to arrive here on their own?{' '}
-        <Link to="/profile#watchlist" className="text-accent hover:underline">
-          Follow company job boards
-        </Link>{' '}
-        and new matching jobs are added to this inbox.
-      </p>
-    );
+  if (!status || status.sources === 0) return null;
   const p = status.progress;
+  const problem =
+    !p.running &&
+    [
+      status.waitingCount > 0 && `${plural(status.waitingCount, 'job')} waiting for the pre-screen`,
+      status.lastError,
+    ]
+      .filter(Boolean)
+      .join(' · ');
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-surface px-3 py-2 text-sm">
-      <span className="font-medium">Watchlist</span>
+    <div className="flex flex-wrap items-center gap-x-2 text-xs text-ink-3">
+      <Link to="/watchlist" className="font-medium text-ink-2 hover:underline">
+        Watchlist
+      </Link>
       {p.running ? (
         <span className="text-accent">
-          Checking… {p.boardsDone}/{p.boards} boards, {plural(p.matched, 'matching job')}
-          {status.prescreen ? `, ${p.screened} pre-screened` : ''}, {p.added} added
+          Checking… {p.boardsDone}/{p.boards} boards, {p.added} added
         </span>
       ) : (
-        <span className="text-ink-2">{lastCheck(status)}</span>
+        <span>{lastCheck(status)}</span>
       )}
-      {status.waitingCount > 0 && !p.running && (
-        <span className="text-warn">
-          {plural(status.waitingCount, 'job')} waiting for the pre-screen.
-        </span>
+      {problem && <span className="text-warn">{problem}</span>}
+      {!p.running && (
+        <button className="text-accent hover:underline" onClick={() => check.mutate()}>
+          Check now
+        </button>
       )}
-      {status.lastError && !p.running && <span className="text-warn">{status.lastError}</span>}
-      <span className="ml-auto flex items-center gap-2">
-        <span className="text-xs text-ink-3">
-          {status.prescreen ? `Pre-screen: ${status.prescreen.model}` : 'Rules only'}
-        </span>
-        {status.nextRunAt && !p.running && (
-          <span className="text-xs text-ink-3">Next check {when(status.nextRunAt)}</span>
-        )}
-        <Link to="/profile#watchlist" className="text-xs text-accent hover:underline">
-          {plural(status.sources, 'company', 'companies')}
-        </Link>
-        <Button onClick={() => check.mutate()} disabled={p.running}>
-          {p.running ? 'Checking…' : 'Check now'}
-        </Button>
-      </span>
       <ErrorText error={check.error} />
     </div>
   );
@@ -145,13 +130,12 @@ export function FilteredList({ onAdded }: { onAdded: (applicationId: number) => 
     );
   return (
     <div className="space-y-2">
-      <p className="text-sm text-ink-2">
-        Found on your watched boards with a title you look for, but kept out of the inbox. Rules are
-        on{' '}
-        <Link to="/profile#watchlist" className="text-accent hover:underline">
-          Profile
-        </Link>
-        ; a job filtered by a rule is looked at again whenever the rules change.
+      <p className="text-xs text-ink-3">
+        Matched a title on your{' '}
+        <Link to="/watchlist" className="text-accent hover:underline">
+          watchlist
+        </Link>{' '}
+        but kept out of the inbox.
       </p>
       <ErrorText error={error ?? add.error} />
       <ul className="divide-y divide-border rounded-lg border border-border bg-surface">
@@ -214,25 +198,40 @@ function LeadLine({ lead, busy, onAdd }: { lead: LeadRow; busy: boolean; onAdd: 
   );
 }
 
-// ---------- Profile: the boards and the rules ----------
+// ---------- Watchlist page: the boards and the rules ----------
 
-type Lists = Pick<CrawlStatus, 'titleInclude' | 'titleExclude' | 'locations'>;
-const toText = (s: Lists | undefined) => ({
-  titleInclude: (s?.titleInclude ?? []).join('\n'),
-  titleExclude: (s?.titleExclude ?? []).join('\n'),
-  locations: (s?.locations ?? []).join('\n'),
-});
-const toLines = (t: string) =>
-  t
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-/** Profile page: which company job boards to follow, and what to look for on them. */
-export function WatchlistCard() {
-  const qc = useQueryClient();
-  const status = useCrawlStatus();
+/** Page header line: how the last check went, and Check now. */
+export function WatchlistHeader({ status }: { status: CrawlStatus | undefined }) {
   const check = useCheckNow();
+  const p = status?.progress;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <h1 className="text-xl font-semibold">Watchlist</h1>
+      <span className="mr-auto text-sm text-ink-3">
+        {!status
+          ? ''
+          : p?.running
+            ? `Checking… ${p.boardsDone}/${p.boards} boards, ${p.added} added`
+            : lastCheck(status)}
+      </span>
+      {status?.lastError && !p?.running && (
+        <span className="text-sm text-warn">{status.lastError}</span>
+      )}
+      <Button
+        variant="primary"
+        onClick={() => check.mutate()}
+        disabled={!status || p?.running || status.sources === 0}
+      >
+        {p?.running ? 'Checking…' : 'Check now'}
+      </Button>
+      <ErrorText error={check.error} />
+    </div>
+  );
+}
+
+/** The company job boards you follow. */
+export function WatchlistCompanies() {
+  const qc = useQueryClient();
   const { data: sources = [] } = useQuery({
     queryKey: ['crawl-sources'],
     queryFn: api.crawlSources,
@@ -241,7 +240,6 @@ export function WatchlistCard() {
     qc.invalidateQueries({ queryKey: ['crawl-sources'] });
     qc.invalidateQueries({ queryKey: ['crawl-status'] });
   };
-
   const [url, setUrl] = useState('');
   const add = useMutation({
     mutationFn: () => api.addCrawlSource(url.trim()),
@@ -256,11 +254,114 @@ export function WatchlistCard() {
     onSuccess: refresh,
   });
   const remove = useMutation({ mutationFn: api.removeCrawlSource, onSuccess: refresh });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (url.trim()) add.mutate();
+  };
+
+  return (
+    <Card title={`Companies${sources.length ? ` (${sources.length})` : ''}`}>
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
+        <Input
+          type="url"
+          className="min-w-72 flex-1"
+          placeholder="Paste a company's careers page, job board or any job posting"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <Button type="submit" disabled={!url.trim() || add.isPending}>
+          {add.isPending ? 'Reading the board…' : 'Follow'}
+        </Button>
+      </form>
+      <ErrorText error={add.error ?? update.error ?? remove.error} />
+
+      {sources.length === 0 ? (
+        <p className="mt-3 text-sm text-ink-3">
+          No companies yet. Greenhouse, Ashby, Lever and Workday boards can be followed. New jobs
+          with a title you look for are added to the Screening inbox.
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-border text-sm">
+          {sources.map((s) => (
+            <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+              <input
+                type="checkbox"
+                checked={s.enabled}
+                title={s.enabled ? 'Checked on each run' : 'Paused'}
+                aria-label={`Check ${s.companyName}`}
+                onChange={(e) => update.mutate({ id: s.id, enabled: e.target.checked })}
+              />
+              <button
+                className={cx('font-medium hover:underline', !s.enabled && 'text-ink-3')}
+                title="Rename"
+                onClick={() => {
+                  const name = prompt('Company name', s.companyName)?.trim();
+                  if (name && name !== s.companyName)
+                    update.mutate({ id: s.id, companyName: name });
+                }}
+              >
+                {s.companyName}
+              </button>
+              <a
+                href={s.boardUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-ink-3 hover:underline"
+              >
+                {BOARD[s.kind]} ↗
+              </a>
+              <span
+                className="ml-auto text-xs text-ink-3"
+                title={s.lastCheckedAt ? `Checked ${when(s.lastCheckedAt)}` : undefined}
+              >
+                {s.lastError ? (
+                  <span className="text-bad">{s.lastError}</span>
+                ) : s.lastCount == null ? (
+                  'Not checked yet'
+                ) : s.kind === 'workday' ? (
+                  plural(s.lastMatched ?? 0, 'matching job')
+                ) : (
+                  `${s.lastMatched ?? 0} matching of ${s.lastCount}`
+                )}
+              </span>
+              <button
+                className="px-1 text-ink-3 hover:text-bad"
+                title="Stop following"
+                aria-label={`Stop following ${s.companyName}`}
+                onClick={() =>
+                  confirm(`Stop following ${s.companyName}? Jobs already in your inbox stay.`) &&
+                  remove.mutate(s.id)
+                }
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+type Lists = Pick<CrawlStatus, 'titleInclude' | 'titleExclude' | 'locations'>;
+const toText = (s: Lists | undefined) => ({
+  titleInclude: (s?.titleInclude ?? []).join('\n'),
+  titleExclude: (s?.titleExclude ?? []).join('\n'),
+  locations: (s?.locations ?? []).join('\n'),
+});
+const toLines = (t: string) =>
+  t
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+/** What to look for on the boards, what to leave out, and how often to check. */
+export function WatchlistRules({ status }: { status: CrawlStatus | undefined }) {
+  const qc = useQueryClient();
   const settings = useMutation({
     mutationFn: api.crawlSettings,
     onSuccess: (s) => qc.setQueryData(['crawl-status'], s),
   });
-
   const lists = status && {
     titleInclude: status.titleInclude,
     titleExclude: status.titleExclude,
@@ -273,154 +374,25 @@ export function WatchlistCard() {
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF((x) => ({ ...x, [k]: e.target.value }));
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (url.trim()) add.mutate();
-  };
-  const running = Boolean(status?.progress.running);
-
-  // Links from the Screening page land here (/profile#watchlist).
-  const top = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (window.location.hash === '#watchlist') top.current?.scrollIntoView();
-  }, []);
-
   return (
-    <div id="watchlist" ref={top} className="scroll-mt-16">
-      <Card
-        title="Watchlist"
-        actions={
-          <Button
-            variant="primary"
-            onClick={() => check.mutate()}
-            disabled={running || sources.length === 0}
+    <Card
+      title="Rules"
+      actions={
+        <>
+          <span className="text-xs text-ink-3">Check</span>
+          <Select
+            className="w-auto py-1"
+            aria-label="When to check"
+            value={status?.intervalMinutes ?? 0}
+            onChange={(e) => settings.mutate({ intervalMinutes: Number(e.target.value) })}
           >
-            {running ? 'Checking…' : 'Check now'}
-          </Button>
-        }
-      >
-        <p className="mb-3 text-sm text-ink-2">
-          Company job boards to follow. New jobs with a title you look for are added to the
-          Screening inbox, unless a rule below filters them out. Checking is free: it reads each
-          company's public board (Greenhouse, Ashby, Lever or Workday). A free model can then look
-          at what the rules let through (set it up below).
-        </p>
-
-        {sources.length > 0 && (
-          <ul className="mb-3 divide-y divide-border rounded-md border border-border text-sm">
-            {sources.map((s) => (
-              <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-                <input
-                  type="checkbox"
-                  checked={s.enabled}
-                  aria-label={`Check ${s.companyName}`}
-                  onChange={(e) => update.mutate({ id: s.id, enabled: e.target.checked })}
-                />
-                <button
-                  className={cx('font-medium hover:underline', !s.enabled && 'text-ink-3')}
-                  title="Rename"
-                  onClick={() => {
-                    const name = prompt('Company name', s.companyName)?.trim();
-                    if (name && name !== s.companyName)
-                      update.mutate({ id: s.id, companyName: name });
-                  }}
-                >
-                  {s.companyName}
-                </button>
-                <a
-                  href={s.boardUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-ink-3 hover:underline"
-                >
-                  {BOARD[s.kind]}
-                </a>
-                <span className="ml-auto text-xs text-ink-3">
-                  {s.lastError ? (
-                    <span className="text-bad">{s.lastError}</span>
-                  ) : s.lastCount != null ? (
-                    <>
-                      {s.kind === 'workday'
-                        ? plural(s.lastMatched ?? 0, 'matching job')
-                        : `${s.lastMatched ?? 0} matching of ${plural(s.lastCount, 'open job')}`}{' '}
-                      · {when(s.lastCheckedAt)}
-                    </>
-                  ) : (
-                    'Not checked yet'
-                  )}
-                </span>
-                <Button
-                  variant="danger"
-                  onClick={() =>
-                    confirm(`Stop following ${s.companyName}? Jobs already in your inbox stay.`) &&
-                    remove.mutate(s.id)
-                  }
-                >
-                  Remove
-                </Button>
-              </li>
+            {(status?.intervals ?? [0]).map((m) => (
+              <option key={m} value={m}>
+                {INTERVAL_LABEL[m] ?? `Every ${m} minutes`}
+              </option>
             ))}
-          </ul>
-        )}
-
-        <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
-          <Input
-            type="url"
-            className="min-w-72 flex-1"
-            placeholder="Follow a company — paste its careers page, job board or any job posting"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-          <Button type="submit" disabled={!url.trim() || add.isPending}>
-            {add.isPending ? 'Reading the board…' : 'Follow'}
-          </Button>
-        </form>
-        <ErrorText error={add.error ?? update.error ?? remove.error ?? check.error} />
-
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          <Field label="Titles to look for (one per line)">
-            <Textarea rows={6} value={f.titleInclude} onChange={set('titleInclude')} />
-            <span className="mt-1 block text-xs text-ink-3">
-              A job is picked up when its title contains one of these. “TPM” and “Sr.” are read as
-              “technical program manager” and “senior”.
-            </span>
-          </Field>
-          <Field label="Titles to skip">
-            <Textarea rows={6} value={f.titleExclude} onChange={set('titleExclude')} />
-            <span className="mt-1 block text-xs text-ink-3">
-              Filtered out when the title contains one of these.
-            </span>
-          </Field>
-          <Field label="Places you can work from">
-            <Textarea rows={6} value={f.locations} onChange={set('locations')} />
-            <span className="mt-1 block text-xs text-ink-3">
-              Remote jobs and postings that name no place always pass. Leave empty for anywhere.
-            </span>
-          </Field>
-        </div>
-        <p className="mt-2 text-xs text-ink-3">
-          Also filtered out: contracts, internships and hourly pay; a posted range whose top is
-          below your minimum base (set under Goals & criteria); and jobs you already track.
-        </p>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-          <label className="flex items-center gap-2">
-            <span className="text-ink-2">Check</span>
-            <Select
-              className="w-auto"
-              value={status?.intervalMinutes ?? 0}
-              onChange={(e) => settings.mutate({ intervalMinutes: Number(e.target.value) })}
-            >
-              {(status?.intervals ?? [0]).map((m) => (
-                <option key={m} value={m}>
-                  {INTERVAL_LABEL[m] ?? `Every ${m} minutes`}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <span className="text-ink-3">{status ? lastCheck(status) : ''}</span>
+          </Select>
           <Button
-            className="ml-auto"
             variant="primary"
             disabled={!dirty || settings.isPending}
             onClick={() =>
@@ -431,13 +403,37 @@ export function WatchlistCard() {
               })
             }
           >
-            Save rules
+            Save
           </Button>
-        </div>
-        <ErrorText error={settings.error} />
-        <PrescreenSettings />
-      </Card>
-    </div>
+        </>
+      }
+    >
+      <div className="grid gap-4 md:grid-cols-3">
+        <Field label="Titles to look for">
+          <Textarea rows={5} value={f.titleInclude} onChange={set('titleInclude')} />
+        </Field>
+        <Field label="Titles to skip">
+          <Textarea rows={5} value={f.titleExclude} onChange={set('titleExclude')} />
+        </Field>
+        <Field label="Places you can work from">
+          <Textarea rows={5} value={f.locations} onChange={set('locations')} />
+        </Field>
+      </div>
+      <p className="mt-2 text-xs text-ink-3">
+        One per line. Remote jobs and postings that name no place always pass.{' '}
+        <span
+          className="cursor-help underline decoration-dotted"
+          title={
+            '“TPM” and “Sr.” are read as “technical program manager” and “senior”.\n' +
+            'Also filtered out: contracts, internships and hourly pay; a posted pay range whose top is below your minimum base (Profile → Criteria); and jobs you already track.\n' +
+            'Leave the places empty to allow anywhere.'
+          }
+        >
+          What else is filtered?
+        </span>
+      </p>
+      <ErrorText error={settings.error} />
+    </Card>
   );
 }
 
@@ -473,7 +469,7 @@ const PROVIDER_NOTE: Record<Provider, string> = {
  * Which model, if any, looks at jobs the rules let through and answers yes / maybe / no.
  * "No" keeps a job out of the inbox (listed under Filtered out with the reason).
  */
-function PrescreenSettings() {
+export function PrescreenSettings() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
   const pre = data?.prescreen;
@@ -499,13 +495,30 @@ function PrescreenSettings() {
   const dirty = model.trim() !== pre.model || (wantsUrl && baseUrl.trim() !== pre.baseUrl);
 
   return (
-    <div className="mt-5 border-t border-border pt-4">
-      <h3 className="text-sm font-semibold">Pre-screen</h3>
-      <p className="mb-3 mt-1 text-sm text-ink-2">
-        A quick yes / maybe / no from a small model on each job the rules let through. Only a clear
-        “no” (a deal-breaker, or a different kind of job) keeps a job out of the inbox. The model is
-        sent the posting and your goals, pay floor, must-haves and deal-breakers — never your resume
-        or career profile.
+    <Card
+      title={
+        <span>
+          Pre-screen{' '}
+          <span
+            className={cx(
+              'ml-1 font-normal',
+              pre.provider === 'off' ? 'text-ink-3' : pre.ready ? 'text-good' : 'text-warn',
+            )}
+          >
+            · {pre.provider === 'off' ? 'off' : pre.ready ? `on, ${pre.model}` : 'not set up yet'}
+          </span>
+        </span>
+      }
+    >
+      <p className="mb-3 text-sm text-ink-2">
+        A small model answers yes, maybe or no on each job the rules let through. Only a clear “no”
+        keeps a job out.{' '}
+        <span
+          className="cursor-help underline decoration-dotted"
+          title="It is sent the posting and your goals, pay floor, must-haves and deal-breakers. It is never sent your resume or career profile."
+        >
+          What is it sent?
+        </span>
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Model" className="min-w-72">
@@ -593,16 +606,14 @@ function PrescreenSettings() {
         </form>
       )}
       <p className="mt-2 text-xs text-ink-3">{PROVIDER_NOTE[pre.provider]}</p>
-      {pre.provider !== 'off' && (
-        <p className={cx('mt-1 text-xs', pre.ready ? 'text-good' : 'text-warn')}>
-          {pre.ready
-            ? `Ready: new jobs are pre-screened by ${pre.model} on the next check.`
-            : pre.provider === 'anthropic'
-              ? 'Add your Anthropic API key under AI settings to use this.'
-              : 'Not set up yet (a key, a model name and an address are needed). Until then jobs that pass the rules go straight to the inbox.'}
+      {pre.provider !== 'off' && !pre.ready && (
+        <p className="mt-1 text-xs text-warn">
+          {pre.provider === 'anthropic'
+            ? 'Add your Anthropic API key under Profile → Settings to use this.'
+            : 'It needs a key, a model name and an address. Until then jobs that pass the rules go straight to the inbox.'}
         </p>
       )}
       <ErrorText error={save.error} />
-    </div>
+    </Card>
   );
 }

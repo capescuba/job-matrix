@@ -79,9 +79,13 @@ export function LinkedInCard({ summary }: { summary: LinkedInSummary | undefined
   return (
     <Card title="LinkedIn profile">
       <p className="mb-3 text-sm text-ink-2">
-        Your LinkedIn profile has far more detail than a resume. Job Matrix reads it through the
-        Chrome extension, in your signed-in Chrome: a tab opens, pages through your profile (about,
-        every role in full, projects, skills, certifications, recommendations) and closes.
+        More detail than a resume.{' '}
+        <span
+          className="cursor-help underline decoration-dotted"
+          title="Job Matrix reads it through the Chrome extension, in your signed-in Chrome: a tab opens, pages through your profile (about, every role in full, projects, skills, certifications, recommendations) and closes."
+        >
+          How is it read?
+        </span>
       </p>
       <form
         className="flex flex-wrap gap-2"
