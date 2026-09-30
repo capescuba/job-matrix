@@ -140,6 +140,7 @@ function decide(
     applicationId?: number | null;
     model?: string | null;
     usageId?: number | null;
+    score?: number | null;
   },
 ) {
   const values = {
@@ -158,6 +159,7 @@ function decide(
     applicationId: decision.applicationId ?? null,
     model: decision.model ?? null,
     usageId: decision.usageId ?? null,
+    score: decision.score ?? null,
     decidedAt: new Date().toISOString(),
   };
   db.insert(crawlLeads)
@@ -176,7 +178,13 @@ const UNDECIDED = new Set(['no-rules', 'error', 'waiting']);
 const MAX_RETRY_AFTER_S = 60;
 
 type Screened =
-  | { verdict: 'yes' | 'maybe' | 'no'; reason: string; model: string; usageId: number }
+  | {
+      verdict: 'yes' | 'maybe' | 'no';
+      reason: string;
+      model: string;
+      usageId: number;
+      score: number | null;
+    }
   | { verdict: 'waiting'; reason: string };
 
 /** What one check (or one saved search) found and did. */
@@ -217,7 +225,13 @@ function prescreener(db: Db, deps: CrawlDeps, counts: Counts) {
         const r = await prescreenJob(db, job, screener!);
         failures = 0;
         counts.screened++;
-        return { verdict: r.verdict, reason: r.reason, model: r.model, usageId: r.usageId };
+        return {
+          verdict: r.verdict,
+          reason: r.reason,
+          model: r.model,
+          usageId: r.usageId,
+          score: r.score == null ? null : Math.round(r.score * 10) / 10,
+        };
       } catch (e) {
         const msg = (e as Error).message;
         if (e instanceof RateLimitError) {
@@ -299,7 +313,13 @@ async function judge(c: Check, jobs: FoundJob[], origin: Origin): Promise<FoundJ
       continue;
     }
     let note = origin.note;
-    let passed: { verdict: 'yes' | 'maybe'; reason: string; model?: string; usageId?: number } = {
+    let passed: {
+      verdict: 'yes' | 'maybe';
+      reason: string;
+      model?: string;
+      usageId?: number;
+      score?: number | null;
+    } = {
       verdict: 'yes',
       reason: 'Passed your rules',
     };
@@ -331,7 +351,7 @@ async function judge(c: Check, jobs: FoundJob[], origin: Origin): Promise<FoundJ
           continue;
         }
         passed = { ...s, verdict: s.verdict };
-        note += `. Pre-screen (${s.model}): ${s.verdict} — ${s.reason}`;
+        note += `. Pre-screen (${s.model}): ${s.verdict}${s.score != null ? `, ${s.score}/10` : ''} — ${s.reason}`;
       }
       const r = await addToInbox(db, job, note, f, !origin.fetchable);
       const verdict = r.existing ? 'duplicate' : passed.verdict;

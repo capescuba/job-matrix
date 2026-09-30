@@ -305,7 +305,10 @@ async function importMyLinkedIn() {
   const r = await chrome.runtime.sendMessage({ type: 'jm-import-linkedin', url: state.tab.url });
   state.busy = null;
   state.notice = r?.ok
-    ? { tone: 'good', text: `Imported your LinkedIn profile (${(r.summary?.chars ?? 0).toLocaleString()} characters). Build your career profile on Job Matrix's Profile page.` }
+    ? {
+        tone: 'good',
+        text: `Imported your LinkedIn profile (${(r.summary?.chars ?? 0).toLocaleString()} characters). Build your career profile on Job Matrix's Profile page.`,
+      }
     : { tone: 'error', text: r?.error || 'The import failed.' };
   render();
 }
@@ -388,14 +391,16 @@ function postingSection() {
         </div>
         ${t.fitScore != null ? `<span class="score ${t.fitGate === 'fail' ? 'fail' : ''}" title="${esc(t.fitVerdict ?? '')}">${t.fitScore.toFixed(1)}</span>` : ''}
       </div>
+      ${prescreenLine(t)}
       <div class="stack small" style="margin-top:6px">
         ${fitBlock}
         <div data-live="app:${t.applicationId}" ${state.scoring === t.applicationId ? 'data-pending="Starting the fit score…"' : ''}></div>
       </div>
       <div class="row" style="margin-top:8px">
+        ${open && t.fitScore == null ? prescreenButton(t) : ''}
         ${
           open && t.fitScore == null
-            ? `<button class="${early ? 'primary' : ''}" data-action="score-fit" data-id="${t.applicationId}" ${scoring ? 'disabled' : ''} title="Fit score only — company research stays separate">${scoring ? 'Scoring…' : `Score fit · ~${money(state.ctx.costs.fit)}`}</button>`
+            ? `<button class="${early && t.prescreenVerdict ? 'primary' : ''}" data-action="score-fit" data-id="${t.applicationId}" ${scoring ? 'disabled' : ''} title="Fit score only — company research stays separate">${scoring ? 'Scoring…' : `Score fit · ~${money(state.ctx.costs.fit)}`}</button>`
             : ''
         }
         ${early && open ? `<button class="${t.fitScore != null ? 'primary' : ''}" data-action="mark-applied" ${state.busy === 'applied' ? 'disabled' : ''} title="Move it to Applied, dated today">✓ I applied</button>` : ''}
@@ -446,6 +451,11 @@ function postingSection() {
       <div class="small faint">Description from ${src}. Highlight text on the page to use just that.</div>
       <div class="row">
         <button class="primary" data-action="add" ${state.busy ? 'disabled' : ''}>${state.busy === 'add' ? 'Adding…' : 'Add to Screening'}</button>
+        ${
+          ctx.prescreen
+            ? `<button data-action="add-prescreen" ${state.busy ? 'disabled' : ''} title="Adds it to Screening and asks the free pre-screen model (${esc(ctx.prescreen.model)}) for a quick yes / maybe / no">${state.busy === 'prescreen' ? 'Adding…' : 'Add &amp; pre-screen · free'}</button>`
+            : ''
+        }
         <button data-action="add-score" ${state.busy ? 'disabled' : ''} title="Adds it to Screening and scores your fit here — company research stays separate">${state.busy === 'score' ? 'Adding…' : `Add &amp; score fit · ~${money(ctx.costs.fit)}`}</button>
       </div>
     </div>
@@ -570,7 +580,13 @@ function teachSection() {
           <span class="small faint" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.selectors[k] ?? '')}">${esc(t.samples[k] ?? (t.selectors[k] ? t.selectors[k] : 'Click, then click it on the page'))}</span>
         </div>${
           t.big?.[k]
-            ? `<div class="small warn">That's a big block of the page, so only its first line will be used: “${esc((t.samples[k] ?? '').split('\n').find((l) => l.trim())?.trim().slice(0, 80) ?? '')}”. If that's not the ${esc(label.toLowerCase())}, pick again and aim at the text itself.</div>`
+            ? `<div class="small warn">That's a big block of the page, so only its first line will be used: “${esc(
+                (t.samples[k] ?? '')
+                  .split('\n')
+                  .find((l) => l.trim())
+                  ?.trim()
+                  .slice(0, 80) ?? '',
+              )}”. If that's not the ${esc(label.toLowerCase())}, pick again and aim at the text itself.</div>`
             : ''
         }`,
       ).join('')}
@@ -584,9 +600,12 @@ function teachSection() {
 
 // ---------- actions ----------
 
-async function add(score) {
+/** Adds the page to Screening; then, with `then`, scores its fit ('score') or pre-screens it ('prescreen'). */
+async function add(then) {
+  const score = then === 'score' || then === true;
+  const pre = then === 'prescreen';
   state.notice = null;
-  state.busy = score ? 'score' : 'add';
+  state.busy = score ? 'score' : pre ? 'prescreen' : 'add';
   render();
   try {
     // Read again so a fresh selection counts.
@@ -601,10 +620,11 @@ async function add(score) {
     });
     // Add & score: stay here and show the fit in the panel. Add: go to Screening as before.
     if (r.existing) await openInApp(`/applications/${r.applicationId}`);
-    else if (!score) await openInApp(`/screening?focus=${r.applicationId}`);
+    else if (!score && !pre) await openInApp(`/screening?focus=${r.applicationId}`);
     state.busy = null;
     await refresh();
     if (score && !r.existing) await scoreFit(r.applicationId);
+    if (pre && !r.existing) await prescreen(r.applicationId);
     if (r.existing) {
       state.notice = {
         tone: 'warn',
@@ -617,6 +637,36 @@ async function add(score) {
     state.notice = { tone: 'error', text: e.message || String(e) };
     render();
   }
+}
+
+/** The free pre-screen: a quick yes / maybe / no and 0–10 from the small model. */
+async function prescreen(applicationId) {
+  state.prescreening = applicationId;
+  state.notice = null;
+  render();
+  try {
+    await api(`/api/applications/${applicationId}/prescreen`, { method: 'POST' });
+  } catch (e) {
+    state.notice = { tone: 'error', text: `Pre-screen failed: ${e.message || e}` };
+  }
+  state.prescreening = null;
+  await refresh();
+}
+
+/** "Pre-screen 6.5/10 · maybe — reason", coloured by the verdict. */
+function prescreenLine(t) {
+  if (!t.prescreenVerdict) return '';
+  const tone = t.prescreenVerdict === 'yes' ? 'good' : t.prescreenVerdict === 'no' ? 'bad' : 'warn';
+  const score = t.prescreenScore != null ? `${t.prescreenScore}/10 · ` : '';
+  return `<div class="small" style="margin-top:6px" title="${esc(t.prescreenModel ?? '')}"><span class="chip ${tone}">Pre-screen ${score}${esc(t.prescreenVerdict)}</span> <span class="muted">${esc(t.prescreenReason ?? '')}</span></div>`;
+}
+
+/** Pre-screen (free) before the paid fit score; a link to set it up when no model is chosen. */
+function prescreenButton(t) {
+  if (!state.ctx.prescreen)
+    return '<button class="link small" data-action="open" data-path="/watchlist" title="Choose a free model (Groq, Gemini, …) for a quick yes / maybe / no before paying for a fit score">Set up the free pre-screen</button>';
+  const busy = state.prescreening === t.applicationId;
+  return `<button class="${t.prescreenVerdict ? '' : 'primary'}" data-action="prescreen" data-id="${t.applicationId}" ${busy ? 'disabled' : ''} title="A quick yes / maybe / no and 0–10 from ${esc(state.ctx.prescreen.model)}, before you pay for a fit score">${busy ? 'Pre-screening…' : t.prescreenVerdict ? 'Pre-screen again' : 'Pre-screen · free'}</button>`;
 }
 
 /** Fit score only (no company research); the panel shows it live and when it's done. */
@@ -768,7 +818,9 @@ document.addEventListener('click', async (e) => {
     state.showAdd = true;
     render();
   } else if (a === 'add') add(false);
-  else if (a === 'add-score') add(true);
+  else if (a === 'add-score') add('score');
+  else if (a === 'add-prescreen') add('prescreen');
+  else if (a === 'prescreen') prescreen(Number(el.dataset.id));
   else if (a === 'score-fit') scoreFit(Number(el.dataset.id));
   else if (a === 'mark-applied') markApplied();
   else if (a === 'import-linkedin') importMyLinkedIn();

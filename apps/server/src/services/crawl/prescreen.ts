@@ -4,10 +4,13 @@
  * must-haves, deal-breakers), never your resume or career profile. It can only keep a job out
  * for a clear deal-breaker; when unsure it says "maybe", which goes to the inbox like "yes".
  */
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import type { LLMProvider } from '@jm/ai';
+import { LLMError, getPrescreenProvider, type LLMProvider } from '@jm/ai';
 import { splitLines } from '@jm/shared';
 import type { Db } from '../../db/client.ts';
+import { applications, companies, jobs, prescreens } from '../../db/schema.ts';
+import { NotFoundError, addActivity } from '../applications.ts';
 import { getProfile } from '../resume.ts';
 import { recordUsage } from '../usage.ts';
 import type { BoardJob } from './boards.ts';
@@ -23,11 +26,18 @@ Rules:
 - Judge only from what the posting says. Missing information is never a reason for "no".
 - Known gaps, nice-to-haves and an imperfect match are not reasons for "no".
 - When in doubt between "no" and "maybe", answer "maybe". A wrongly rejected job costs the candidate far more than a wrongly kept one.
-- reason: one short sentence, in plain words, quoting or pointing at what in the posting decided it.`;
+- reason: one short sentence, in plain words, quoting or pointing at what in the posting decided it.
+- score: a rough 0–10 for how well the role matches the candidate's target: 9–10 squarely the target role, level and place; 6–8 a good match with something to check; 4–5 plausible but unclear; 0–3 a poor match or a different kind of job. The verdict, not the score, decides what the candidate sees.`;
 
 export const prescreenSchema = z.object({
   verdict: z.enum(['yes', 'maybe', 'no']),
   reason: z.string().describe('One short sentence: what in the posting decided it'),
+  score: z
+    .number()
+    .min(0)
+    .max(10)
+    .optional()
+    .describe('Rough 0–10 match with the target (not a deal-breaker check)'),
   dealBreaker: z
     .string()
     .nullable()
@@ -90,6 +100,7 @@ export async function prescreenJob(
   db: Db,
   job: Parameters<typeof buildPrescreenPrompt>[1],
   screener: Prescreener,
+  applicationId?: number,
 ): Promise<PrescreenResult & { model: string; usageId: number }> {
   const res = await screener.provider.completeStructured({
     system: PRESCREEN_SYSTEM_PROMPT,
@@ -104,6 +115,67 @@ export async function prescreenJob(
     model: res.model,
     usage: res.usage,
     trace: res.trace,
+    applicationId,
   });
   return { ...res.data, model: res.model, usageId };
+}
+
+/** No pre-screen model is set up (or its key is missing). */
+export class PrescreenNotSetUp extends LLMError {}
+
+/**
+ * A pre-screen you ask for on a job you already track (from the Chrome extension or the inbox):
+ * the free model's quick answer before you pay for a fit score. Kept, and noted on the timeline.
+ */
+export async function prescreenApplication(
+  db: Db,
+  applicationId: number,
+  opts: { screener?: Prescreener | null } = {},
+) {
+  const screener = opts.screener === undefined ? getPrescreenProvider() : opts.screener;
+  if (!screener)
+    throw new PrescreenNotSetUp(
+      'No pre-screen model is set up yet. Choose one (Groq is free) on the Watchlist page.',
+    );
+  const row = db
+    .select({ app: applications, job: jobs, company: companies.name })
+    .from(applications)
+    .innerJoin(jobs, eq(jobs.id, applications.jobId))
+    .innerJoin(companies, eq(companies.id, jobs.companyId))
+    .where(eq(applications.id, applicationId))
+    .get();
+  if (!row) throw new NotFoundError(`Application ${applicationId} not found`);
+  const r = await prescreenJob(
+    db,
+    {
+      company: row.company,
+      title: row.job.title,
+      location: row.job.location,
+      remoteType: row.job.remoteType as BoardJob['remoteType'],
+      salaryMin: row.job.salaryMin,
+      salaryMax: row.job.salaryMax,
+      descriptionText: row.job.descriptionText,
+    },
+    screener,
+    applicationId,
+  );
+  const score = r.score == null ? null : Math.round(r.score * 10) / 10;
+  const saved = db
+    .insert(prescreens)
+    .values({
+      applicationId,
+      verdict: r.verdict,
+      score,
+      reason: r.reason,
+      model: r.model,
+      usageId: r.usageId,
+    })
+    .returning()
+    .get();
+  addActivity(db, applicationId, {
+    at: new Date().toISOString().slice(0, 10),
+    kind: 'Note',
+    summary: `Pre-screen (${r.model}): ${r.verdict}${score != null ? `, ${score}/10` : ''} — ${r.reason}`,
+  });
+  return saved;
 }

@@ -4,7 +4,7 @@ import { RateLimitError, LLMError, type LLMProvider, type StructuredRequest } fr
 import { buildApp } from '../../app.ts';
 import { openDb, type Db } from '../../db/client.ts';
 import { aiUsage, crawlLeads, resumeVersions } from '../../db/schema.ts';
-import { getApplicationDetail, listApplications } from '../applications.ts';
+import { createApplication, getApplicationDetail, listApplications } from '../applications.ts';
 import { updateProfile } from '../resume.ts';
 import { getSettings } from '../settings.ts';
 import { buildPrescreenPrompt, type PrescreenResult } from './prescreen.ts';
@@ -272,5 +272,111 @@ describe('pre-screen settings', () => {
       model: 'llama3.2',
       baseUrl: 'http://localhost:11434/v1',
     });
+  });
+});
+
+describe('telling watchlist jobs apart in the inbox', () => {
+  it('each row says where the watchlist found it and what the pre-screen said', async () => {
+    const f = await follow();
+    updateProfile(db, { minBase: 100_000 });
+    const { screener } = fakeScreener((title) =>
+      /Compute/.test(title) ? { ...yes, score: 8.46 } : maybe,
+    );
+    await runCrawl(db, { fetchFn: f, prescreen: screener, ...fast });
+    createApplication(db, { company: 'Acme', title: 'TPM I added', status: 'Screening' });
+
+    const rows = Object.fromEntries(
+      listApplications(db).map((a) => [
+        a.title,
+        [a.foundBy, a.prescreenVerdict, a.prescreenScore, a.prescreenReason, a.prescreenModel],
+      ]),
+    );
+    expect(rows).toEqual({
+      'Staff Technical Program Manager, Compute': [
+        'Anthropic board',
+        'yes',
+        8.5,
+        'Infra TPM role in SF',
+        'fake-small',
+      ],
+      'Technical Program Manager, Finance Systems': [
+        'Anthropic board',
+        'maybe',
+        null,
+        'Office days not stated',
+        'fake-small',
+      ],
+      'TPM I added': [null, null, null, null, null],
+    });
+  });
+
+  it('without a pre-screen, only where it was found', async () => {
+    const f = await follow();
+    await runCrawl(db, { fetchFn: f, prescreen: null });
+    const row = listApplications(db).find((a) => /Compute/.test(a.title))!;
+    expect(row).toMatchObject({ foundBy: 'Anthropic board', prescreenVerdict: null, prescreenScore: null });
+  });
+});
+
+describe('pre-screening a job you added, before a paid score', () => {
+  const jd = 'You will lead programs across teams, plan the work and ship it on time. '.repeat(5);
+  const addJob = () =>
+    createApplication(db, {
+      company: 'Acme',
+      title: 'Staff TPM, Infrastructure',
+      status: 'Screening',
+      descriptionText: jd,
+    });
+
+  it('asks the model once, keeps the answer, notes it on the timeline and records the call', async () => {
+    const id = addJob();
+    const { screener, prompts } = fakeScreener(() => ({ ...yes, score: 7.25 }));
+    const app = buildApp(db, { crawl: { prescreen: screener } });
+    const r = await app.inject({ method: 'POST', url: `/api/applications/${id}/prescreen` });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ verdict: 'yes', score: 7.3, model: 'fake-small' });
+    expect(prompts[0]).toContain('Title: Staff TPM, Infrastructure');
+    expect(prompts[0]).toContain('lead programs across teams');
+
+    const row = listApplications(db).find((a) => a.id === id)!;
+    expect(row).toMatchObject({
+      foundBy: null,
+      prescreenVerdict: 'yes',
+      prescreenScore: 7.3,
+      prescreenReason: 'Infra TPM role in SF',
+    });
+    expect(getApplicationDetail(db, id).activities.map((a) => a.summary)).toContain(
+      'Pre-screen (fake-small): yes, 7.3/10 — Infra TPM role in SF',
+    );
+    expect(db.select().from(aiUsage).all()[0]).toMatchObject({
+      feature: 'prescreen',
+      applicationId: id,
+    });
+  });
+
+  it('a "no" is shown too; asking again replaces what is shown', async () => {
+    const id = addJob();
+    let answer: Answer = no;
+    const { screener } = fakeScreener(() => answer);
+    const app = buildApp(db, { crawl: { prescreen: screener } });
+    await app.inject({ method: 'POST', url: `/api/applications/${id}/prescreen` });
+    expect(listApplications(db).find((a) => a.id === id)!.prescreenVerdict).toBe('no');
+    answer = maybe;
+    await app.inject({ method: 'POST', url: `/api/applications/${id}/prescreen` });
+    expect(listApplications(db).find((a) => a.id === id)!.prescreenVerdict).toBe('maybe');
+  });
+
+  it('says how to set it up when no model is chosen, and how long to wait on a rate limit', async () => {
+    const id = addJob();
+    const off = buildApp(db, { crawl: { prescreen: null } });
+    const r = await off.inject({ method: 'POST', url: `/api/applications/${id}/prescreen` });
+    expect(r.statusCode).toBe(422);
+    expect(r.json().error).toMatch(/No pre-screen model is set up yet/);
+
+    const limited = fakeScreener(() => new RateLimitError('Groq rate limit reached: TPM', 20));
+    const busy = buildApp(db, { crawl: { prescreen: limited.screener } });
+    const b = await busy.inject({ method: 'POST', url: `/api/applications/${id}/prescreen` });
+    expect(b.statusCode).toBe(429);
+    expect(b.json().error).toMatch(/Groq rate limit reached: TPM\. Try again in a minute\./);
   });
 });

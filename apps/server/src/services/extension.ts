@@ -1,6 +1,6 @@
 import { and, desc, eq, like } from 'drizzle-orm';
 import { z } from 'zod';
-import { getProvider, type LLMProvider } from '@jm/ai';
+import { getProvider, prescreenConfig, type LLMProvider } from '@jm/ai';
 import {
   looksLikeCompanyName,
   shortText,
@@ -188,6 +188,10 @@ function summary(db: Db, r: ApplicationRow) {
     fitVerdict: r.fitVerdict,
     fitGate: r.fitGate,
     fitGateReasons: r.fitGateReasons,
+    prescreenVerdict: r.prescreenVerdict,
+    prescreenScore: r.prescreenScore,
+    prescreenReason: r.prescreenReason,
+    prescreenModel: r.prescreenModel,
     nextAction: r.nextAction,
     nextActionDate: r.nextActionDate,
     lastActivityAt: r.lastActivityAt,
@@ -361,6 +365,8 @@ export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: type
       researchNeeded: !research,
       answer: ANSWER_ESTIMATE_USD,
     },
+    /** The free pre-screen model, when one is set up (null = not yet). */
+    prescreen: prescreenConfig().ready ? { model: prescreenConfig().model } : null,
     template: tpl,
   };
 }

@@ -443,6 +443,8 @@ export const crawlLeads = sqliteTable(
     /** yes | maybe (in the inbox) · no-rules | no-ai | duplicate (filtered out) · waiting | error (try again) */
     verdict: text('verdict').notNull(),
     reason: text('reason'),
+    /** The pre-screen's rough 0–10 match (not the fit score). */
+    score: real('score'),
     /** The model that judged it, when one did. */
     model: text('model'),
     usageId: integer('usage_id'),
@@ -479,3 +481,25 @@ export const crawlState = sqliteTable('crawl_state', {
   searchKeywords: text('search_keywords'),
   searchLocation: text('search_location'),
 });
+
+/**
+ * Pre-screens you asked for on a job (the free model's quick yes / maybe / no and 0–10 score),
+ * from the Chrome extension or the inbox. Watchlist jobs keep theirs on crawl_leads.
+ */
+export const prescreens = sqliteTable(
+  'prescreens',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    applicationId: integer('application_id')
+      .notNull()
+      .references(() => applications.id, { onDelete: 'cascade' }),
+    /** yes | maybe | no */
+    verdict: text('verdict').notNull(),
+    score: real('score'),
+    reason: text('reason'),
+    model: text('model').notNull(),
+    usageId: integer('usage_id'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('prescreens_app').on(t.applicationId)],
+);

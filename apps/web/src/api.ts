@@ -175,6 +175,12 @@ export const api = {
       'POST',
       `/api/fit/batch${status ? `?status=${encodeURIComponent(status)}` : ''}`,
     ),
+  /** The free pre-screen on one job: a quick yes / maybe / no and 0–10, before a paid score. */
+  prescreenApplication: (id: number) =>
+    request<{ verdict: string; score: number | null; reason: string | null; model: string }>(
+      'POST',
+      `/api/applications/${id}/prescreen`,
+    ),
   /** Add a job to the Screening inbox from its URL (server-side fetch). */
   screenUrl: (url: string) => request<CaptureResult>('POST', '/api/screen/url', { url }),
   scoreAllStatus: () => request<FitBatchStatus | null>('GET', '/api/fit/batch'),

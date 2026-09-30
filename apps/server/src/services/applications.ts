@@ -143,6 +143,14 @@ export interface ApplicationRow {
   fitWhyNotHigher: string | null;
   /** When the company's latest research brief was made (null = never). */
   researchAt: string | null;
+  /** Where the watchlist found it ("LinkedIn search", "Anthropic board"); null = added by you. */
+  foundBy: string | null;
+  /** The pre-screen's answer: the latest you asked for, else the watchlist's. */
+  prescreenVerdict: 'yes' | 'maybe' | 'no' | null;
+  /** Its rough 0–10 score (not the fit score). */
+  prescreenScore: number | null;
+  prescreenReason: string | null;
+  prescreenModel: string | null;
 }
 
 type RawRow = Omit<ApplicationRow, 'fitGateReasons' | 'outreachRecommended' | 'postedApprox'> & {
@@ -181,12 +189,32 @@ export function listApplications(db: Db): ApplicationRow[] {
            json_extract(f.result, '$.summary') AS fitSummary,
            json_extract(f.result, '$.whyNotHigher') AS fitWhyNotHigher,
            (SELECT max(created_at) FROM company_research cr WHERE cr.company_id = c.id) AS researchAt,
-           COALESCE((SELECT max(at) FROM activities WHERE application_id = a.id), a.applied_at) AS lastActivityAt
+           COALESCE((SELECT max(at) FROM activities WHERE application_id = a.id), a.applied_at) AS lastActivityAt,
+           CASE WHEN l.id IS NULL THEN NULL
+                WHEN cs.id IS NOT NULL AND cs.preset THEN cs.label || ' search'
+                WHEN cs.id IS NOT NULL THEN 'search “' || cs.label || '”'
+                WHEN src.id IS NOT NULL THEN src.company_name || ' board'
+                ELSE 'watchlist' END AS foundBy,
+           CASE WHEN ps.id IS NOT NULL THEN ps.verdict WHEN l.model IS NOT NULL THEN l.verdict END AS prescreenVerdict,
+           CASE WHEN ps.id IS NOT NULL THEN ps.score WHEN l.model IS NOT NULL THEN l.score END AS prescreenScore,
+           CASE WHEN ps.id IS NOT NULL THEN ps.reason WHEN l.model IS NOT NULL THEN l.reason END AS prescreenReason,
+           COALESCE(ps.model, l.model) AS prescreenModel
     FROM applications a
     JOIN jobs j ON j.id = a.job_id
     JOIN companies c ON c.id = j.company_id
     LEFT JOIN fit_assessments f ON f.id = (
       SELECT id FROM fit_assessments WHERE job_id = j.id ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    -- The watchlist job that put this in the inbox, if one did.
+    LEFT JOIN crawl_leads l ON l.id = (
+      SELECT id FROM crawl_leads WHERE application_id = a.id AND verdict IN ('yes', 'maybe')
+      ORDER BY id LIMIT 1
+    )
+    LEFT JOIN crawl_searches cs ON cs.id = l.search_id
+    LEFT JOIN crawl_sources src ON src.id = l.source_id
+    -- The latest pre-screen you asked for on it.
+    LEFT JOIN prescreens ps ON ps.id = (
+      SELECT id FROM prescreens WHERE application_id = a.id ORDER BY id DESC LIMIT 1
     )
     ORDER BY COALESCE(a.updated_at, a.created_at) DESC
   `);
