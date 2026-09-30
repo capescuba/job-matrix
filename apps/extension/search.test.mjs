@@ -11,12 +11,26 @@ const pages = {
   },
   'https://www.indeed.com/jobs?q=tpm': { problem: 'The site asked for a robot check.' },
 };
+// Job postings the description pass opens: what the reader finds on each.
+const postings = {
+  'https://www.indeed.com/viewjob?jk=1': { descriptionText: 'A long description. '.repeat(20) },
+  'https://www.indeed.com/viewjob?jk=2': { descriptionText: null, jsonLd: [] },
+  'https://www.glassdoor.com/job-listing/x?jl=3': { problem: 'robot check' },
+  'https://www.glassdoor.com/job-listing/y?jl=4': { descriptionText: 'Never read.'.repeat(30) },
+};
+let missing = [];
+const local = {};
+const captures = [];
+const opened = [];
 let nextTab = 1;
 const tabUrls = {};
 const listeners = new Set();
 globalThis.chrome = {
   storage: {
-    local: { get: async () => ({ token: 't', server: 'http://127.0.0.1:5174' }) },
+    local: {
+      get: async () => ({ token: 't', server: 'http://127.0.0.1:5174', ...local }),
+      set: async (o) => Object.assign(local, o),
+    },
     session: {
       set: async (o) => {
         for (const v of Object.values(o)) reports.push(structuredClone(v));
@@ -26,9 +40,10 @@ globalThis.chrome = {
   runtime: { sendNativeMessage: async () => null },
   tabs: {
     query: async () => [{ id: 99 }],
-    create: async ({ url }) => {
+    create: async ({ url, active }) => {
       const id = nextTab++;
       tabUrls[id] = url;
+      opened.push({ url, active });
       setTimeout(() => listeners.forEach((l) => l(id, { status: 'complete' })), 0);
       return { id };
     },
@@ -40,7 +55,10 @@ globalThis.chrome = {
     },
   },
   scripting: {
-    executeScript: async ({ target }) => [{ result: pages[tabUrls[target.tabId]] }],
+    executeScript: async ({ target }) => {
+      const url = tabUrls[target.tabId];
+      return [{ result: pages[url] ?? postings[url] }];
+    },
   },
 };
 
@@ -66,6 +84,12 @@ globalThis.fetch = vi.fn(async (url, init) => {
       },
     ]);
   if (path === '/api/crawl/searches/started') return json({ ok: true });
+  if (path === '/api/crawl/searches/missing-descriptions') return json(missing);
+  if (path === '/api/screen/capture') {
+    const body = JSON.parse(init.body);
+    captures.push(body);
+    return json({ existing: true, descriptionAdded: !!body.fields?.descriptionText });
+  }
   if (path === '/api/crawl/searches/1/results')
     return json({ seen: 1, matched: 1, added: 1, filtered: 0, screened: 0, waiting: 0 });
   if (path === '/api/crawl/searches/2/results')
@@ -77,7 +101,21 @@ const { runSearches } = await import('./search.js');
 
 beforeEach(() => {
   reports.length = 0;
+  captures.length = 0;
+  opened.length = 0;
+  missing = [];
+  for (const k of Object.keys(local)) delete local[k];
 });
+
+/** Runs the searches with the pauses skipped. */
+async function run() {
+  vi.useFakeTimers({ toFake: ['setTimeout'] });
+  const running = runSearches();
+  await vi.runAllTimersAsync();
+  const r = await running;
+  vi.useRealTimers();
+  return r;
+}
 
 describe('saved-search progress for the side panel', () => {
   it('reports which site is being read, what each found, and when it is done', async () => {
@@ -105,5 +143,48 @@ describe('saved-search progress for the side panel', () => {
         problem: 'The site asked for a robot check.',
       },
     ]);
+  });
+});
+
+describe('reading the descriptions the server cannot', () => {
+  const job = (id, url, site) => ({ applicationId: id, url, site, title: 'TPM', company: 'Acme' });
+
+  it('opens each posting in a background tab and sends its description to the job', async () => {
+    missing = [
+      job(1, 'https://www.indeed.com/viewjob?jk=1', 'indeed'),
+      job(2, 'https://www.indeed.com/viewjob?jk=2', 'indeed'),
+      job(3, 'https://www.glassdoor.com/job-listing/x?jl=3', 'glassdoor'),
+      job(4, 'https://www.glassdoor.com/job-listing/y?jl=4', 'glassdoor'),
+    ];
+    await run();
+
+    const postingTabs = opened.filter((o) => !pages[o.url]);
+    // Glassdoor asked for a robot check, so its second posting wasn't opened.
+    expect(postingTabs.map((o) => o.url)).toEqual(missing.slice(0, 3).map((j) => j.url));
+    expect(postingTabs.every((o) => o.active === false)).toBe(true);
+    expect(captures).toEqual([
+      expect.objectContaining({
+        url: 'https://www.indeed.com/viewjob?jk=1',
+        fields: { descriptionText: expect.stringContaining('A long description.') },
+        templateName: 'Built-in Indeed',
+      }),
+      expect.objectContaining({ url: 'https://www.indeed.com/viewjob?jk=2', fields: null }),
+    ]);
+    expect(reports.some((p) => p.reading?.index === 2 && p.reading.total === 4)).toBe(true);
+    expect(reports.at(-1)).toMatchObject({
+      running: false,
+      reading: null,
+      descriptions: { added: 1, tried: 4, problem: 'Glassdoor: robot check' },
+    });
+    // The posting with nothing to read counts a try; the robot check doesn't.
+    expect(local.jmDescriptionTries).toEqual({ 'https://www.indeed.com/viewjob?jk=2': 1 });
+  });
+
+  it('gives up on a posting after two runs that found nothing', async () => {
+    missing = [job(2, 'https://www.indeed.com/viewjob?jk=2', 'indeed')];
+    local.jmDescriptionTries = { 'https://www.indeed.com/viewjob?jk=2': 2, 'https://gone': 1 };
+    await run();
+    expect(captures).toEqual([]);
+    expect(reports.at(-1).descriptions).toBeNull();
   });
 });

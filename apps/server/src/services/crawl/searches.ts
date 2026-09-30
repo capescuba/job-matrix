@@ -37,6 +37,22 @@ export function searchSiteOf(raw: string): SearchSite | null {
   return null;
 }
 
+/** Which search site a job posting's address is on (any page there); null for anything else. */
+export function postingSiteOf(raw: string): SearchSite | null {
+  let h: string;
+  try {
+    h = new URL(raw.trim()).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (/(^|\.)linkedin\.com$/.test(h)) return 'linkedin';
+  if (/(^|\.)indeed\.com$/.test(h)) return 'indeed';
+  if (/(^|\.)glassdoor\.[a-z.]+$/.test(h)) return 'glassdoor';
+  if (/(^|\.)ziprecruiter\.com$/.test(h)) return 'ziprecruiter';
+  if (/(^|\.)dice\.com$/.test(h)) return 'dice';
+  return null;
+}
+
 /** What the built-in site searches look for when you haven't said. */
 export const DEFAULT_SEARCH_KEYWORDS = 'technical program manager';
 export const DEFAULT_SEARCH_LOCATION = 'San Francisco Bay Area';

@@ -119,6 +119,7 @@ import {
   nextCrawlAt,
   runCrawl,
   scheduleCrawl,
+  searchJobsMissingDescriptions,
   type CrawlDeps,
 } from './services/crawl/run.ts';
 import {
@@ -471,6 +472,11 @@ export function buildApp(
   });
   app.post('/api/crawl/searches/:id/results', { preHandler: requireToken }, (req) =>
     ingestSearch(db, idParam.parse(req.params).id, searchResultsSchema.parse(req.body), crawlDeps),
+  );
+  // After a run, the extension reads the postings the server can't, for the inbox jobs that lack
+  // a description, and sends each back through /api/screen/capture.
+  app.get('/api/crawl/searches/missing-descriptions', { preHandler: requireToken }, () =>
+    searchJobsMissingDescriptions(db),
   );
 
   // A free pre-screen on a tracked job, before paying for a fit score (extension or inbox).

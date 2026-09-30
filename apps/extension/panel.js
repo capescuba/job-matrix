@@ -289,13 +289,24 @@ function searchStrip() {
         : `<li><span class="good">✓</span><span><strong>${esc(x.label)}</strong> <span class="muted">${x.read} read · ${x.matched} matching · ${x.added} added${x.filtered ? ` · ${x.filtered} filtered out` : ''}</span></span></li>`,
     )
     .join('');
+  const d = r.descriptions;
+  const described = d
+    ? d.tried
+      ? `<li><span class="${d.problem ? 'warn' : 'good'}">${d.problem ? '!' : '✓'}</span><span><strong>Job descriptions</strong> <span class="muted">${d.added} of ${d.tried} read${d.problem ? ` · ${esc(d.problem)}` : ''}</span></span></li>`
+      : `<li><span class="warn">!</span><span><strong>Job descriptions</strong> <span class="muted">${esc(d.problem ?? '')}</span></span></li>`
+    : '';
   const added = (r.results ?? []).reduce((n, x) => n + (x.added || 0), 0);
   const head = r.running
-    ? `<div class="row"><span class="grow">Searching <strong>${esc(r.current ?? '…')}</strong> (${r.index} of ${r.total})…</span></div>`
+    ? r.reading
+      ? `<div class="row"><span class="grow">Reading job descriptions (${r.reading.index} of ${r.reading.total})…</span></div>`
+      : r.current === 'job descriptions'
+        ? `<div class="row"><span class="grow">Checking for missing job descriptions…</span></div>`
+        : `<div class="row"><span class="grow">Searching <strong>${esc(r.current ?? '…')}</strong> (${r.index} of ${r.total})…</span></div>`
     : `<div class="row"><span class="grow">Done: ${added} new ${added === 1 ? 'job' : 'jobs'} in the inbox${r.problem ? ` <span class="warn">${esc(r.problem)}</span>` : ''}</span>
          ${added ? '<button class="primary" data-action="open" data-path="/screening?from=watchlist">See them</button>' : ''}
          <button class="link small" data-action="run-dismiss" title="Close">✕</button></div>`;
-  return `<section><h2>Watchlist search</h2>${head}${lines ? `<ul class="list small" style="margin-top:6px">${lines}</ul>` : ''}</section>`;
+  const all = lines + described;
+  return `<section><h2>Watchlist search</h2>${head}${all ? `<ul class="list small" style="margin-top:6px">${all}</ul>` : ''}</section>`;
 }
 
 function draw() {
@@ -664,8 +675,10 @@ async function add(then) {
     if (pre && !r.existing) await prescreen(r.applicationId);
     if (r.existing) {
       state.notice = {
-        tone: 'warn',
-        text: `Already tracked: ${r.company} — ${r.title} (${r.status}).`,
+        tone: r.descriptionAdded ? 'good' : 'warn',
+        text: r.descriptionAdded
+          ? `Already tracked: ${r.company} — ${r.title} (${r.status}). Its missing description was added.`
+          : `Already tracked: ${r.company} — ${r.title} (${r.status}).`,
       };
       render();
     }

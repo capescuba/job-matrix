@@ -1,7 +1,9 @@
 // Runs your saved job searches (LinkedIn, Indeed, Glassdoor, ZipRecruiter) in your signed-in
 // Chrome: opens each results page in a tab, reads the listings, closes the tab and sends them to
-// Job Matrix, which sorts them with your watchlist rules. Read-only: it scrolls and reads, and
-// never clicks apply, signs in or answers a robot check.
+// Job Matrix, which sorts them with your watchlist rules. Then it opens the postings the server
+// can't read (Indeed, Glassdoor, …) for the inbox jobs that still lack a description, and sends
+// each description back. Read-only: it scrolls and reads, and never clicks apply, signs in or
+// answers a robot check.
 
 import { api } from './api.js';
 
@@ -166,6 +168,62 @@ export async function readSearchPage() {
   return { listings: out };
 }
 
+/**
+ * Runs in a job posting's tab (passed to chrome.scripting.executeScript, so it must be
+ * self-contained). `saved` is the description selector from your template for this site, if
+ * any. Returns { descriptionText, jsonLd, pageTitle } or { problem } when the page can't be read.
+ */
+export async function readPosting(saved) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const text = (el) =>
+    el ? (el.innerText || el.textContent || '').replace(/\s+\n/g, '\n').trim() : '';
+  const SELECTORS = [
+    saved,
+    '#jobDescriptionText', // Indeed
+    '[class*="JobDetails_jobDescription"]', // Glassdoor
+    '[data-test="jobDescriptionContent"]',
+    '.job_description', // ZipRecruiter
+    '[class*="job_description"]',
+    '#job-details', // LinkedIn
+    '.jobs-description__content',
+    '.description__text',
+    '[data-testid="jobDescriptionHtml"]', // Dice
+    '#jobDescription',
+  ].filter(Boolean);
+  const described = () => {
+    for (const sel of SELECTORS) {
+      try {
+        const t = text(document.querySelector(sel));
+        if (t.length >= 200) return t;
+      } catch {
+        // a saved selector that no longer parses
+      }
+    }
+    return null;
+  };
+  const ld = () =>
+    [...document.querySelectorAll('script[type="application/ld+json"]')]
+      .map((s) => s.textContent || '')
+      .filter(Boolean)
+      .slice(0, 20);
+  const hasPosting = () => ld().some((b) => /"JobPosting"/.test(b));
+
+  // Give the page time to render the description.
+  for (let i = 0; i < 40 && !described() && !hasPosting(); i++) await sleep(250);
+
+  const body = document.body?.innerText || '';
+  if (
+    /just a moment|attention required|access denied|security check/i.test(document.title) ||
+    /verify you are (a )?human|additional verification required|unusual (activity|traffic)|complete the captcha/i.test(
+      body.slice(0, 3000),
+    )
+  )
+    return { problem: 'robot check' };
+  if (/\/(authwall|login|checkpoint|uas\/login)/.test(location.pathname))
+    return { problem: 'signed out' };
+  return { descriptionText: described(), jsonLd: ld(), pageTitle: document.title };
+}
+
 function waitForLoad(tabId, timeoutMs = 30_000) {
   return new Promise((resolve) => {
     const done = () => {
@@ -226,7 +284,8 @@ export const RUN_KEY = 'jmSearchRun';
 
 /**
  * The run's progress, shared with the side panel: { running, total, index, current, results:
- * [{ label, read, matched, added, filtered, problem }], startedAt, finishedAt }.
+ * [{ label, read, matched, added, filtered, problem }], reading: { index, total } while
+ * descriptions are read, descriptions: { added, tried, problem }, startedAt, finishedAt }.
  */
 let progress = null;
 async function report(patch) {
@@ -248,6 +307,88 @@ const finished = (label, read, counts, problem) =>
       },
     ],
   });
+
+/** Postings whose description couldn't be read, by address: how many runs have tried. */
+const TRIES_KEY = 'jmDescriptionTries';
+/** Runs to try a posting before leaving it to you (it may be closed, or laid out differently). */
+const MAX_TRIES = 2;
+const SITE_LABEL = {
+  linkedin: 'LinkedIn',
+  indeed: 'Indeed',
+  glassdoor: 'Glassdoor',
+  ziprecruiter: 'ZipRecruiter',
+  dice: 'Dice',
+};
+
+/**
+ * Opens each inbox job from a search site that has no description yet, in a background tab, one
+ * at a time, reads the description and sends it to Job Matrix. A site that asks for a robot
+ * check is left alone for the rest of the run. Returns { added, tried, problem }, or null when
+ * there was nothing to read.
+ */
+async function readDescriptions() {
+  const jobs = await api('/api/crawl/searches/missing-descriptions');
+  const stored = (await chrome.storage.local.get(TRIES_KEY))?.[TRIES_KEY] ?? {};
+  // Only the jobs still waiting are kept, so the record stays small.
+  const tries = Object.fromEntries(
+    jobs.map((j) => [j.url, stored[j.url] ?? 0]).filter(([, n]) => n),
+  );
+  const todo = jobs.filter((j) => (tries[j.url] ?? 0) < MAX_TRIES);
+  if (!todo.length) return null;
+  const blocked = new Map();
+  const templates = {};
+  let added = 0;
+  for (const [i, j] of todo.entries()) {
+    if (blocked.has(j.site)) continue;
+    await report({ reading: { index: i + 1, total: todo.length } });
+    let tab;
+    try {
+      const host = new URL(j.url).hostname.toLowerCase();
+      templates[host] ??= await api(`/api/ext/templates/${encodeURIComponent(host)}`).catch(
+        () => null,
+      );
+      const template = templates[host];
+      tab = await chrome.tabs.create({ url: j.url, active: false });
+      await waitForLoad(tab.id);
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: readPosting,
+        args: [template?.selectors?.description ?? null],
+      });
+      if (result?.problem) {
+        // The site's doing, not the posting's: tried again next run.
+        blocked.set(j.site, result.problem);
+        continue;
+      }
+      const r = await api('/api/screen/capture', {
+        method: 'POST',
+        body: {
+          // The address Job Matrix has, so the capture finds the job however the site redirected.
+          url: j.url,
+          pageTitle: result?.pageTitle ?? null,
+          jsonLd: result?.jsonLd ?? null,
+          fields: result?.descriptionText ? { descriptionText: result.descriptionText } : null,
+          templateName: template?.name ?? `Built-in ${SITE_LABEL[j.site] ?? j.site}`,
+        },
+      });
+      if (r.descriptionAdded) {
+        added++;
+        delete tries[j.url];
+      } else tries[j.url] = (tries[j.url] ?? 0) + 1;
+    } catch {
+      tries[j.url] = (tries[j.url] ?? 0) + 1;
+    } finally {
+      if (tab?.id) await chrome.tabs.remove(tab.id).catch(() => {});
+    }
+    // A pause between postings, like a person would take.
+    await sleep(2000 + Math.random() * 2000);
+  }
+  await chrome.storage.local.set({ [TRIES_KEY]: tries }).catch(() => {});
+  const problem = [...blocked]
+    .map(([site, why]) => `${SITE_LABEL[site] ?? site}: ${why}`)
+    .join('; ');
+  return { added, tried: todo.length, problem: problem || null };
+}
 
 /**
  * Runs the enabled saved searches (or just `ids`), one at a time. The results tab is brought to
@@ -272,6 +413,8 @@ export function runSearches(ids = null) {
         index: 0,
         current: null,
         results: [],
+        reading: null,
+        descriptions: null,
         startedAt: Date.now(),
         finishedAt: null,
       });
@@ -326,6 +469,18 @@ export function runSearches(ids = null) {
         }
         // A pause between sites, like a person would take.
         await sleep(2500);
+      }
+      await report({ current: 'job descriptions' });
+      try {
+        const descriptions = await readDescriptions();
+        if (descriptions) await report({ descriptions });
+      } catch (e) {
+        errors.push(`Job descriptions: ${e?.message || e}`);
+        await report({
+          descriptions: { added: 0, tried: 0, problem: e?.message || String(e) },
+        });
+      } finally {
+        await report({ reading: null });
       }
       return { ok: true, ran, errors };
     } catch (e) {
