@@ -14,6 +14,7 @@ import {
   decodeEntities,
   fetchJobPosting,
   htmlToText,
+  ldPlaces,
   parseSalaryRange,
   toDate,
   type FetchedJob,
@@ -331,11 +332,7 @@ export async function captureJob(
     fromTitle.title ??
     'Unknown role';
 
-  const ldLoc = Array.isArray(ld?.jobLocation) ? undefined : ld?.jobLocation?.address;
-  const location =
-    clean(f.location) ??
-    clean(fetched?.location) ??
-    clean([ldLoc?.addressLocality, ldLoc?.addressRegion].filter(Boolean).join(', '));
+  const location = clean(f.location) ?? clean(fetched?.location) ?? ldPlaces(ld?.jobLocation);
 
   const ldSal = ld?.baseSalary?.value;
   const salary =

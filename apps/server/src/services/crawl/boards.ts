@@ -8,6 +8,7 @@ import {
   getJson,
   getText,
   htmlToText,
+  joinPlaces,
   parseSalaryRange,
   relativeToDate,
   remoteFrom,
@@ -147,10 +148,6 @@ export async function boardCompanyName(ref: BoardRef, f: FetchFn = fetch): Promi
 // ---------- listing ----------
 
 const positive = (n: number | null | undefined) => (typeof n === 'number' && n > 0 ? n : null);
-const join = (places: (string | null | undefined)[]) => {
-  const list = [...new Set(places.map((p) => p?.trim()).filter(Boolean))];
-  return list.length ? list.join(' | ') : null;
-};
 const safeUrl = (url: string) => {
   try {
     return normalizeUrl(url);
@@ -233,7 +230,7 @@ async function ashby(ref: BoardRef, f: FetchFn): Promise<BoardJob[]> {
       return {
         url: `https://jobs.ashbyhq.com/${encodeURIComponent(ref.slug)}/${j.id}`,
         title: j.title.trim(),
-        location: join([j.location, ...(j.secondaryLocations ?? []).map((s) => s.location)]),
+        location: joinPlaces([j.location, ...(j.secondaryLocations ?? []).map((s) => s.location)]),
         remoteType: remoteFrom(j.workplaceType) ?? (j.isRemote ? 'Remote' : null),
         salaryMin: min ?? max,
         salaryMax: max ?? min,
@@ -280,7 +277,7 @@ async function lever(ref: BoardRef, f: FetchFn): Promise<BoardJob[]> {
     return {
       url: `${ref.boardUrl}/${j.id}`,
       title: j.text.trim(),
-      location: join([j.categories?.location, ...(j.categories?.allLocations ?? [])]),
+      location: joinPlaces([j.categories?.location, ...(j.categories?.allLocations ?? [])]),
       remoteType: remoteFrom(j.workplaceType),
       salaryMin: min ?? max,
       salaryMax: max ?? min,
