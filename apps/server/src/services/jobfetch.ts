@@ -165,6 +165,22 @@ export function parseSalaryRange(text: string): { min: number; max: number } | n
   return { min: Math.min(...found.map((r) => r.min)), max: Math.max(...found.map((r) => r.max)) };
 }
 
+/**
+ * Every place a posting names, once each, as the posting's location: "New York | San Francisco".
+ * Postings open in several places list them all; keeping only the first misjudges the job.
+ */
+export function joinPlaces(places: (string | null | undefined)[]): string | null {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of places) {
+    const t = p?.replace(/\s+/g, ' ').trim();
+    if (!t || PLACEHOLDER.test(t) || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    out.push(t);
+  }
+  return out.length ? out.join(' | ') : null;
+}
+
 export function remoteFrom(s: string | null | undefined): FetchedJob['remoteType'] {
   if (!s) return null;
   if (/remote|telecommute/i.test(s)) return 'Remote';
@@ -277,7 +293,7 @@ async function lever(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     description?: string;
     lists?: { text: string; content: string }[];
     additionalPlain?: string;
-    categories?: { location?: string };
+    categories?: { location?: string; allLocations?: string[] };
     workplaceType?: string;
     salaryRange?: { min?: number; max?: number; interval?: string };
     createdAt?: number;
@@ -290,7 +306,7 @@ async function lever(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   const annual = !j.salaryRange?.interval || /year/i.test(j.salaryRange.interval);
   return finish({
     title: j.text,
-    location: j.categories?.location ?? null,
+    location: joinPlaces([j.categories?.location, ...(j.categories?.allLocations ?? [])]),
     remoteType: remoteFrom(j.workplaceType),
     salaryMin: annual ? positive(j.salaryRange?.min) : null,
     salaryMax: annual ? positive(j.salaryRange?.max) : null,
@@ -308,6 +324,7 @@ async function ashby(f: FetchFn, u: URL): Promise<FetchedJob | null> {
       id: string;
       title: string;
       location?: string;
+      secondaryLocations?: { location?: string }[];
       isRemote?: boolean;
       workplaceType?: string;
       descriptionPlain?: string;
@@ -323,7 +340,7 @@ async function ashby(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   const salary = comp ? parseSalaryRange(comp) : null;
   return finish({
     title: j.title,
-    location: j.location ?? null,
+    location: joinPlaces([j.location, ...(j.secondaryLocations ?? []).map((x) => x.location)]),
     remoteType: remoteFrom(j.workplaceType) ?? (j.isRemote ? 'Remote' : null),
     salaryMin: salary?.min ?? null,
     salaryMax: salary?.max ?? null,
@@ -350,6 +367,7 @@ async function workday(f: FetchFn, u: URL): Promise<FetchedJob | null> {
       title?: string;
       jobDescription?: string;
       location?: string;
+      additionalLocations?: string[];
       remoteType?: string;
       startDate?: string;
       postedOn?: string;
@@ -359,7 +377,7 @@ async function workday(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   if (!info?.jobDescription) return null;
   return finish({
     title: info.title ?? null,
-    location: info.location ?? null,
+    location: joinPlaces([info.location, ...(info.additionalLocations ?? [])]),
     remoteType: remoteFrom(info.remoteType),
     descriptionText: htmlToText(info.jobDescription),
     posted:
@@ -481,6 +499,22 @@ interface LdJobPosting {
   hiringOrganization?: string | { name?: string };
 }
 
+type LdPlace = { address?: { addressLocality?: string; addressRegion?: string } };
+
+/** Every place in a schema.org jobLocation (one place or a list), as the posting's location. */
+export function ldPlaces(jobLocation: LdPlace | LdPlace[] | unknown[] | null | undefined) {
+  const list = (Array.isArray(jobLocation) ? jobLocation : [jobLocation]) as (
+    LdPlace | null | undefined
+  )[];
+  return joinPlaces(
+    list.map((loc) =>
+      [loc?.address?.addressLocality, loc?.address?.addressRegion]
+        .filter((p) => p && !PLACEHOLDER.test(p.trim()))
+        .join(', '),
+    ),
+  );
+}
+
 function findJobPosting(node: unknown): LdJobPosting | null {
   if (!node || typeof node !== 'object') return null;
   if (Array.isArray(node)) {
@@ -525,10 +559,7 @@ async function generic(f: FetchFn, u: URL): Promise<FetchedJob> {
     }
     const jp = findJobPosting(data);
     if (!jp?.description) continue;
-    const loc = Array.isArray(jp.jobLocation) ? jp.jobLocation[0] : jp.jobLocation;
-    const place = [loc?.address?.addressLocality, loc?.address?.addressRegion]
-      .filter((p) => p && !PLACEHOLDER.test(p.trim()))
-      .join(', ');
+    const place = ldPlaces(jp.jobLocation);
     const sal = jp.baseSalary?.value;
     const annual = !sal?.unitText || /year/i.test(sal.unitText);
     return finish({
