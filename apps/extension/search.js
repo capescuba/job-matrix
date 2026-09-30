@@ -400,6 +400,11 @@ export function runSearches(ids = null) {
   running ??= (async () => {
     const errors = [];
     let ran = 0;
+    // Chrome stops an idle extension worker after 30 seconds, and waiting on a reply doesn't
+    // count: the pre-screen of a busy results page takes minutes, which ended runs half-way
+    // (no description pass, the panel stuck on "Searching"). An extension call every 20 seconds
+    // keeps the worker up until the run is done.
+    const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), 20_000);
     try {
       const searches = (await api('/api/crawl/searches')).filter((s) =>
         ids ? ids.includes(s.id) : s.enabled,
@@ -487,6 +492,7 @@ export function runSearches(ids = null) {
       if (progress) await report({ problem: e?.message || String(e) });
       return { ok: false, ran, errors: [...errors, e?.message || String(e)] };
     } finally {
+      clearInterval(keepAlive);
       if (progress?.running)
         await report({ running: false, current: null, finishedAt: Date.now() });
       running = null;
