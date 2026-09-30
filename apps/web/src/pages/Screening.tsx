@@ -19,6 +19,7 @@ export default function ScreeningPage() {
   const [params, setParams] = useSearchParams();
   const tab: Tab = TABS.find((t) => t === params.get('tab')) ?? 'inbox';
   const watchlist = useCrawlStatus();
+  const [expandAll, setExpandAll] = useState(false);
   const focus = Number(params.get('focus')) || null;
   const {
     data = [],
@@ -87,6 +88,11 @@ export default function ScreeningPage() {
             </button>
           ))}
         </div>
+        {tab !== 'filtered' && rows.some((r) => r.fitScore != null) && (
+          <Button variant="ghost" onClick={() => setExpandAll((v) => !v)} aria-pressed={expandAll}>
+            {expandAll ? 'Collapse all' : 'Expand all'}
+          </Button>
+        )}
         {tab === 'inbox' &&
           (batch?.running ? (
             <Button disabled>
@@ -143,6 +149,7 @@ export default function ScreeningPage() {
               key={r.id}
               row={r}
               focused={r.id === focus}
+              expanded={expandAll}
               costs={costs}
               onChanged={refresh}
             />

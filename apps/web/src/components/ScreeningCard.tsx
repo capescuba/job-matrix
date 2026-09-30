@@ -16,17 +16,21 @@ export interface Costs {
 }
 
 /**
- * One job in the Screening inbox. Scored jobs get the decision card (verdict, five tiles, short
- * works-for-you / watch-out lists, fit bars); unscored ones stay a single line until you score.
+ * One job in the Screening inbox, as a single line: title, verdict and score, and the two
+ * decisions you make most (add to pipeline, pass). Opening a scored job shows the decision card
+ * (five tiles, short works-for-you / watch-out lists, fit bars) and the rarer actions.
  */
 export function ScreeningCard({
   row: r,
   focused,
+  expanded,
   costs,
   onChanged,
 }: {
   row: ApplicationRow;
   focused: boolean;
+  /** "Expand all" on the page. */
+  expanded: boolean;
   costs: Costs;
   onChanged: () => void;
 }) {
@@ -130,10 +134,17 @@ export function ScreeningCard({
     );
   }
 
-  // ---- Scored: the decision card ----
+  // ---- Scored: one line that opens into the decision card ----
   return (
-    <div ref={ref} className={cx(frame, 'p-4')}>
-      <Scored row={r} onChanged={onChanged} live={live} errors={errors} scoreButton={scoreButton} />
+    <div ref={ref} className={cx(frame, 'px-4 py-2.5')}>
+      <Scored
+        row={r}
+        expanded={expanded}
+        onChanged={onChanged}
+        live={live}
+        errors={errors}
+        scoreButton={scoreButton}
+      />
     </div>
   );
 }
@@ -170,27 +181,28 @@ function Title({ row: r, onChanged }: { row: ApplicationRow; onChanged: () => vo
 
 function Scored({
   row: r,
+  expanded,
   onChanged,
   live,
   errors,
   scoreButton,
 }: {
   row: ApplicationRow;
+  expanded: boolean;
   onChanged: () => void;
   live: ReactNode;
   errors: ReactNode;
   scoreButton: ReactNode;
 }) {
-  const [details, setDetails] = useState(false);
-  const { detail, brief, stock, minBase, fit } = useDecisionData(r.id, r.companyId);
+  const [open, setOpen] = useState(expanded);
+  useEffect(() => setOpen(expanded), [expanded]);
   const reasons = (r.fitGateReasons ?? []) as GateReason[];
 
   return (
     <>
-      {/* Header */}
-      <div className="flex gap-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="min-w-0 flex-1">
-          <div className="text-base">
+          <div className={open ? 'text-base' : 'text-sm'}>
             <Title row={r} onChanged={onChanged} />
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-ink-3">
@@ -210,9 +222,47 @@ function Scored({
             </Link>
           </div>
         </div>
-        <Verdict score={r.fitScore!} verdict={r.fitVerdict} gate={r.fitGate} reasons={reasons} />
+        <Verdict
+          score={r.fitScore!}
+          verdict={r.fitVerdict}
+          gate={r.fitGate}
+          reasons={reasons}
+          compact={!open}
+        />
+        {!open && <Actions row={r} onChanged={onChanged} compact />}
+        <Button
+          variant="ghost"
+          className="px-2"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          title={open ? 'Collapse' : 'Show the details'}
+        >
+          {open ? '▾' : '▸'}
+        </Button>
       </div>
 
+      {live && <div className="mt-3">{live}</div>}
+      {errors}
+      {open && <ScoredBody row={r} onChanged={onChanged} scoreButton={scoreButton} />}
+    </>
+  );
+}
+
+/** The opened card: tiles, lists and bars, every action, and the deeper details on request. */
+function ScoredBody({
+  row: r,
+  onChanged,
+  scoreButton,
+}: {
+  row: ApplicationRow;
+  onChanged: () => void;
+  scoreButton: ReactNode;
+}) {
+  const [details, setDetails] = useState(false);
+  const { detail, brief, stock, minBase, fit } = useDecisionData(r.id, r.companyId);
+  const reasons = (r.fitGateReasons ?? []) as GateReason[];
+  return (
+    <>
       <DecisionBody
         title={r.title}
         fit={fit}
@@ -225,10 +275,6 @@ function Scored({
         moreLabel="in details"
       />
 
-      {live && <div className="mt-3">{live}</div>}
-      {errors}
-
-      {/* Actions */}
       <div className="mt-3 border-t border-border pt-3">
         <Actions
           row={r}
@@ -237,7 +283,7 @@ function Scored({
             <>
               {scoreButton}
               <Button variant="ghost" onClick={() => setDetails((v) => !v)} aria-expanded={details}>
-                {details ? '▾ Hide details' : '▸ Details'}
+                {details ? '▾ Less' : '▸ Summary, company, description'}
               </Button>
             </>
           }
@@ -292,15 +338,20 @@ function Description({ row: r }: { row: ApplicationRow }) {
   );
 }
 
-/** Pipeline / Applied / Pass (with reason) / Delete — plus any extra controls on the right. */
+/**
+ * Pipeline / Applied / Pass (with reason) / Delete — plus any extra controls on the right.
+ * `compact` keeps just Pipeline and Pass, for the one-line row.
+ */
 function Actions({
   row: r,
   onChanged,
   extra,
+  compact,
 }: {
   row: ApplicationRow;
   onChanged: () => void;
   extra?: ReactNode;
+  compact?: boolean;
 }) {
   const [passing, setPassing] = useState(false);
   const [reason, setReason] = useState('');
@@ -328,12 +379,18 @@ function Actions({
     <div className="flex flex-wrap items-center gap-2">
       {r.status === 'Screening' ? (
         <>
-          <Button variant="primary" onClick={() => move.mutate('Saved')} disabled={move.isPending}>
+          <Button
+            variant={compact ? 'secondary' : 'primary'}
+            onClick={() => move.mutate('Saved')}
+            disabled={move.isPending}
+          >
             Add to pipeline
           </Button>
-          <Button onClick={() => move.mutate('Applied')} disabled={move.isPending}>
-            Applied
-          </Button>
+          {!compact && (
+            <Button onClick={() => move.mutate('Applied')} disabled={move.isPending}>
+              Applied
+            </Button>
+          )}
           {passing ? (
             <form
               className="flex items-center gap-1"
@@ -367,21 +424,25 @@ function Actions({
           Move back to inbox
         </Button>
       )}
-      <span className="flex-1" />
-      {extra}
-      <Button
-        variant="ghost"
-        className="text-ink-3"
-        disabled={remove.isPending}
-        onClick={() =>
-          confirm(
-            `Delete "${r.title}" at ${r.company}? This removes it and its scores completely.`,
-          ) && remove.mutate()
-        }
-        title="Delete completely"
-      >
-        Delete
-      </Button>
+      {!compact && (
+        <>
+          <span className="flex-1" />
+          {extra}
+          <Button
+            variant="ghost"
+            className="text-ink-3"
+            disabled={remove.isPending}
+            onClick={() =>
+              confirm(
+                `Delete "${r.title}" at ${r.company}? This removes it and its scores completely.`,
+              ) && remove.mutate()
+            }
+            title="Delete completely"
+          >
+            Delete
+          </Button>
+        </>
+      )}
       <ErrorText error={move.error ?? pass.error ?? remove.error} />
     </div>
   );

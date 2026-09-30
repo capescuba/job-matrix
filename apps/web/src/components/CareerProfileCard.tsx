@@ -67,10 +67,14 @@ export function CareerProfileCard() {
       }
     >
       <p className="mb-3 text-sm text-ink-2">
-        A detailed, factual inventory of your career — every role with its scope, programs, numbers
-        and skills — built from your resume{data.hasLinkedIn ? ' and LinkedIn profile' : ''}. Fit
-        scoring reads it next to your resume, and application answers use it too. Built only when
-        you press the button; edit it freely.
+        An inventory of your career built from your resume
+        {data.hasLinkedIn ? ' and LinkedIn profile' : ''}.{' '}
+        <span
+          className="cursor-help underline decoration-dotted"
+          title="Every role with its scope, programs, numbers and skills. Fit scoring reads it next to your resume, and application answers use it too. It is built only when you press the button, and you can edit it freely."
+        >
+          What is it for?
+        </span>
       </p>
       {!data.hasLinkedIn && (
         <p className="mb-2 text-sm text-warn">

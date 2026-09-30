@@ -12,11 +12,11 @@ Use the **Job Matrix** icon (Start menu or Desktop, pin either to the taskbar). 
 The server shuts itself down 10 minutes after the last Job Matrix tab closes. Logs: `data/server.log`, `data/server-error.log`.
 Recreate the shortcuts with `powershell -File scripts/install-shortcuts.ps1`; regenerate the icon with `node scripts/make-icon.mjs`.
 
-Set the Anthropic API key and model on the **Profile** page (saved to `.env`).
+Set the Anthropic API key and model under **More → Profile → Settings** (saved to `.env`).
 
 ## Using it
 
-1. **Profile** — upload your resume (PDF/DOCX/TXT/MD) and write your goals, must-haves and deal-breakers.
+1. **Profile** (under **More**, top right) — upload your resume (PDF/DOCX/TXT/MD) on **About you**, and write your goals, must-haves and deal-breakers on **Criteria**.
 2. **Applications** — add jobs (paste a URL and hit Fetch, or paste the JD), log follow-ups, move them through statuses in the table or Kanban board. "Import N descriptions" fetches JDs for every job with a link.
 3. **Score fit** on a job page, or "Score N unscored" on the list. Results are cached per (JD, resume, goals, model); "Re-score" forces a fresh run.
 4. **Dashboard** — pipeline, weekly volume, response rate, fit vs. outcome, next actions.
@@ -53,7 +53,7 @@ The **Email** page reads your Hotmail / Outlook.com mailbox (read-only, Microsof
 
 ## Watchlist
 
-The **Watchlist** card on the Profile page follows company job boards, so new jobs reach the Screening inbox on their own.
+The **Watchlist** page follows company job boards, so new jobs reach the Screening inbox on their own.
 
 - **Follow a company.** Paste its careers page, its job board or any one of its job postings. Greenhouse, Ashby, Lever and Workday boards are supported. The board is read once straight away, so a wrong address is reported there and then.
 - **What is picked up.** Jobs whose title contains one of your **titles to look for**. "TPM" and "Sr." are read as "technical program manager" and "senior".
@@ -61,7 +61,7 @@ The **Watchlist** card on the Profile page follows company job boards, so new jo
 - **Where the rest goes.** Into the Screening inbox, with a timeline note naming the board. Filtered-out jobs are listed on Screening under **Filtered out**, each with its reason and an **Add anyway** button.
 - **Decided once.** A job added or filtered out is remembered by its address and not looked at again. The exception is a job a rule filtered out: it is judged again on each check, so a change to the rules takes effect.
 - **When it checks.** When Job Matrix opens, by default. You can choose manual only, or also every 1, 3 or 6 hours while the app is open. **Check now** is on both pages.
-- **Pre-screen (optional).** A small model can look at each job the rules let through and answer yes, maybe or no. Yes and maybe go to the inbox with the model's reason on the timeline. A no is listed under **Filtered out** with the reason. Choose the model on the Watchlist card: Groq, Google Gemini or OpenRouter (free, each needs its own free key), Ollama on this PC, any other OpenAI-compatible service, or Claude Haiku 4.5 (paid). It is off until you choose one.
+- **Pre-screen (optional).** A small model can look at each job the rules let through and answer yes, maybe or no. Yes and maybe go to the inbox with the model's reason on the timeline. A no is listed under **Filtered out** with the reason. Choose the model on the Watchlist page: Groq, Google Gemini or OpenRouter (free, each needs its own free key), Ollama on this PC, any other OpenAI-compatible service, or Claude Haiku 4.5 (paid). It is off until you choose one.
   - The model is sent the posting and your goals, pay floor, must-haves and deal-breakers. It is never sent your resume or career profile.
   - Free tiers are rate-limited. A short "slow down" is waited out. A daily limit leaves the remaining jobs waiting, and the next check asks about them again. Nothing falls back to a paid model.
   - Every call is listed on the AI usage page under "Watchlist pre-screen".
