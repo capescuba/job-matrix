@@ -2,7 +2,7 @@ import Fastify, { LogController } from 'fastify';
 import multipart from '@fastify/multipart';
 import { asc, eq } from 'drizzle-orm';
 import { ZodError, z } from 'zod';
-import { EFFORTS, LLMError, PRESCREEN_PROVIDERS, prescreenConfig } from '@jm/ai';
+import { EFFORTS, LLMError, PRESCREEN_PROVIDERS, RateLimitError, prescreenConfig } from '@jm/ai';
 import { GraphError, NeedsSignIn, createMailClient, type MailClient } from '@jm/mail';
 import {
   STATUSES,
@@ -143,6 +143,7 @@ import {
 } from './services/crawl/watchlist.ts';
 
 import { searchResultsSchema } from './services/crawl/searches.ts';
+import { prescreenApplication } from './services/crawl/prescreen.ts';
 
 const idParam = z.object({ id: z.coerce.number().int() });
 
@@ -471,6 +472,21 @@ export function buildApp(
   app.post('/api/crawl/searches/:id/results', { preHandler: requireToken }, (req) =>
     ingestSearch(db, idParam.parse(req.params).id, searchResultsSchema.parse(req.body), crawlDeps),
   );
+
+  // A free pre-screen on a tracked job, before paying for a fit score (extension or inbox).
+  app.post('/api/applications/:id/prescreen', async (req, reply) => {
+    try {
+      return await prescreenApplication(db, idParam.parse(req.params).id, {
+        screener: crawlDeps.prescreen,
+      });
+    } catch (e) {
+      if (e instanceof RateLimitError)
+        return reply
+          .status(429)
+          .send({ error: `${e.message.replace(/\.?$/, '.')} Try again in a minute.` });
+      throw e;
+    }
+  });
 
   // Is this posting already tracked? (the extension popup asks before capturing)
   app.get('/api/screen/lookup', { preHandler: requireToken }, (req) => {

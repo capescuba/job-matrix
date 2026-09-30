@@ -145,8 +145,8 @@ export interface ApplicationRow {
   researchAt: string | null;
   /** Where the watchlist found it ("LinkedIn search", "Anthropic board"); null = added by you. */
   foundBy: string | null;
-  /** The watchlist pre-screen's answer, when a model looked at it. */
-  prescreenVerdict: 'yes' | 'maybe' | null;
+  /** The pre-screen's answer: the latest you asked for, else the watchlist's. */
+  prescreenVerdict: 'yes' | 'maybe' | 'no' | null;
   /** Its rough 0–10 score (not the fit score). */
   prescreenScore: number | null;
   prescreenReason: string | null;
@@ -195,10 +195,10 @@ export function listApplications(db: Db): ApplicationRow[] {
                 WHEN cs.id IS NOT NULL THEN 'search “' || cs.label || '”'
                 WHEN src.id IS NOT NULL THEN src.company_name || ' board'
                 ELSE 'watchlist' END AS foundBy,
-           CASE WHEN l.model IS NOT NULL THEN l.verdict END AS prescreenVerdict,
-           CASE WHEN l.model IS NOT NULL THEN l.score END AS prescreenScore,
-           CASE WHEN l.model IS NOT NULL THEN l.reason END AS prescreenReason,
-           l.model AS prescreenModel
+           CASE WHEN ps.id IS NOT NULL THEN ps.verdict WHEN l.model IS NOT NULL THEN l.verdict END AS prescreenVerdict,
+           CASE WHEN ps.id IS NOT NULL THEN ps.score WHEN l.model IS NOT NULL THEN l.score END AS prescreenScore,
+           CASE WHEN ps.id IS NOT NULL THEN ps.reason WHEN l.model IS NOT NULL THEN l.reason END AS prescreenReason,
+           COALESCE(ps.model, l.model) AS prescreenModel
     FROM applications a
     JOIN jobs j ON j.id = a.job_id
     JOIN companies c ON c.id = j.company_id
@@ -212,6 +212,10 @@ export function listApplications(db: Db): ApplicationRow[] {
     )
     LEFT JOIN crawl_searches cs ON cs.id = l.search_id
     LEFT JOIN crawl_sources src ON src.id = l.source_id
+    -- The latest pre-screen you asked for on it.
+    LEFT JOIN prescreens ps ON ps.id = (
+      SELECT id FROM prescreens WHERE application_id = a.id ORDER BY id DESC LIMIT 1
+    )
     ORDER BY COALESCE(a.updated_at, a.created_at) DESC
   `);
   const { minBase } = getProfile(db);

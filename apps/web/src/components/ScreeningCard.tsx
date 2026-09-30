@@ -118,6 +118,7 @@ export function ScreeningCard({
             <WatchlistChips row={r} />
           </div>
           {!r.hasDescription && <span className="text-xs text-warn">No description captured</span>}
+          <PrescreenButton row={r} onChanged={onChanged} />
           {scoreButton}
           <Button variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
             {open ? 'Less' : 'More'}
@@ -155,20 +156,26 @@ export function ScreeningCard({
  * the reason on hover). Jobs you added yourself show nothing.
  */
 export function WatchlistChips({ row: r }: { row: ApplicationRow }) {
-  if (!r.foundBy) return null;
+  if (!r.foundBy && !r.prescreenVerdict) return null;
   return (
     <span className="ml-2 inline-flex flex-wrap items-center gap-1 align-middle text-xs">
-      <span
-        className="rounded bg-accent/10 px-1.5 py-0.5 text-accent"
-        title="Found by the watchlist"
-      >
-        Watchlist · {r.foundBy}
-      </span>
+      {r.foundBy && (
+        <span
+          className="rounded bg-accent/10 px-1.5 py-0.5 text-accent"
+          title="Found by the watchlist"
+        >
+          Watchlist · {r.foundBy}
+        </span>
+      )}
       {r.prescreenVerdict && (
         <span
           className={cx(
             'rounded px-1.5 py-0.5',
-            r.prescreenVerdict === 'yes' ? 'bg-good/10 text-good' : 'bg-warn/10 text-warn',
+            r.prescreenVerdict === 'yes'
+              ? 'bg-good/10 text-good'
+              : r.prescreenVerdict === 'no'
+                ? 'bg-bad/10 text-bad'
+                : 'bg-warn/10 text-warn',
           )}
           title={`Pre-screen by ${r.prescreenModel}: ${r.prescreenReason ?? ''}`}
         >
@@ -177,6 +184,33 @@ export function WatchlistChips({ row: r }: { row: ApplicationRow }) {
         </span>
       )}
     </span>
+  );
+}
+
+/** The free pre-screen, offered before a paid score when a pre-screen model is set up. */
+function PrescreenButton({ row: r, onChanged }: { row: ApplicationRow; onChanged: () => void }) {
+  const { data: status } = useQuery({ queryKey: ['crawl-status'], queryFn: api.crawlStatus });
+  const run = useMutation({
+    mutationFn: () => api.prescreenApplication(r.id),
+    onSettled: onChanged,
+  });
+  if (!status?.prescreen) return null;
+  return (
+    <>
+      <Button
+        variant={r.prescreenVerdict ? 'ghost' : 'secondary'}
+        disabled={run.isPending}
+        onClick={() => run.mutate()}
+        title={`A quick yes / maybe / no and 0–10 from ${status.prescreen.model}, before you pay for a fit score`}
+      >
+        {run.isPending
+          ? 'Pre-screening…'
+          : r.prescreenVerdict
+            ? 'Pre-screen again'
+            : 'Pre-screen · free'}
+      </Button>
+      <ErrorText error={run.error} />
+    </>
   );
 }
 
