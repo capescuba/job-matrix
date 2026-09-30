@@ -3,6 +3,7 @@ import { api, openInApp } from './api.js';
 import { captureBody, contextBody, readTab } from './capture.js';
 import { fillField, startPicker } from './reader.js';
 import { connectLive, isRunning, renderLive, toggleStream } from './live.js';
+import { RUN_KEY } from './search.js';
 
 const root = document.getElementById('root');
 const statusEl = document.getElementById('status');
@@ -21,6 +22,8 @@ const state = {
   drafts: {}, // question id → { text, basedOn, loading, error }
   saved: {}, // question id → earlier answers to similar questions
   teach: null, // { selectors: {}, samples: {} } while teaching this site
+  run: null, // the watchlist's saved-search run, as search.js reports it
+  runDismissed: null, // startedAt of a finished run you closed
 };
 
 // ---------- helpers ----------
@@ -264,21 +267,55 @@ function render() {
   }
 }
 
+/** How long a finished run stays on show (unless you close it). */
+const RUN_SHOWN_MS = 15 * 60_000;
+
+/**
+ * The watchlist's saved searches while they run in this Chrome: which site is being read, and
+ * what each finished one found. Stays a while after the run so you can see the result.
+ */
+function searchStrip() {
+  const r = state.run;
+  if (!r) return '';
+  if (
+    !r.running &&
+    (state.runDismissed === r.startedAt || Date.now() - r.finishedAt > RUN_SHOWN_MS)
+  )
+    return '';
+  const lines = (r.results ?? [])
+    .map((x) =>
+      x.problem
+        ? `<li><span class="warn">!</span><span><strong>${esc(x.label)}</strong> <span class="muted">${esc(x.problem)}</span></span></li>`
+        : `<li><span class="good">✓</span><span><strong>${esc(x.label)}</strong> <span class="muted">${x.read} read · ${x.matched} matching · ${x.added} added${x.filtered ? ` · ${x.filtered} filtered out` : ''}</span></span></li>`,
+    )
+    .join('');
+  const added = (r.results ?? []).reduce((n, x) => n + (x.added || 0), 0);
+  const head = r.running
+    ? `<div class="row"><span class="grow">Searching <strong>${esc(r.current ?? '…')}</strong> (${r.index} of ${r.total})…</span></div>`
+    : `<div class="row"><span class="grow">Done: ${added} new ${added === 1 ? 'job' : 'jobs'} in the inbox${r.problem ? ` <span class="warn">${esc(r.problem)}</span>` : ''}</span>
+         ${added ? '<button class="primary" data-action="open" data-path="/screening?from=watchlist">See them</button>' : ''}
+         <button class="link small" data-action="run-dismiss" title="Close">✕</button></div>`;
+  return `<section><h2>Watchlist search</h2>${head}${lines ? `<ul class="list small" style="margin-top:6px">${lines}</ul>` : ''}</section>`;
+}
+
 function draw() {
+  const strip = searchStrip();
   if (!state.tab || !/^https?:/.test(state.tab.url ?? '')) {
     root.innerHTML =
+      strip +
       '<p class="muted pad">Open a job posting, a company’s careers page or an application form.</p>';
     return;
   }
   if (state.error) {
-    root.innerHTML = `<section><p class="error">${esc(state.error)}</p><button data-action="refresh">Try again</button></section>`;
+    root.innerHTML = `${strip}<section><p class="error">${esc(state.error)}</p><button data-action="refresh">Try again</button></section>`;
     return;
   }
   if (!state.ctx) {
-    root.innerHTML = '<p class="muted pad">Reading the page…</p>';
+    root.innerHTML = `${strip}<p class="muted pad">Reading the page…</p>`;
     return;
   }
   root.innerHTML = [
+    strip,
     state.notice ? `<section class="${state.notice.tone}">${esc(state.notice.text)}</section>` : '',
     linkedinProfileSection(),
     postingSection(),
@@ -821,7 +858,10 @@ document.addEventListener('click', async (e) => {
   else if (a === 'add-score') add('score');
   else if (a === 'add-prescreen') add('prescreen');
   else if (a === 'prescreen') prescreen(Number(el.dataset.id));
-  else if (a === 'score-fit') scoreFit(Number(el.dataset.id));
+  else if (a === 'run-dismiss') {
+    state.runDismissed = state.run?.startedAt ?? null;
+    render();
+  } else if (a === 'score-fit') scoreFit(Number(el.dataset.id));
   else if (a === 'mark-applied') markApplied();
   else if (a === 'import-linkedin') importMyLinkedIn();
   else if (a === 'pass') {
@@ -922,4 +962,19 @@ connectLive({
   onChange: () => renderLive(root),
   onFinish: () => soon(),
 });
+
+// The watchlist's saved searches report their progress here while they run.
+chrome.storage.session
+  .get(RUN_KEY)
+  .then((s) => {
+    state.run = s[RUN_KEY] ?? null;
+    render();
+  })
+  .catch(() => {});
+chrome.storage.session.onChanged.addListener((changes) => {
+  if (!changes[RUN_KEY]) return;
+  state.run = changes[RUN_KEY].newValue ?? null;
+  render();
+});
+
 refresh();

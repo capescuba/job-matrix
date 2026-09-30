@@ -221,10 +221,39 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let running = null;
 
+/** Where the side panel reads a run's progress (session storage: gone when Chrome closes). */
+export const RUN_KEY = 'jmSearchRun';
+
+/**
+ * The run's progress, shared with the side panel: { running, total, index, current, results:
+ * [{ label, read, matched, added, filtered, problem }], startedAt, finishedAt }.
+ */
+let progress = null;
+async function report(patch) {
+  progress = { ...progress, ...patch };
+  await chrome.storage.session.set({ [RUN_KEY]: progress }).catch(() => {});
+}
+/** One site done: what it read and what became of it (or why it couldn't be read). */
+const finished = (label, read, counts, problem) =>
+  report({
+    results: [
+      ...(progress?.results ?? []),
+      {
+        label,
+        read,
+        matched: counts?.matched ?? 0,
+        added: counts?.added ?? 0,
+        filtered: counts?.filtered ?? 0,
+        problem: problem ?? null,
+      },
+    ],
+  });
+
 /**
  * Runs the enabled saved searches (or just `ids`), one at a time. The results tab is brought to
  * the front while it is read (sites only fill in their lists for a visible page), then closed,
- * and the tab you were on is brought back. Returns { ok, ran, errors }.
+ * and the tab you were on is brought back. Progress goes to the side panel. Returns
+ * { ok, ran, errors }.
  */
 export function runSearches(ids = null) {
   running ??= (async () => {
@@ -236,9 +265,20 @@ export function runSearches(ids = null) {
       );
       if (!searches.length) return { ok: true, ran: 0, errors };
       await api('/api/crawl/searches/started', { method: 'POST', body: {} });
+      progress = null;
+      await report({
+        running: true,
+        total: searches.length,
+        index: 0,
+        current: null,
+        results: [],
+        startedAt: Date.now(),
+        finishedAt: null,
+      });
       const [before] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      for (const s of searches) {
+      for (const [i, s] of searches.entries()) {
         let tab;
+        await report({ index: i + 1, current: s.label });
         try {
           tab = await chrome.tabs.create({ url: s.url, active: true });
           await waitForLoad(tab.id);
@@ -251,6 +291,7 @@ export function runSearches(ids = null) {
                 body: { listings: [], problem: fixed.problem },
               });
               errors.push(`${s.label}: ${fixed.problem}`);
+              await finished(s.label, 0, null, fixed.problem);
               continue;
             }
             if (fixed?.url) {
@@ -269,14 +310,16 @@ export function runSearches(ids = null) {
             target: { tabId: tab.id },
             func: readSearchPage,
           });
-          await api(`/api/crawl/searches/${s.id}/results`, {
+          const counts = await api(`/api/crawl/searches/${s.id}/results`, {
             method: 'POST',
             body: { listings: result?.listings ?? [], problem: result?.problem ?? null },
           });
           ran++;
           if (result?.problem) errors.push(`${s.label}: ${result.problem}`);
+          await finished(s.label, result?.listings?.length ?? 0, counts, result?.problem);
         } catch (e) {
           errors.push(`${s.label}: ${e?.message || e}`);
+          await finished(s.label, 0, null, e?.message || String(e));
         } finally {
           if (tab?.id) await chrome.tabs.remove(tab.id).catch(() => {});
           if (before?.id) await chrome.tabs.update(before.id, { active: true }).catch(() => {});
@@ -286,8 +329,11 @@ export function runSearches(ids = null) {
       }
       return { ok: true, ran, errors };
     } catch (e) {
+      if (progress) await report({ problem: e?.message || String(e) });
       return { ok: false, ran, errors: [...errors, e?.message || String(e)] };
     } finally {
+      if (progress?.running)
+        await report({ running: false, current: null, finishedAt: Date.now() });
       running = null;
     }
   })();
