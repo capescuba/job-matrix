@@ -23,7 +23,7 @@ export async function readSearchPage() {
   // Give the page time to render its list.
   const ready = () =>
     document.querySelector(
-      'li[data-occludable-job-id], a[data-jk], li[data-jobid], article[id^="job-card-"]',
+      'li[data-occludable-job-id], a[data-jk], li[data-jobid], article[id^="job-card-"], [data-testid="job-card"]',
     );
   for (let i = 0; i < 40 && !ready(); i++) await sleep(250);
 
@@ -125,6 +125,33 @@ export async function readSearchPage() {
         company: text(card.querySelector('a[href^="/co/"]')) || (i > 0 ? ls[i - 1] : null),
         location: i >= 0 ? ls[i + 1] || null : null,
         pay: payLine(card),
+        snippet: null,
+      });
+    }
+  } else if (/(^|\.)dice\.com$/.test(host)) {
+    // Each card: title, company, "Hybrid in Pleasanton, California • Yesterday", type, pay.
+    for (const card of document.querySelectorAll('[data-testid="job-card"]')) {
+      const a = card.querySelector('a[href*="/job-detail/"]');
+      if (!a) continue;
+      const u = new URL(a.href);
+      const ls = lines(card);
+      const company = text(card.querySelector('[data-testid="job-card-company-name"]')) || ls[1];
+      const title =
+        a
+          .getAttribute('aria-label')
+          ?.replace(/^View Details for /, '')
+          .replace(/\s*\([0-9a-f]{16,}\)$/, '') || ls[0];
+      const at = ls.findIndex((l) => l.includes('•'));
+      // Employment type and pay come after the place line (the title can say "contract" too).
+      const rest = at >= 0 ? ls.slice(at + 1) : [];
+      add({
+        url: `${u.origin}${u.pathname}`,
+        title,
+        company: company || null,
+        location: at >= 0 ? ls[at].split('•')[0].trim() : null,
+        pay: rest.find((l) => /\$\s?\d|USD\s?\d|per (year|hour)|^\d+\s*-\s*\d+$/.test(l)) || null,
+        employmentType:
+          rest.find((l) => /full[- ]?time|part[- ]?time|contract|third party/i.test(l)) || null,
         snippet: null,
       });
     }

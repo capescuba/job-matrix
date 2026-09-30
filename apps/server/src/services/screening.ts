@@ -84,6 +84,8 @@ export function normalizeUrl(raw: string): string {
   // ZipRecruiter shows a job inside its search page (lk = the job).
   if (/(^|\.)ziprecruiter\.com$/.test(host) && u.searchParams.get('lk'))
     keep('search', 'location', 'lk');
+  // Dice: the job is its /job-detail/<id> path; the query is search state.
+  if (/(^|\.)dice\.com$/.test(host) && u.pathname.startsWith('/job-detail/')) u.search = '';
   if (host === 'jobs.lever.co') u.pathname = u.pathname.replace(/\/apply\/?$/, '');
   if (host === 'jobs.ashbyhq.com') u.pathname = u.pathname.replace(/\/application\/?$/, '');
   if (host.endsWith('myworkdayjobs.com'))

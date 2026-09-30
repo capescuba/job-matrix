@@ -58,6 +58,8 @@ describe('saved search addresses', () => {
       'glassdoor',
     ],
     [ZIP_SEARCH, 'ziprecruiter'],
+    ['https://www.dice.com/jobs?q=tpm&location=San%20Francisco%20Bay%20Area', 'dice'],
+    ['https://www.dice.com/job-detail/1d0c780f-20e4-4689-8a71-74a8c1abaa53', null],
     ['https://www.linkedin.com/in/someone/', null],
     ['https://jobs.ashbyhq.com/openai', null],
   ])('%s → %s', (url, site) => expect(searchSiteOf(url)).toBe(site));
@@ -191,7 +193,9 @@ describe('results from the extension', () => {
     expect(inbox.map((a) => `${a.company} — ${a.title}`)).toEqual([
       'LinkedIn — Staff Technical Program Manager',
     ]);
-    expect(inbox[0]!.foundBy).toBe('search “LinkedIn: technical program manager in San Francisco Bay Area”');
+    expect(inbox[0]!.foundBy).toBe(
+      'search “LinkedIn: technical program manager in San Francisco Bay Area”',
+    );
     // LinkedIn postings are read by the server, so the inbox card has the description.
     const detail = getApplicationDetail(db, inbox[0]!.id);
     expect(detail.job.url).toBe('https://www.linkedin.com/jobs/view/111/');
@@ -321,15 +325,17 @@ describe('the built-in job-site searches', () => {
       ['indeed', 'Indeed', true, true],
       ['glassdoor', 'Glassdoor', true, true],
       ['ziprecruiter', 'ZipRecruiter', true, true],
+      ['dice', 'Dice', true, true],
     ]);
     expect(sites.map((s) => s.url)).toEqual([
       'https://www.linkedin.com/jobs/search/?keywords=technical+program+manager&location=San+Francisco+Bay+Area&sortBy=DD&f_TPR=r604800',
       'https://www.indeed.com/jobs?q=technical+program+manager&l=San+Francisco+Bay+Area&sort=date&fromage=7',
       'https://www.glassdoor.com/Job/jobs.htm?sc.keyword=technical+program+manager&locKeyword=San+Francisco+Bay+Area&sortBy=date_desc',
       'https://www.ziprecruiter.com/jobs-search?search=technical+program+manager&location=San+Francisco+Bay+Area&days=7',
+      'https://www.dice.com/jobs?q=technical+program+manager&location=San+Francisco+Bay+Area&radius=30&radiusUnit=mi&filters.postedDate=SEVEN',
     ]);
     // Asking again doesn't add more.
-    expect(jobSites(db).sites).toHaveLength(4);
+    expect(jobSites(db).sites).toHaveLength(5);
   });
 
   it('new keywords remake every site search; switches are kept', () => {
@@ -355,5 +361,100 @@ describe('the built-in job-site searches', () => {
     jobSites(db);
     updateCrawlSettings(db, { intervalMinutes: -1 });
     expect(searchesDue(db, new Date(Date.now() + 86_400_000))).toBe(false);
+  });
+});
+
+describe('Dice', () => {
+  const base = {
+    url: 'https://www.dice.com/job-detail/1d0c780f-20e4-4689-8a71-74a8c1abaa53?searchlink=x',
+    title: 'Senior Technical Program Manager - Credit & Lending',
+    company: 'Mercury',
+  };
+
+  it('one address per job, whatever search found it', () => {
+    expect(listingToJob(base)?.url).toBe(
+      'https://www.dice.com/job-detail/1d0c780f-20e4-4689-8a71-74a8c1abaa53',
+    );
+  });
+
+  it('reads Dice’s way of saying where and how', () => {
+    expect(listingToJob({ ...base, location: 'Hybrid in Pleasanton, California' })).toMatchObject({
+      location: 'Pleasanton, California',
+      remoteType: 'Hybrid',
+    });
+    expect(listingToJob({ ...base, location: 'Remote or Reston, Virginia' })).toMatchObject({
+      location: 'Remote | Reston, Virginia',
+      remoteType: 'Remote',
+    });
+    expect(listingToJob({ ...base, location: 'Remote' })).toMatchObject({
+      location: 'Remote',
+      remoteType: 'Remote',
+    });
+    expect(listingToJob({ ...base, location: 'San Francisco, California' })?.location).toBe(
+      'San Francisco, California',
+    );
+  });
+
+  it('reads USD pay and the employment type', () => {
+    expect(
+      listingToJob({
+        ...base,
+        pay: 'USD 180,200.00 - 225,200.00 per year',
+        employmentType: 'Full-time',
+      }),
+    ).toMatchObject({ salaryMin: 180_200, salaryMax: 225_200, employmentType: 'Full-time' });
+    expect(listingToJob({ ...base, employmentType: 'Third Party, Contract' })?.employmentType).toBe(
+      'Third Party, Contract',
+    );
+  });
+
+  it('contracts are filtered; full-time jobs are read in full by the server', async () => {
+    const LONG_JD =
+      'You will lead programs across teams, plan the work and ship it on time. '.repeat(5);
+    const calls: string[] = [];
+    const f = (async (input: string | URL | Request) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === 'https://www.dice.com/job-detail/1d0c780f-20e4-4689-8a71-74a8c1abaa53')
+        return new Response(
+          `<html><script type="application/ld+json">${JSON.stringify({
+            '@type': 'JobPosting',
+            title: base.title,
+            description: `<p>${LONG_JD}</p>`,
+            hiringOrganization: { name: 'Mercury' },
+            jobLocation: { address: { addressLocality: 'San Francisco', addressRegion: 'CA' } },
+          })}</script><body>x</body></html>`,
+        );
+      return new Response('', { status: 404 });
+    }) as typeof fetch;
+    const app = buildApp(db, { extensionToken: TOKEN, fetchFn: f, crawl: { prescreen: null } });
+    const dice = jobSites(db).sites.find((x) => x.site === 'dice')!;
+    const r = await app.inject({
+      method: 'POST',
+      url: `/api/crawl/searches/${dice.id}/results`,
+      headers: { 'x-jm-token': TOKEN },
+      payload: {
+        listings: [
+          {
+            ...base,
+            location: 'San Francisco, California',
+            employmentType: 'Full-time',
+            pay: 'USD 180,200.00 - 225,200.00 per year',
+          },
+          {
+            url: 'https://www.dice.com/job-detail/ba304221-3a34-410f-b206-d32aad646ed5',
+            title: 'Technical Program Manager',
+            company: 'Pyramid Consulting, Inc.',
+            location: 'Remote',
+            employmentType: 'Contract',
+            pay: '80 - 85',
+          },
+        ],
+      },
+    });
+    expect(r.json()).toMatchObject({ seen: 2, matched: 2, added: 1, filtered: 1 });
+    const added = listApplications(db).find((a) => a.company === 'Mercury')!;
+    expect(added).toMatchObject({ hasDescription: 1, foundBy: 'Dice search' });
+    expect(listFiltered(db).map((l) => l.reason)).toEqual(['Not a permanent role (Contract)']);
   });
 });
