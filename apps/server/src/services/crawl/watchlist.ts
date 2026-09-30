@@ -5,7 +5,8 @@
 import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { splitLines } from '@jm/shared';
 import type { Db } from '../../db/client.ts';
-import { companies, crawlLeads, crawlSources, crawlState } from '../../db/schema.ts';
+import { companies, crawlLeads, crawlSearches, crawlSources, crawlState } from '../../db/schema.ts';
+import { SEARCH_SITE_LABEL, searchLabel, searchSiteOf, type SearchSite } from './searches.ts';
 import { NotFoundError } from '../applications.ts';
 import { companyKey } from '../extension.ts';
 import type { FetchFn } from '../jobfetch.ts';
@@ -180,6 +181,81 @@ export function updateSource(
 /** Stops following a board. Jobs already in the inbox stay; its filtered-out jobs go. */
 export function removeSource(db: Db, id: number) {
   db.delete(crawlSources).where(eq(crawlSources.id, id)).run();
+}
+
+// ---------- saved searches ----------
+
+export type SearchRow = Omit<typeof crawlSearches.$inferSelect, 'site'> & { site: SearchSite };
+
+export const listSearches = (db: Db) =>
+  db.select().from(crawlSearches).orderBy(crawlSearches.id).all() as SearchRow[];
+
+export function getSearch(db: Db, id: number): SearchRow {
+  const row = db.select().from(crawlSearches).where(eq(crawlSearches.id, id)).get();
+  if (!row) throw new NotFoundError(`Saved search ${id} not found`);
+  return row as SearchRow;
+}
+
+/** Saves a results-page address from LinkedIn, Indeed, Glassdoor or ZipRecruiter. */
+export function addSearch(db: Db, input: { url: string; label?: string | null }): SearchRow {
+  const site = searchSiteOf(input.url);
+  if (!site)
+    throw new BoardError(
+      `Paste a search results page from ${Object.values(SEARCH_SITE_LABEL).join(', ')}.`,
+    );
+  if (listSearches(db).some((s) => s.url === input.url.trim()))
+    throw new BoardError('That search is already saved.');
+  return db
+    .insert(crawlSearches)
+    .values({ site, url: input.url.trim(), label: input.label?.trim() || searchLabel(input.url) })
+    .returning()
+    .get() as SearchRow;
+}
+
+export function updateSearch(db: Db, id: number, patch: { enabled?: boolean; label?: string }) {
+  getSearch(db, id);
+  db.update(crawlSearches)
+    .set({
+      ...(patch.enabled !== undefined && { enabled: patch.enabled }),
+      ...(patch.label?.trim() && { label: patch.label.trim() }),
+    })
+    .where(eq(crawlSearches.id, id))
+    .run();
+  return getSearch(db, id);
+}
+
+/** Forgets a saved search. Jobs it found stay (in the inbox or the filtered-out list). */
+export function removeSearch(db: Db, id: number) {
+  db.transaction((tx) => {
+    tx.update(crawlLeads).set({ searchId: null }).where(eq(crawlLeads.searchId, id)).run();
+    tx.delete(crawlSearches).where(eq(crawlSearches.id, id)).run();
+  });
+}
+
+/** When this server started: "when Job Matrix opens" means once per start. */
+const startedAt = new Date().toISOString();
+
+/**
+ * Whether the saved searches should run now, by the same schedule as the boards: never when
+ * manual; once per app start; or also every N minutes. Asked by the web page, which then asks
+ * the Chrome extension (only it can open the searches in your signed-in Chrome).
+ */
+export function searchesDue(db: Db, now = new Date()): boolean {
+  const s = crawlSettings(db);
+  if (!s.enabled || s.intervalMinutes < 0) return false;
+  if (!listSearches(db).some((x) => x.enabled)) return false;
+  const last = s.searchRunAt;
+  if (!last || last < startedAt) return true;
+  return s.intervalMinutes > 0 && now.getTime() - Date.parse(last) > s.intervalMinutes * 60_000;
+}
+
+/** The extension is starting a run: stamp it so no other window starts one too. */
+export function markSearchRun(db: Db) {
+  stateRow(db);
+  db.update(crawlState)
+    .set({ searchRunAt: new Date().toISOString() })
+    .where(eq(crawlState.id, 1))
+    .run();
 }
 
 // ---------- jobs found ----------

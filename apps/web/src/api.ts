@@ -34,9 +34,9 @@ import type { EmailKind } from '../../server/src/services/mail/rules.ts';
 import type { LogEntry, listLogs } from '../../server/src/services/logs.ts';
 import type { MailStatus as MailConnection } from '@jm/mail';
 import type { CrawlProgress } from '../../server/src/services/crawl/run.ts';
-import type { LeadRow, SourceRow } from '../../server/src/services/crawl/watchlist.ts';
+import type { LeadRow, SearchRow, SourceRow } from '../../server/src/services/crawl/watchlist.ts';
 
-export type { LeadRow, SourceRow };
+export type { LeadRow, SearchRow, SourceRow };
 /** The watchlist: what to look for, and how the last check went. */
 export interface CrawlStatus {
   enabled: boolean;
@@ -55,6 +55,10 @@ export interface CrawlStatus {
   filteredCount: number;
   /** Passed the rules, not yet answered by the pre-screen. */
   waitingCount: number;
+  /** Saved searches, and whether the page should ask the extension to run them now. */
+  searches: number;
+  searchesDue: boolean;
+  searchRunAt: string | null;
   /** The pre-screen model in use; null = rules only. */
   prescreen: { label: string; model: string } | null;
 }
@@ -304,6 +308,13 @@ export const api = {
   /** Jobs that matched a watched title but were kept out of the inbox. */
   crawlLeads: () => request<LeadRow[]>('GET', '/api/crawl/leads'),
   addCrawlLead: (id: number) => request<CaptureResult>('POST', `/api/crawl/leads/${id}/add`),
+  /** Saved searches (run by the Chrome extension). */
+  crawlSearches: () => request<SearchRow[]>('GET', '/api/crawl/searches'),
+  addCrawlSearch: (url: string, label?: string | null) =>
+    request<SearchRow>('POST', '/api/crawl/searches', { url, label }),
+  updateCrawlSearch: (id: number, patch: { enabled?: boolean; label?: string }) =>
+    request<SearchRow>('PATCH', `/api/crawl/searches/${id}`, patch),
+  removeCrawlSearch: (id: number) => request<void>('DELETE', `/api/crawl/searches/${id}`),
 
   // ----- logs -----
   logs: () => request<{ dir: string; files: LogFile[] }>('GET', '/api/logs'),

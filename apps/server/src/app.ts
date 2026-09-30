@@ -115,6 +115,7 @@ import {
 import {
   addLead,
   crawlProgress,
+  ingestSearch,
   nextCrawlAt,
   runCrawl,
   scheduleCrawl,
@@ -122,8 +123,14 @@ import {
 } from './services/crawl/run.ts';
 import {
   CRAWL_INTERVALS,
+  addSearch,
   addSource,
   crawlSettings,
+  listSearches,
+  markSearchRun,
+  removeSearch,
+  searchesDue,
+  updateSearch,
   filteredCount,
   waitingCount,
   listFiltered,
@@ -132,6 +139,8 @@ import {
   updateCrawlSettings,
   updateSource,
 } from './services/crawl/watchlist.ts';
+
+import { searchResultsSchema } from './services/crawl/searches.ts';
 
 const idParam = z.object({ id: z.coerce.number().int() });
 
@@ -327,6 +336,10 @@ export function buildApp(
       sources: listSources(db).length,
       filteredCount: filteredCount(db),
       waitingCount: waitingCount(db),
+      searches: listSearches(db).length,
+      /** The page should ask the extension to run the saved searches. */
+      searchesDue: searchesDue(db),
+      searchRunAt: s.searchRunAt,
       // Which model, if any, looks at jobs the rules let through.
       prescreen:
         crawlDeps.prescreen !== undefined
@@ -400,6 +413,45 @@ export function buildApp(
   app.get('/api/crawl/leads', () => listFiltered(db));
   app.post('/api/crawl/leads/:id/add', (req) =>
     addLead(db, idParam.parse(req.params).id, crawlDeps),
+  );
+
+  // ----- saved searches: read by the Chrome extension in your signed-in Chrome -----
+  app.get('/api/crawl/searches', () => listSearches(db));
+  app.post('/api/crawl/searches', (req, reply) => {
+    const body = z
+      .object({
+        url: z.string().trim().url().max(2000),
+        label: z.string().trim().max(200).nullable().optional(),
+      })
+      .parse(req.body);
+    const s = addSearch(db, body);
+    logEvent('crawl.search.add', `Saved search: ${s.label}`, { searchId: s.id, site: s.site });
+    return reply.status(201).send(s);
+  });
+  app.patch('/api/crawl/searches/:id', (req) =>
+    updateSearch(
+      db,
+      idParam.parse(req.params).id,
+      z
+        .object({
+          enabled: z.boolean().optional(),
+          label: z.string().trim().min(1).max(200).optional(),
+        })
+        .parse(req.body),
+    ),
+  );
+  app.delete('/api/crawl/searches/:id', (req, reply) => {
+    removeSearch(db, idParam.parse(req.params).id);
+    return reply.status(204).send();
+  });
+  // From the extension: a run is starting, then each search's listings.
+  app.post('/api/crawl/searches/started', { preHandler: requireToken }, () => {
+    markSearchRun(db);
+    logEvent('crawl.search.start', 'Running saved searches in Chrome');
+    return { ok: true };
+  });
+  app.post('/api/crawl/searches/:id/results', { preHandler: requireToken }, (req) =>
+    ingestSearch(db, idParam.parse(req.params).id, searchResultsSchema.parse(req.body), crawlDeps),
   );
 
   // Is this posting already tracked? (the extension popup asks before capturing)

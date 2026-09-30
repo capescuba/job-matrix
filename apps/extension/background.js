@@ -3,6 +3,7 @@
 import { api, openInApp } from './api.js';
 import { captureBody, readTab } from './capture.js';
 import { importLinkedIn } from './linkedin.js';
+import { runSearches } from './search.js';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -55,6 +56,13 @@ async function runImport(url) {
 chrome.runtime.onMessageExternal.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'jm-ping') {
     sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+    return false;
+  }
+  // Saved searches: started by the Job Matrix page (Check now, or when they are due). Answers at
+  // once; the page follows progress through the server.
+  if (msg?.type === 'jm-run-searches') {
+    runSearches().then((r) => console.log('Job Matrix saved searches:', r));
+    sendResponse({ ok: true, started: true });
     return false;
   }
   if (msg?.type !== 'jm-import-linkedin') return false;
