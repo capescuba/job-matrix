@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
@@ -232,6 +232,7 @@ export function WatchlistHeader({ status }: { status: CrawlStatus | undefined })
       {status?.lastError && !p?.running && (
         <span className="text-sm text-warn">{status.lastError}</span>
       )}
+      <Schedule status={status} />
       <Button
         variant="primary"
         onClick={() => check.mutate()}
@@ -241,6 +242,32 @@ export function WatchlistHeader({ status }: { status: CrawlStatus | undefined })
       </Button>
       <ErrorText error={check.error} />
     </div>
+  );
+}
+
+/** Whether checks happen by themselves: manual only, when the app opens, or every few hours. */
+function Schedule({ status }: { status: CrawlStatus | undefined }) {
+  const qc = useQueryClient();
+  const settings = useMutation({
+    mutationFn: api.crawlSettings,
+    onSuccess: (s) => qc.setQueryData(['crawl-status'], s),
+  });
+  return (
+    <label className="flex items-center gap-2 text-sm text-ink-3">
+      Automatic
+      <Select
+        className="w-auto py-1"
+        aria-label="When to check automatically"
+        value={status?.intervalMinutes ?? -1}
+        onChange={(e) => settings.mutate({ intervalMinutes: Number(e.target.value) })}
+      >
+        {(status?.intervals ?? [-1]).map((m) => (
+          <option key={m} value={m}>
+            {INTERVAL_LABEL[m] ?? `Every ${m} minutes`}
+          </option>
+        ))}
+      </Select>
+    </label>
   );
 }
 
@@ -358,18 +385,18 @@ export function WatchlistCompanies() {
   );
 }
 
-const SITE: Record<SearchRow['site'], string> = {
-  linkedin: 'LinkedIn',
-  indeed: 'Indeed',
-  glassdoor: 'Glassdoor',
-  ziprecruiter: 'ZipRecruiter',
+/** Sites whose results pages the extension can read; Indeed's reader hasn't been tried yet. */
+const SITE_NOTE: Partial<Record<SearchRow['site'], string>> = {
+  indeed: 'Not tried yet: Indeed showed a robot check during testing',
 };
 
 /**
- * Saved searches on LinkedIn, Indeed, Glassdoor and ZipRecruiter. Job Matrix can't read those
- * sites itself, so the Chrome extension opens each search in your signed-in Chrome and reads it.
+ * Job sites: LinkedIn, Indeed, Glassdoor and ZipRecruiter, each searched for your keywords and
+ * place. Job Matrix can't read those sites itself, so the Chrome extension opens each search in
+ * your signed-in Chrome, reads the first page of results and sends them here. Searches you paste
+ * yourself are listed underneath.
  */
-export function WatchlistSearches() {
+export function JobSites() {
   const qc = useQueryClient();
   // For a few minutes after a run starts, follow the results as they come in.
   const { data: runStarted = 0 } = useQuery<number>({
@@ -377,20 +404,35 @@ export function WatchlistSearches() {
     queryFn: () => 0,
     staleTime: Infinity,
   });
-  const { data: searches = [] } = useQuery({
+  const following = Date.now() - runStarted < 4 * 60_000;
+  const { data } = useQuery({
+    queryKey: ['job-sites'],
+    queryFn: api.jobSites,
+    refetchInterval: following ? 3000 : false,
+  });
+  const { data: all = [] } = useQuery({
     queryKey: ['crawl-searches'],
     queryFn: api.crawlSearches,
-    refetchInterval: () => (Date.now() - runStarted < 4 * 60_000 ? 3000 : false),
+    refetchInterval: following ? 3000 : false,
   });
+  const own = all.filter((x) => !x.preset);
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ['crawl-searches'] });
-    qc.invalidateQueries({ queryKey: ['crawl-status'] });
+    for (const key of ['job-sites', 'crawl-searches', 'crawl-status'])
+      qc.invalidateQueries({ queryKey: [key] });
   };
-  const [url, setUrl] = useState('');
-  const add = useMutation({
-    mutationFn: () => api.addCrawlSearch(url.trim()),
-    onSuccess: () => {
-      setUrl('');
+
+  const [keywords, setKeywords] = useState('');
+  const [place, setPlace] = useState('');
+  useEffect(() => {
+    if (!data) return;
+    setKeywords(data.keywords);
+    setPlace(data.location);
+  }, [data?.keywords, data?.location]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = !!data && (keywords.trim() !== data.keywords || place.trim() !== data.location);
+  const save = useMutation({
+    mutationFn: () => api.setJobSites(keywords.trim(), place.trim()),
+    onSuccess: (d) => {
+      qc.setQueryData(['job-sites'], d);
       refresh();
     },
   });
@@ -400,112 +442,163 @@ export function WatchlistSearches() {
     onSuccess: refresh,
   });
   const remove = useMutation({ mutationFn: api.removeCrawlSearch, onSuccess: refresh });
+  const [started, setStarted] = useState<{ ids: number[] | null; at: string } | null>(null);
   const run = useMutation({
-    mutationFn: async () => {
-      const problem = await runSearchesInChrome();
+    mutationFn: async (ids: number[] | null) => {
+      const problem = await runSearchesInChrome(ids ?? undefined);
       if (problem) throw new Error(problem);
+      setStarted({ ids, at: new Date().toISOString() });
       qc.setQueryData(['searches-running'], Date.now());
     },
   });
-  const running = Date.now() - runStarted < 4 * 60_000 && run.isSuccess;
+  const [url, setUrl] = useState('');
+  const add = useMutation({
+    mutationFn: () => api.addCrawlSearch(url.trim()),
+    onSuccess: () => {
+      setUrl('');
+      refresh();
+    },
+  });
+
+  /** Still being searched: part of the run just started, and no result back since. */
+  const inRun = (x: SearchRow) =>
+    following &&
+    !!started &&
+    (started.ids ? started.ids.includes(x.id) : x.enabled) &&
+    (!x.lastRunAt || x.lastRunAt < started.at);
+  const result = (x: SearchRow) =>
+    inRun(x) ? (
+      <span className="text-accent">Searching in Chrome…</span>
+    ) : x.lastError ? (
+      <span className="text-warn">{x.lastError}</span>
+    ) : x.lastRunAt ? (
+      <span title={`Searched ${when(x.lastRunAt)}`}>
+        {x.lastMatched ?? 0} matching of {x.lastCount ?? 0} · {x.lastAdded ?? 0} added ·{' '}
+        {when(x.lastRunAt)}
+      </span>
+    ) : (
+      <span>{SITE_NOTE[x.site] ?? 'Not searched yet'}</span>
+    );
+  const row = (x: SearchRow, name: ReactNode, extra?: ReactNode) => (
+    <li key={x.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+      <input
+        type="checkbox"
+        checked={x.enabled}
+        title={x.enabled ? 'Included in Search all' : 'Left out of Search all'}
+        aria-label={`Include ${x.label} in Search all`}
+        onChange={(e) => update.mutate({ id: x.id, enabled: e.target.checked })}
+      />
+      <span className={cx('min-w-28 font-medium', !x.enabled && 'text-ink-3')}>{name}</span>
+      <a
+        href={x.url}
+        target="_blank"
+        rel="noreferrer"
+        className="text-xs text-ink-3 hover:underline"
+        title="Open this search in a new tab"
+      >
+        open ↗
+      </a>
+      <span className="ml-auto text-xs text-ink-3">{result(x)}</span>
+      <Button onClick={() => run.mutate([x.id])} disabled={run.isPending || inRun(x)}>
+        Search now
+      </Button>
+      {extra}
+    </li>
+  );
 
   return (
     <Card
-      title={`Searches${searches.length ? ` (${searches.length})` : ''}`}
+      title="Job sites"
       actions={
-        searches.length > 0 && (
-          <Button onClick={() => run.mutate()} disabled={run.isPending}>
-            {run.isPending ? 'Starting…' : 'Run in Chrome'}
-          </Button>
-        )
+        <Button
+          variant="primary"
+          onClick={() => run.mutate(null)}
+          disabled={run.isPending || !all.some((x) => x.enabled)}
+        >
+          Search all now
+        </Button>
       }
     >
       <form
+        className="flex flex-wrap items-end gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (url.trim()) add.mutate();
+          if (dirty && keywords.trim() && place.trim()) save.mutate();
         }}
-        className="flex flex-wrap items-center gap-2"
       >
-        <Input
-          type="url"
-          className="min-w-72 flex-1"
-          placeholder="Paste a search results page from LinkedIn, Indeed, Glassdoor or ZipRecruiter"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-        <Button type="submit" disabled={!url.trim() || add.isPending}>
-          Save search
+        <Field label="Search for" className="min-w-64 flex-1">
+          <Input value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+        </Field>
+        <Field label="In" className="min-w-56 flex-1">
+          <Input value={place} onChange={(e) => setPlace(e.target.value)} />
+        </Field>
+        <Button type="submit" variant="primary" disabled={!dirty || save.isPending}>
+          Save
         </Button>
       </form>
-      <ErrorText error={add.error ?? update.error ?? remove.error ?? run.error} />
-      {running && (
-        <p className="mt-2 text-xs text-accent">
-          Running in Chrome: a tab opens for each search and closes when it has been read.
-        </p>
-      )}
+      <p className="mt-2 text-xs text-ink-3">
+        Each search opens in a tab of your Chrome, is read (first page, newest first) and closed.
+        New matching jobs go through your rules to the Screening inbox.
+      </p>
+      <ErrorText error={save.error ?? update.error ?? remove.error ?? run.error} />
 
-      {searches.length === 0 ? (
-        <p className="mt-3 text-sm text-ink-3">
-          Search in Chrome as you normally would (sorted by date works best), then paste the address
-          of the results page. The Chrome extension opens each saved search in your signed-in Chrome
-          on the same schedule as the boards.
-        </p>
-      ) : (
-        <ul className="mt-3 divide-y divide-border text-sm">
-          {searches.map((s) => (
-            <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
-              <input
-                type="checkbox"
-                checked={s.enabled}
-                title={s.enabled ? 'Run on each check' : 'Paused'}
-                aria-label={`Run ${s.label}`}
-                onChange={(e) => update.mutate({ id: s.id, enabled: e.target.checked })}
-              />
-              <button
-                className={cx('font-medium hover:underline', !s.enabled && 'text-ink-3')}
-                title="Rename"
-                onClick={() => {
-                  const label = prompt('Name', s.label)?.trim();
-                  if (label && label !== s.label) update.mutate({ id: s.id, label });
-                }}
-              >
-                {s.label}
-              </button>
-              <a
-                href={s.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-ink-3 hover:underline"
-              >
-                {SITE[s.site]} ↗
-              </a>
-              <span
-                className="ml-auto text-xs text-ink-3"
-                title={s.lastRunAt ? `Last run ${when(s.lastRunAt)}` : undefined}
-              >
-                {s.lastError ? (
-                  <span className="text-warn">{s.lastError}</span>
-                ) : s.lastRunAt == null ? (
-                  'Not run yet'
-                ) : (
-                  `${s.lastMatched ?? 0} matching of ${s.lastCount ?? 0} · ${s.lastAdded ?? 0} added`
-                )}
-              </span>
-              <button
-                className="px-1 text-ink-3 hover:text-bad"
-                title="Forget this search"
-                aria-label={`Forget ${s.label}`}
-                onClick={() =>
-                  confirm(`Forget “${s.label}”? Jobs it found stay.`) && remove.mutate(s.id)
-                }
-              >
-                ✕
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="mt-2 divide-y divide-border text-sm">
+        {data?.sites.map((x) => row(x, x.label))}
+      </ul>
+
+      <details className="mt-3 text-sm" open={own.length > 0}>
+        <summary className="cursor-pointer text-ink-2">
+          Your own searches{own.length ? ` (${own.length})` : ''}
+        </summary>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (url.trim()) add.mutate();
+          }}
+          className="mt-2 flex flex-wrap items-center gap-2"
+        >
+          <Input
+            type="url"
+            className="min-w-72 flex-1"
+            placeholder="Paste a results page from LinkedIn, Indeed, Glassdoor or ZipRecruiter"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <Button type="submit" disabled={!url.trim() || add.isPending}>
+            Save search
+          </Button>
+        </form>
+        <ErrorText error={add.error} />
+        {own.length > 0 && (
+          <ul className="mt-2 divide-y divide-border">
+            {own.map((x) =>
+              row(
+                x,
+                <button
+                  className="text-left hover:underline"
+                  title="Rename"
+                  onClick={() => {
+                    const label = prompt('Name', x.label)?.trim();
+                    if (label && label !== x.label) update.mutate({ id: x.id, label });
+                  }}
+                >
+                  {x.label}
+                </button>,
+                <button
+                  className="px-1 text-ink-3 hover:text-bad"
+                  title="Forget this search"
+                  aria-label={`Forget ${x.label}`}
+                  onClick={() =>
+                    confirm(`Forget “${x.label}”? Jobs it found stay.`) && remove.mutate(x.id)
+                  }
+                >
+                  ✕
+                </button>,
+              ),
+            )}
+          </ul>
+        )}
+      </details>
     </Card>
   );
 }
@@ -546,19 +639,6 @@ export function WatchlistRules({ status }: { status: CrawlStatus | undefined }) 
       title="Rules"
       actions={
         <>
-          <span className="text-xs text-ink-3">Check</span>
-          <Select
-            className="w-auto py-1"
-            aria-label="When to check"
-            value={status?.intervalMinutes ?? 0}
-            onChange={(e) => settings.mutate({ intervalMinutes: Number(e.target.value) })}
-          >
-            {(status?.intervals ?? [0]).map((m) => (
-              <option key={m} value={m}>
-                {INTERVAL_LABEL[m] ?? `Every ${m} minutes`}
-              </option>
-            ))}
-          </Select>
           <Button
             variant="primary"
             disabled={!dirty || settings.isPending}

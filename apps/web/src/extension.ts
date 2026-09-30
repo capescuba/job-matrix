@@ -40,15 +40,19 @@ const atLeast = (v: string, want: string) => {
 export const SEARCHES_VERSION = '0.3.0';
 
 /**
- * Asks the extension to run the saved searches in Chrome. Resolves with why it couldn't, or null
+ * Asks the extension to run the saved searches in Chrome (all enabled ones, or just `ids`).
+ * Resolves with why it couldn't, or null
  * when the run has started (it goes on in the background).
  */
-export async function runSearchesInChrome(): Promise<string | null> {
+export async function runSearchesInChrome(ids?: number[]): Promise<string | null> {
   const v = await extensionVersion();
   if (!v)
     return 'The Job Matrix Chrome extension isn’t reachable. Open this page in Chrome with the extension installed.';
   if (!atLeast(v, SEARCHES_VERSION))
     return `The Chrome extension is version ${v}; saved searches need ${SEARCHES_VERSION}. Reload it in chrome://extensions.`;
-  const r = await toExtension<{ ok: boolean; started?: boolean }>({ type: 'jm-run-searches' });
+  const r = await toExtension<{ ok: boolean; started?: boolean }>({
+    type: 'jm-run-searches',
+    ...(ids && { ids }),
+  });
   return r?.started ? null : 'The Chrome extension didn’t start the searches.';
 }

@@ -6,7 +6,16 @@ import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { splitLines } from '@jm/shared';
 import type { Db } from '../../db/client.ts';
 import { companies, crawlLeads, crawlSearches, crawlSources, crawlState } from '../../db/schema.ts';
-import { SEARCH_SITE_LABEL, searchLabel, searchSiteOf, type SearchSite } from './searches.ts';
+import {
+  DEFAULT_SEARCH_KEYWORDS,
+  DEFAULT_SEARCH_LOCATION,
+  SEARCH_SITES,
+  SEARCH_SITE_LABEL,
+  buildSearchUrl,
+  searchLabel,
+  searchSiteOf,
+  type SearchSite,
+} from './searches.ts';
 import { NotFoundError } from '../applications.ts';
 import { companyKey } from '../extension.ts';
 import type { FetchFn } from '../jobfetch.ts';
@@ -50,6 +59,8 @@ export function crawlSettings(db: Db) {
     titleInclude: s.titleInclude == null ? DEFAULT_TITLE_INCLUDE : splitLines(s.titleInclude),
     titleExclude: s.titleExclude == null ? DEFAULT_TITLE_EXCLUDE : splitLines(s.titleExclude),
     locations: s.locations == null ? DEFAULT_PLACES : splitLines(s.locations),
+    searchKeywords: s.searchKeywords?.trim() || DEFAULT_SEARCH_KEYWORDS,
+    searchLocation: s.searchLocation?.trim() || DEFAULT_SEARCH_LOCATION,
   };
 }
 
@@ -212,12 +223,21 @@ export function addSearch(db: Db, input: { url: string; label?: string | null })
     .get() as SearchRow;
 }
 
-export function updateSearch(db: Db, id: number, patch: { enabled?: boolean; label?: string }) {
-  getSearch(db, id);
+export function updateSearch(
+  db: Db,
+  id: number,
+  patch: { enabled?: boolean; label?: string; url?: string },
+) {
+  const current = getSearch(db, id);
+  // A new address must be on the same site (the extension saves Glassdoor's, once it knows the
+  // place's id).
+  if (patch.url !== undefined && searchSiteOf(patch.url) !== current.site)
+    throw new BoardError(`That address is not a ${SEARCH_SITE_LABEL[current.site]} search.`);
   db.update(crawlSearches)
     .set({
       ...(patch.enabled !== undefined && { enabled: patch.enabled }),
       ...(patch.label?.trim() && { label: patch.label.trim() }),
+      ...(patch.url !== undefined && { url: patch.url.trim() }),
     })
     .where(eq(crawlSearches.id, id))
     .run();
@@ -230,6 +250,48 @@ export function removeSearch(db: Db, id: number) {
     tx.update(crawlLeads).set({ searchId: null }).where(eq(crawlLeads.searchId, id)).run();
     tx.delete(crawlSearches).where(eq(crawlSearches.id, id)).run();
   });
+}
+
+/**
+ * The built-in search on each job site, made from your keywords and place. Created the first
+ * time they're asked for, so the four sites are always listed; each can be switched off.
+ */
+export function jobSites(db: Db) {
+  const s = crawlSettings(db);
+  const have = listSearches(db).filter((x) => x.preset);
+  for (const site of SEARCH_SITES) {
+    if (have.some((x) => x.site === site)) continue;
+    db.insert(crawlSearches)
+      .values({
+        site,
+        preset: true,
+        label: SEARCH_SITE_LABEL[site],
+        url: buildSearchUrl(site, s.searchKeywords, s.searchLocation),
+      })
+      .run();
+  }
+  const rows = listSearches(db).filter((x) => x.preset);
+  return {
+    keywords: s.searchKeywords,
+    location: s.searchLocation,
+    sites: SEARCH_SITES.map((site) => rows.find((x) => x.site === site)!),
+  };
+}
+
+/** New keywords or place: every built-in site search is remade to match. */
+export function setJobSiteSearch(db: Db, input: { keywords: string; location: string }) {
+  stateRow(db);
+  db.update(crawlState)
+    .set({ searchKeywords: input.keywords.trim(), searchLocation: input.location.trim() })
+    .where(eq(crawlState.id, 1))
+    .run();
+  const { keywords, location, sites } = jobSites(db);
+  for (const row of sites)
+    db.update(crawlSearches)
+      .set({ url: buildSearchUrl(row.site, keywords, location), lastError: null })
+      .where(eq(crawlSearches.id, row.id))
+      .run();
+  return jobSites(db);
 }
 
 /** When this server started: "when Job Matrix opens" means once per start. */
