@@ -398,14 +398,37 @@ export const crawlSources = sqliteTable(
 );
 
 /**
- * Jobs found on watched boards whose title matched, each with what was decided about it. A job
- * is decided once: added to the Screening inbox, or kept here with the reason it wasn't.
+ * Saved job searches on LinkedIn, Indeed, Glassdoor or ZipRecruiter. The Chrome extension opens
+ * each one in your signed-in Chrome, reads the listings and sends them here.
+ */
+export const crawlSearches = sqliteTable('crawl_searches', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** linkedin | indeed | glassdoor | ziprecruiter */
+  site: text('site').notNull(),
+  label: text('label').notNull(),
+  /** The results page, as you had it in Chrome. */
+  url: text('url').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  lastRunAt: text('last_run_at'),
+  lastError: text('last_error'),
+  /** Last run: listings read, how many had a title you watch for, and how many were added. */
+  lastCount: integer('last_count'),
+  lastMatched: integer('last_matched'),
+  lastAdded: integer('last_added'),
+  createdAt: createdAt(),
+});
+
+/**
+ * Jobs found on watched boards or saved searches whose title matched, each with what was decided
+ * about it. A job is decided once: added to the Screening inbox, or kept here with the reason it
+ * wasn't.
  */
 export const crawlLeads = sqliteTable(
   'crawl_leads',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     sourceId: integer('source_id').references(() => crawlSources.id, { onDelete: 'cascade' }),
+    searchId: integer('search_id').references(() => crawlSearches.id, { onDelete: 'set null' }),
     /** Normalized posting URL (see normalizeUrl). */
     url: text('url').notNull(),
     company: text('company').notNull(),
@@ -448,4 +471,6 @@ export const crawlState = sqliteTable('crawl_state', {
   matched: integer('matched').notNull().default(0),
   added: integer('added').notNull().default(0),
   filtered: integer('filtered').notNull().default(0),
+  /** When the extension last started running the saved searches. */
+  searchRunAt: text('search_run_at'),
 });

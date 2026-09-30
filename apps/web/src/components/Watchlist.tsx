@@ -1,7 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type CrawlStatus, type LeadRow, type Settings, type SourceRow } from '../api.ts';
+import {
+  api,
+  type CrawlStatus,
+  type LeadRow,
+  type SearchRow,
+  type Settings,
+  type SourceRow,
+} from '../api.ts';
+import { runSearchesInChrome } from '../extension.ts';
 import { Button, Card, ErrorText, Field, Input, Select, Textarea, cx } from './ui.tsx';
 
 const INTERVAL_LABEL: Record<number, string> = {
@@ -44,10 +52,17 @@ export function useCrawlStatus() {
   return query.data;
 }
 
+/** Check now: the boards (on the server) and the saved searches (in Chrome, by the extension). */
 function useCheckNow() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: api.crawlRun,
+    mutationFn: async () => {
+      const s = await api.crawlRun();
+      const problem = s.searches > 0 ? await runSearchesInChrome() : null;
+      if (s.searches > 0) qc.setQueryData(['searches-running'], Date.now());
+      if (problem && s.sources === 0) throw new Error(problem);
+      return s;
+    },
     onSuccess: (s) => qc.setQueryData(['crawl-status'], s),
   });
 }
@@ -62,7 +77,7 @@ function lastCheck(s: CrawlStatus) {
 /** Screening page: one quiet line on the watchlist, once a company is followed. */
 export function WatchlistStrip({ status }: { status: CrawlStatus | undefined }) {
   const check = useCheckNow();
-  if (!status || status.sources === 0) return null;
+  if (!status || status.sources + status.searches === 0) return null;
   const p = status.progress;
   const problem =
     !p.running &&
@@ -220,7 +235,7 @@ export function WatchlistHeader({ status }: { status: CrawlStatus | undefined })
       <Button
         variant="primary"
         onClick={() => check.mutate()}
-        disabled={!status || p?.running || status.sources === 0}
+        disabled={!status || p?.running || status.sources + status.searches === 0}
       >
         {p?.running ? 'Checking…' : 'Check now'}
       </Button>
@@ -331,6 +346,158 @@ export function WatchlistCompanies() {
                 onClick={() =>
                   confirm(`Stop following ${s.companyName}? Jobs already in your inbox stay.`) &&
                   remove.mutate(s.id)
+                }
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+const SITE: Record<SearchRow['site'], string> = {
+  linkedin: 'LinkedIn',
+  indeed: 'Indeed',
+  glassdoor: 'Glassdoor',
+  ziprecruiter: 'ZipRecruiter',
+};
+
+/**
+ * Saved searches on LinkedIn, Indeed, Glassdoor and ZipRecruiter. Job Matrix can't read those
+ * sites itself, so the Chrome extension opens each search in your signed-in Chrome and reads it.
+ */
+export function WatchlistSearches() {
+  const qc = useQueryClient();
+  // For a few minutes after a run starts, follow the results as they come in.
+  const { data: runStarted = 0 } = useQuery<number>({
+    queryKey: ['searches-running'],
+    queryFn: () => 0,
+    staleTime: Infinity,
+  });
+  const { data: searches = [] } = useQuery({
+    queryKey: ['crawl-searches'],
+    queryFn: api.crawlSearches,
+    refetchInterval: () => (Date.now() - runStarted < 4 * 60_000 ? 3000 : false),
+  });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['crawl-searches'] });
+    qc.invalidateQueries({ queryKey: ['crawl-status'] });
+  };
+  const [url, setUrl] = useState('');
+  const add = useMutation({
+    mutationFn: () => api.addCrawlSearch(url.trim()),
+    onSuccess: () => {
+      setUrl('');
+      refresh();
+    },
+  });
+  const update = useMutation({
+    mutationFn: (v: { id: number; enabled?: boolean; label?: string }) =>
+      api.updateCrawlSearch(v.id, { enabled: v.enabled, label: v.label }),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({ mutationFn: api.removeCrawlSearch, onSuccess: refresh });
+  const run = useMutation({
+    mutationFn: async () => {
+      const problem = await runSearchesInChrome();
+      if (problem) throw new Error(problem);
+      qc.setQueryData(['searches-running'], Date.now());
+    },
+  });
+  const running = Date.now() - runStarted < 4 * 60_000 && run.isSuccess;
+
+  return (
+    <Card
+      title={`Searches${searches.length ? ` (${searches.length})` : ''}`}
+      actions={
+        searches.length > 0 && (
+          <Button onClick={() => run.mutate()} disabled={run.isPending}>
+            {run.isPending ? 'Starting…' : 'Run in Chrome'}
+          </Button>
+        )
+      }
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (url.trim()) add.mutate();
+        }}
+        className="flex flex-wrap items-center gap-2"
+      >
+        <Input
+          type="url"
+          className="min-w-72 flex-1"
+          placeholder="Paste a search results page from LinkedIn, Indeed, Glassdoor or ZipRecruiter"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <Button type="submit" disabled={!url.trim() || add.isPending}>
+          Save search
+        </Button>
+      </form>
+      <ErrorText error={add.error ?? update.error ?? remove.error ?? run.error} />
+      {running && (
+        <p className="mt-2 text-xs text-accent">
+          Running in Chrome: a tab opens for each search and closes when it has been read.
+        </p>
+      )}
+
+      {searches.length === 0 ? (
+        <p className="mt-3 text-sm text-ink-3">
+          Search in Chrome as you normally would (sorted by date works best), then paste the address
+          of the results page. The Chrome extension opens each saved search in your signed-in Chrome
+          on the same schedule as the boards.
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-border text-sm">
+          {searches.map((s) => (
+            <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+              <input
+                type="checkbox"
+                checked={s.enabled}
+                title={s.enabled ? 'Run on each check' : 'Paused'}
+                aria-label={`Run ${s.label}`}
+                onChange={(e) => update.mutate({ id: s.id, enabled: e.target.checked })}
+              />
+              <button
+                className={cx('font-medium hover:underline', !s.enabled && 'text-ink-3')}
+                title="Rename"
+                onClick={() => {
+                  const label = prompt('Name', s.label)?.trim();
+                  if (label && label !== s.label) update.mutate({ id: s.id, label });
+                }}
+              >
+                {s.label}
+              </button>
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-ink-3 hover:underline"
+              >
+                {SITE[s.site]} ↗
+              </a>
+              <span
+                className="ml-auto text-xs text-ink-3"
+                title={s.lastRunAt ? `Last run ${when(s.lastRunAt)}` : undefined}
+              >
+                {s.lastError ? (
+                  <span className="text-warn">{s.lastError}</span>
+                ) : s.lastRunAt == null ? (
+                  'Not run yet'
+                ) : (
+                  `${s.lastMatched ?? 0} matching of ${s.lastCount ?? 0} · ${s.lastAdded ?? 0} added`
+                )}
+              </span>
+              <button
+                className="px-1 text-ink-3 hover:text-bad"
+                title="Forget this search"
+                aria-label={`Forget ${s.label}`}
+                onClick={() =>
+                  confirm(`Forget “${s.label}”? Jobs it found stay.`) && remove.mutate(s.id)
                 }
               >
                 ✕

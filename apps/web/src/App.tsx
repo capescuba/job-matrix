@@ -4,6 +4,7 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-route
 import { api } from './api.ts';
 import { AiActivity } from './components/AiActivity.tsx';
 import { ThemeToggle } from './components/ThemeToggle.tsx';
+import { runSearchesInChrome } from './extension.ts';
 import { cx } from './components/ui.tsx';
 import ApplicationDetailPage from './pages/ApplicationDetail.tsx';
 import ApplicationsPage from './pages/Applications.tsx';
@@ -49,6 +50,7 @@ export default function App() {
       q.state.data?.progress.running || q.state.data?.signingIn ? 2000 : 60_000,
   });
   const emailPending = mail?.pending ?? 0;
+  useSearchSchedule();
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-border bg-surface/90 backdrop-blur">
@@ -98,6 +100,25 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+/**
+ * Saved searches can only run in Chrome, through the extension, so this page starts them when
+ * the server says they are due. The extension stamps the run on the server, so other open
+ * windows don't start another; a failed attempt waits ten minutes before the next.
+ */
+function useSearchSchedule() {
+  const { data } = useQuery({
+    queryKey: ['crawl-due'],
+    queryFn: api.crawlStatus,
+    refetchInterval: 60_000,
+  });
+  const lastTry = useRef(0);
+  useEffect(() => {
+    if (!data?.searchesDue || Date.now() - lastTry.current < 10 * 60_000) return;
+    lastTry.current = Date.now();
+    void runSearchesInChrome();
+  }, [data?.searchesDue]);
 }
 
 /** Profile, AI usage and Log: one button on the right that names the page you are on. */

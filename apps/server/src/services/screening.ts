@@ -69,10 +69,27 @@ export function normalizeUrl(raw: string): string {
       u.searchParams.set(key, jid);
     }
   }
+  // Job-search sites: only the job's own id identifies it (the rest is search state).
+  const keep = (...keys: string[]) => {
+    const kept = keys.map((k) => [k, u.searchParams.get(k)] as const).filter(([, v]) => v);
+    u.search = '';
+    for (const [k, v] of kept) u.searchParams.set(k, v!);
+  };
+  if (/(^|\.)indeed\.com$/.test(host) && u.searchParams.get('jk')) {
+    u.pathname = '/viewjob';
+    keep('jk');
+  }
+  if (/(^|\.)glassdoor\.[a-z.]+$/.test(host) && u.searchParams.get('jl')) keep('jl');
+  // ZipRecruiter shows a job inside its search page (lk = the job).
+  if (/(^|\.)ziprecruiter\.com$/.test(host) && u.searchParams.get('lk'))
+    keep('search', 'location', 'lk');
   if (host === 'jobs.lever.co') u.pathname = u.pathname.replace(/\/apply\/?$/, '');
   if (host === 'jobs.ashbyhq.com') u.pathname = u.pathname.replace(/\/application\/?$/, '');
   if (host.endsWith('myworkdayjobs.com'))
-    u.pathname = u.pathname.replace(/\/(apply(\/[^/]*)?|autofillWithResume|applyManually)\/?$/i, '');
+    u.pathname = u.pathname.replace(
+      /\/(apply(\/[^/]*)?|autofillWithResume|applyManually)\/?$/i,
+      '',
+    );
   for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM.test(k)) u.searchParams.delete(k);
   let s = u.toString();
   if (s.endsWith('/') && u.pathname !== '/' && !u.search) s = s.slice(0, -1);
@@ -142,7 +159,8 @@ const TENANT_HOSTS =
   /(^|\.)(icims\.com|eightfold\.ai|avature\.net|taleo\.net|jobvite\.com|bamboohr\.com|recruitee\.com|breezy\.hr|applytojob\.com|teamtailor\.com|pinpointhq\.com|rippling\.com|successfactors\.(com|eu))$/i;
 
 /** Words careers sites put around the company's name in their address. */
-const HOST_WORDS = /^(careers?|jobs?|apply|hiring|recruiting|talent|work|join|www\d*|en|us|global|external)$/i;
+const HOST_WORDS =
+  /^(careers?|jobs?|apply|hiring|recruiting|talent|work|join|www\d*|en|us|global|external)$/i;
 
 /**
  * Company from a careers site's own address: careers.oracle.com → "Oracle",
@@ -253,7 +271,7 @@ const clean = (s: string | null | undefined) => {
 export async function captureJob(
   db: Db,
   raw: CaptureInput,
-  opts: { fetchFn?: typeof fetch } = {},
+  opts: { fetchFn?: typeof fetch; skipFetch?: boolean } = {},
 ): Promise<CaptureResult> {
   const input = captureSchema.parse(raw);
   const url = normalizeUrl(input.url);
@@ -270,7 +288,7 @@ export async function captureJob(
 
   let fetched: FetchedJob | null = null;
   try {
-    fetched = await fetchJobPosting(url, opts.fetchFn);
+    if (!opts.skipFetch) fetched = await fetchJobPosting(url, opts.fetchFn);
   } catch {
     // Blocked/closed/JS-only pages are expected — the page capture covers them.
   }

@@ -1,30 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { api, type LinkedInSummary } from '../api.ts';
+import { toExtension } from '../extension.ts';
 import { Button, Card, ErrorText, Input } from './ui.tsx';
-
-/** The Chrome extension's fixed ID (its manifest key), which accepts messages from this app. */
-const EXTENSION_ID = 'keiamknmppkefljklkaceniaafephpcf';
-
-type ChromeRuntime = {
-  sendMessage: (id: string, msg: unknown, cb: (r: unknown) => void) => void;
-  lastError?: { message?: string };
-};
-const runtime = () =>
-  (window as unknown as { chrome?: { runtime?: ChromeRuntime } }).chrome?.runtime;
-
-/** Asks the extension; null when it isn't installed (or is an older version without this). */
-function toExtension<T>(msg: unknown): Promise<T | null> {
-  const rt = runtime();
-  if (!rt?.sendMessage) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    try {
-      rt.sendMessage(EXTENSION_ID, msg, (r) => resolve(rt.lastError ? null : ((r as T) ?? null)));
-    } catch {
-      resolve(null);
-    }
-  });
-}
 
 const kb = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
 

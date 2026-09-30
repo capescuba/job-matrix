@@ -56,6 +56,10 @@ The **Email** page reads your Hotmail / Outlook.com mailbox (read-only, Microsof
 The **Watchlist** page follows company job boards, so new jobs reach the Screening inbox on their own.
 
 - **Follow a company.** Paste its careers page, its job board or any one of its job postings. Greenhouse, Ashby, Lever and Workday boards are supported. The board is read once straight away, so a wrong address is reported there and then.
+- **Saved searches.** For companies you haven't heard of: run a search on LinkedIn, Indeed, Glassdoor or ZipRecruiter in Chrome, then paste the results page's address under **Searches**. The Chrome extension (version 0.3 or later) opens each saved search in a tab of your signed-in Chrome, reads the listings on the first page, closes the tab and sends them to Job Matrix, where the same rules and pre-screen apply.
+  - It runs on the same schedule as the boards, but only while Job Matrix is open in Chrome. **Check now** and **Run in Chrome** start it by hand.
+  - Only LinkedIn postings can be read in full by Job Matrix. Jobs from the other sites arrive with their title, company, place and pay, and no description until you open them and capture it with the extension.
+  - A robot check or a signed-out page is shown on the search and skipped; nothing tries to get past it. Page layouts change, so a reader can stop finding listings; the search then says so.
 - **What is picked up.** Jobs whose title contains one of your **titles to look for**. "TPM" and "Sr." are read as "technical program manager" and "senior".
 - **What is filtered out.** Titles on your skip list, contracts, internships and hourly pay, a posted range whose top is below your minimum base, a place that is neither remote nor on your list, and jobs you already track. A posting that doesn't state its pay or place passes.
 - **Where the rest goes.** Into the Screening inbox, with a timeline note naming the board. Filtered-out jobs are listed on Screening under **Filtered out**, each with its reason and an **Add anyway** button.
