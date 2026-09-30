@@ -61,7 +61,11 @@ The **Watchlist** card on the Profile page follows company job boards, so new jo
 - **Where the rest goes.** Into the Screening inbox, with a timeline note naming the board. Filtered-out jobs are listed on Screening under **Filtered out**, each with its reason and an **Add anyway** button.
 - **Decided once.** A job added or filtered out is remembered by its address and not looked at again. The exception is a job a rule filtered out: it is judged again on each check, so a change to the rules takes effect.
 - **When it checks.** When Job Matrix opens, by default. You can choose manual only, or also every 1, 3 or 6 hours while the app is open. **Check now** is on both pages.
-- **Cost.** None. It reads each company's public board and uses no AI.
+- **Pre-screen (optional).** A small model can look at each job the rules let through and answer yes, maybe or no. Yes and maybe go to the inbox with the model's reason on the timeline. A no is listed under **Filtered out** with the reason. Choose the model on the Watchlist card: Groq, Google Gemini or OpenRouter (free, each needs its own free key), Ollama on this PC, any other OpenAI-compatible service, or Claude Haiku 4.5 (paid). It is off until you choose one.
+  - The model is sent the posting and your goals, pay floor, must-haves and deal-breakers. It is never sent your resume or career profile.
+  - Free tiers are rate-limited. A short "slow down" is waited out. A daily limit leaves the remaining jobs waiting, and the next check asks about them again. Nothing falls back to a paid model.
+  - Every call is listed on the AI usage page under "Watchlist pre-screen".
+- **Cost.** None with the rules alone or a free model. Reading the boards is free.
 
 ## Log
 

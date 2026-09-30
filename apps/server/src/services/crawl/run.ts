@@ -1,18 +1,21 @@
 /**
  * Checking the watchlist: reads each followed board, keeps the jobs whose title you watch for,
- * filters out the ones that plainly can't fit, and adds the rest to the Screening inbox. Runs on
- * demand ("Check now") and, if you choose, when Job Matrix opens and every few hours after.
+ * filters out the ones that plainly can't fit, asks the pre-screen model (when one is set up)
+ * about the rest, and adds its "yes" and "maybe" to the Screening inbox. Runs on demand ("Check
+ * now") and, if you choose, when Job Matrix opens and every few hours after.
  * A job is decided once: what was added or filtered out is remembered by its address.
  */
 import { eq } from 'drizzle-orm';
+import { RateLimitError, getPrescreenProvider } from '@jm/ai';
 import type { Db } from '../../db/client.ts';
 import { crawlLeads, crawlSources, crawlState } from '../../db/schema.ts';
 import { NotFoundError, addActivity } from '../applications.ts';
 import { companyKey } from '../extension.ts';
-import type { FetchFn } from '../jobfetch.ts';
+import { fetchJobPosting, type FetchFn } from '../jobfetch.ts';
 import { logEvent } from '../log.ts';
 import { captureJob, type CaptureResult } from '../screening.ts';
 import { BOARD_LABEL, listBoard, rememberingFetch, type BoardJob } from './boards.ts';
+import { prescreenJob, type Prescreener } from './prescreen.ts';
 import { buildTracked, prefilter, titleWatched, type Tracked } from './rules.ts';
 import {
   crawlCriteria,
@@ -24,6 +27,11 @@ import {
 
 export interface CrawlDeps {
   fetchFn?: FetchFn;
+  /** The pre-screen model; null = rules only. Left out, the saved setting decides. */
+  prescreen?: Prescreener | null;
+  /** Pause between pre-screen calls (free tiers allow a few a minute); tests pass 0. */
+  prescreenGapMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface CrawlProgress {
@@ -36,10 +44,16 @@ export interface CrawlProgress {
   matched: number;
   added: number;
   filtered: number;
+  /** Asked of the pre-screen model this check, and left waiting for it (rate limit, error). */
+  screened: number;
+  waiting: number;
   startedAt: string | null;
 }
 
-export type CrawlResult = Pick<CrawlProgress, 'boards' | 'seen' | 'matched' | 'added' | 'filtered'>;
+export type CrawlResult = Pick<
+  CrawlProgress,
+  'boards' | 'seen' | 'matched' | 'added' | 'filtered' | 'screened' | 'waiting'
+>;
 
 const idle = (): CrawlProgress => ({
   running: false,
@@ -49,6 +63,8 @@ const idle = (): CrawlProgress => ({
   matched: 0,
   added: 0,
   filtered: 0,
+  screened: 0,
+  waiting: 0,
   startedAt: null,
 });
 const progress: CrawlProgress = idle();
@@ -79,7 +95,13 @@ function decide(
   db: Db,
   job: BoardJob & { company: string },
   sourceId: number,
-  decision: { verdict: string; reason: string | null; applicationId?: number | null },
+  decision: {
+    verdict: string;
+    reason: string | null;
+    applicationId?: number | null;
+    model?: string | null;
+    usageId?: number | null;
+  },
 ) {
   const values = {
     sourceId,
@@ -94,6 +116,8 @@ function decide(
     verdict: decision.verdict,
     reason: decision.reason,
     applicationId: decision.applicationId ?? null,
+    model: decision.model ?? null,
+    usageId: decision.usageId ?? null,
     decidedAt: new Date().toISOString(),
   };
   db.insert(crawlLeads)
@@ -102,17 +126,86 @@ function decide(
     .run();
 }
 
-/** Rule verdicts cost nothing, so a job the rules kept out is looked at again each check. */
-const UNDECIDED = new Set(['no-rules', 'error']);
+/**
+ * Rule verdicts cost nothing, so a job the rules kept out is looked at again each check; so is
+ * one still waiting for the pre-screen.
+ */
+const UNDECIDED = new Set(['no-rules', 'error', 'waiting']);
 
-async function checkBoard(
-  db: Db,
-  source: SourceRow,
-  f: FetchFn,
-  criteria: ReturnType<typeof crawlCriteria>,
-  tracked: Tracked,
-  known: Map<string, string>,
-) {
+/** Waits this long for a rate limit to clear before giving up until the next check. */
+const MAX_RETRY_AFTER_S = 60;
+
+type Screened =
+  | { verdict: 'yes' | 'maybe' | 'no'; reason: string; model: string; usageId: number }
+  | { verdict: 'waiting'; reason: string };
+
+/**
+ * The pre-screen for one check: one call at a time with a pause between, a short wait when the
+ * provider says "slow down", and once it says "come back later" (or keeps failing) everything
+ * left waits for the next check.
+ */
+function prescreener(db: Db, deps: CrawlDeps) {
+  const screener = deps.prescreen === undefined ? getPrescreenProvider() : deps.prescreen;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const gap = deps.prescreenGapMs ?? 2100;
+  let queue: Promise<unknown> = Promise.resolve();
+  let lastCall = 0;
+  let failures = 0;
+  let paused: string | null = null;
+
+  const ask = async (job: Parameters<typeof prescreenJob>[1]): Promise<Screened> => {
+    for (let attempt = 1; ; attempt++) {
+      if (paused) return { verdict: 'waiting', reason: paused };
+      const wait = lastCall + gap - Date.now();
+      if (wait > 0) await sleep(wait);
+      lastCall = Date.now();
+      try {
+        const r = await prescreenJob(db, job, screener!);
+        failures = 0;
+        progress.screened++;
+        return { verdict: r.verdict, reason: r.reason, model: r.model, usageId: r.usageId };
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (e instanceof RateLimitError) {
+          const after = e.retryAfterSeconds;
+          if (after != null && after <= MAX_RETRY_AFTER_S && attempt < 3) {
+            await sleep(after * 1000);
+            continue;
+          }
+          paused = `Pre-screen paused until the next check: ${msg}`;
+        } else if (++failures >= 3) {
+          paused = `Pre-screen stopped after repeated errors: ${msg}`;
+        } else {
+          return { verdict: 'waiting', reason: `Pre-screen failed: ${msg}` };
+        }
+        logEvent('crawl.prescreen.paused', paused, {}, 'warn');
+      }
+    }
+  };
+
+  return {
+    on: Boolean(screener),
+    pausedReason: () => paused,
+    screen: (job: Parameters<typeof prescreenJob>[1]): Promise<Screened> => {
+      const p = queue.then(() => ask(job));
+      queue = p.catch(() => {});
+      return p;
+    },
+  };
+}
+
+interface Check {
+  db: Db;
+  f: FetchFn;
+  criteria: ReturnType<typeof crawlCriteria>;
+  tracked: Tracked;
+  /** Posting address → what was decided before. */
+  known: Map<string, string>;
+  pre: ReturnType<typeof prescreener>;
+}
+
+async function checkBoard(c: Check, source: SourceRow) {
+  const { db, f, criteria, tracked, known, pre } = c;
   const jobs = await listBoard(sourceRef(source), f, { keywords: criteria.include });
   const watched = jobs.filter((j) => titleWatched(j.title, criteria.include));
   progress.seen += jobs.length;
@@ -120,25 +213,52 @@ async function checkBoard(
   for (const j of watched) {
     const before = known.get(j.url);
     if (before && !UNDECIDED.has(before)) continue;
+    // Not yet counted as filtered out by an earlier check.
+    const fresh = !before || before === 'waiting';
     const job = { ...j, company: source.companyName };
     const rule = prefilter(job, criteria, tracked);
     if (rule.verdict !== 'pass') {
       decide(db, job, source.id, rule);
       known.set(j.url, rule.verdict);
-      if (!before) progress.filtered++;
+      if (fresh) progress.filtered++;
       continue;
     }
+    let note = `Found on ${source.companyName}'s ${BOARD_LABEL[source.kind]} job board (watchlist)`;
+    let passed: { verdict: 'yes' | 'maybe'; reason: string; model?: string; usageId?: number } = {
+      verdict: 'yes',
+      reason: 'Passed your rules',
+    };
     try {
-      const r = await addToInbox(
-        db,
-        job,
-        `Found on ${source.companyName}'s ${BOARD_LABEL[source.kind]} job board (watchlist)`,
-        f,
-      );
-      const verdict = r.existing ? 'duplicate' : 'yes';
+      if (pre.on) {
+        // Workday lists titles only: read the posting now that the rules let it through.
+        const descriptionText =
+          j.descriptionText ??
+          (await fetchJobPosting(j.url, f).then(
+            (posting) => posting.descriptionText,
+            () => null,
+          ));
+        const s = await pre.screen({ ...job, descriptionText });
+        if (s.verdict === 'waiting') {
+          decide(db, job, source.id, s);
+          known.set(j.url, 'waiting');
+          progress.waiting++;
+          continue;
+        }
+        if (s.verdict === 'no') {
+          decide(db, job, source.id, { ...s, verdict: 'no-ai' });
+          known.set(j.url, 'no-ai');
+          if (fresh) progress.filtered++;
+          continue;
+        }
+        passed = { ...s, verdict: s.verdict };
+        note += `. Pre-screen (${s.model}): ${s.verdict} — ${s.reason}`;
+      }
+      const r = await addToInbox(db, job, note, f);
+      const verdict = r.existing ? 'duplicate' : passed.verdict;
       decide(db, job, source.id, {
+        ...passed,
         verdict,
-        reason: r.existing ? 'Already tracked' : 'Passed your rules',
+        reason: r.existing ? 'Already tracked' : passed.reason,
         applicationId: r.applicationId,
       });
       known.set(j.url, verdict);
@@ -183,23 +303,27 @@ async function run(db: Db, deps: CrawlDeps, trigger: string): Promise<CrawlResul
     boards: sources.length,
     trigger,
   });
-  const f = rememberingFetch(deps.fetchFn ?? fetch);
-  const criteria = crawlCriteria(db);
-  const tracked = buildTracked(db);
-  const known = new Map(
-    db
-      .select({ url: crawlLeads.url, verdict: crawlLeads.verdict })
-      .from(crawlLeads)
-      .all()
-      .map((l) => [l.url, l.verdict]),
-  );
+  const check: Check = {
+    db,
+    f: rememberingFetch(deps.fetchFn ?? fetch),
+    criteria: crawlCriteria(db),
+    tracked: buildTracked(db),
+    known: new Map(
+      db
+        .select({ url: crawlLeads.url, verdict: crawlLeads.verdict })
+        .from(crawlLeads)
+        .all()
+        .map((l) => [l.url, l.verdict]),
+    ),
+    pre: prescreener(db, deps),
+  };
   const failed: string[] = [];
   let next = 0;
   const worker = async () => {
     while (next < sources.length) {
       const source = sources[next++]!;
       try {
-        await checkBoard(db, source, f, criteria, tracked, known);
+        await checkBoard(check, source);
       } catch (e) {
         const msg = (e as Error).message;
         failed.push(source.companyName);
@@ -224,19 +348,29 @@ async function run(db: Db, deps: CrawlDeps, trigger: string): Promise<CrawlResul
     matched: progress.matched,
     added: progress.added,
     filtered: progress.filtered,
+    screened: progress.screened,
+    waiting: progress.waiting,
   };
+  const problems = [
+    failed.length ? `Couldn't read: ${failed.join(', ')}` : null,
+    check.pre.pausedReason(),
+  ].filter(Boolean);
   crawlSettings(db); // makes sure the row exists
   db.update(crawlState)
     .set({
-      ...result,
+      boards: result.boards,
+      seen: result.seen,
+      matched: result.matched,
+      added: result.added,
+      filtered: result.filtered,
       lastRunAt: new Date().toISOString(),
-      lastError: failed.length ? `Couldn't read: ${failed.join(', ')}` : null,
+      lastError: problems.length ? problems.join(' · ') : null,
     })
     .where(eq(crawlState.id, 1))
     .run();
   logEvent(
     'crawl.done',
-    `Watchlist checked: ${result.matched} matching jobs on ${result.boards} boards, ${result.added} added to the inbox, ${result.filtered} filtered out`,
+    `Watchlist checked: ${result.matched} matching jobs on ${result.boards} boards, ${result.added} added to the inbox, ${result.filtered} filtered out${result.waiting ? `, ${result.waiting} waiting for the pre-screen` : ''}`,
     { ...result, failed },
   );
   return result;

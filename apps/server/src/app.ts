@@ -2,7 +2,7 @@ import Fastify, { LogController } from 'fastify';
 import multipart from '@fastify/multipart';
 import { asc, eq } from 'drizzle-orm';
 import { ZodError, z } from 'zod';
-import { EFFORTS, LLMError } from '@jm/ai';
+import { EFFORTS, LLMError, PRESCREEN_PROVIDERS, prescreenConfig } from '@jm/ai';
 import { GraphError, NeedsSignIn, createMailClient, type MailClient } from '@jm/mail';
 import {
   STATUSES,
@@ -118,12 +118,14 @@ import {
   nextCrawlAt,
   runCrawl,
   scheduleCrawl,
+  type CrawlDeps,
 } from './services/crawl/run.ts';
 import {
   CRAWL_INTERVALS,
   addSource,
   crawlSettings,
   filteredCount,
+  waitingCount,
   listFiltered,
   listSources,
   removeSource,
@@ -141,6 +143,8 @@ export function buildApp(
     fetchFn?: typeof fetch;
     /** Outlook access (tests pass a fake). */
     mail?: MailClient;
+    /** Watchlist checks: tests pass a fake pre-screen model and no pauses. */
+    crawl?: CrawlDeps;
   } = {},
 ) {
   const mail = opts.mail ?? createMailClient({ clientId: process.env.OUTLOOK_CLIENT_ID || null });
@@ -299,7 +303,7 @@ export function buildApp(
     return reply.status(r.existing ? 200 : 201).send(r);
   });
   // ----- watchlist: company job boards checked for new jobs -----
-  const crawlDeps = { fetchFn: opts.fetchFn };
+  const crawlDeps: CrawlDeps = { fetchFn: opts.fetchFn, ...opts.crawl };
   const crawlStatus = () => {
     const s = crawlSettings(db);
     return {
@@ -322,6 +326,17 @@ export function buildApp(
       progress: crawlProgress(),
       sources: listSources(db).length,
       filteredCount: filteredCount(db),
+      waitingCount: waitingCount(db),
+      // Which model, if any, looks at jobs the rules let through.
+      prescreen:
+        crawlDeps.prescreen !== undefined
+          ? crawlDeps.prescreen && {
+              label: crawlDeps.prescreen.provider.name,
+              model: crawlDeps.prescreen.model,
+            }
+          : prescreenConfig().ready
+            ? { label: prescreenConfig().label, model: prescreenConfig().model }
+            : null,
     };
   };
   app.get('/api/crawl/status', crawlStatus);
@@ -621,6 +636,10 @@ export function buildApp(
         aiResearchModel: z.string().max(100).nullable().optional(),
         aiEmailModel: z.string().max(100).nullable().optional(),
         aiEffort: z.enum(EFFORTS).nullable().optional(),
+        prescreenProvider: z.enum(PRESCREEN_PROVIDERS).nullable().optional(),
+        prescreenBaseUrl: z.string().max(500).nullable().optional(),
+        prescreenApiKey: z.string().max(500).nullable().optional(),
+        prescreenModel: z.string().max(200).nullable().optional(),
       })
       .parse(req.body);
     return updateSettings({
@@ -629,6 +648,10 @@ export function buildApp(
       ...(body.aiResearchModel !== undefined && { AI_RESEARCH_MODEL: body.aiResearchModel }),
       ...(body.aiEmailModel !== undefined && { AI_EMAIL_MODEL: body.aiEmailModel }),
       ...(body.aiEffort !== undefined && { AI_EFFORT: body.aiEffort }),
+      ...(body.prescreenProvider !== undefined && { PRESCREEN_PROVIDER: body.prescreenProvider }),
+      ...(body.prescreenBaseUrl !== undefined && { PRESCREEN_BASE_URL: body.prescreenBaseUrl }),
+      ...(body.prescreenApiKey !== undefined && { PRESCREEN_API_KEY: body.prescreenApiKey }),
+      ...(body.prescreenModel !== undefined && { PRESCREEN_MODEL: body.prescreenModel }),
     });
   });
 
