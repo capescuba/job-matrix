@@ -50,9 +50,13 @@ export interface CrawlStatus {
   last: { boards: number; seen: number; matched: number; added: number; filtered: number };
   nextRunAt: string | null;
   progress: CrawlProgress;
-  /** Boards followed, and jobs currently filtered out. */
+  /** Boards followed, and jobs currently filtered out (including those waiting). */
   sources: number;
   filteredCount: number;
+  /** Passed the rules, not yet answered by the pre-screen. */
+  waitingCount: number;
+  /** The pre-screen model in use; null = rules only. */
+  prescreen: { label: string; model: string } | null;
 }
 
 export type Settings = ReturnType<typeof getSettings>;
@@ -225,6 +229,10 @@ export const api = {
     aiResearchModel?: string | null;
     aiEmailModel?: string | null;
     aiEffort?: Settings['effort'] | null;
+    prescreenProvider?: Settings['prescreen']['provider'] | null;
+    prescreenBaseUrl?: string | null;
+    prescreenApiKey?: string | null;
+    prescreenModel?: string | null;
   }) => request<Settings>('PUT', '/api/settings', patch),
 
   // ----- email -----

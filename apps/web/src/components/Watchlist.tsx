@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type CrawlStatus, type LeadRow, type SourceRow } from '../api.ts';
+import { api, type CrawlStatus, type LeadRow, type Settings, type SourceRow } from '../api.ts';
 import { Button, Card, ErrorText, Field, Input, Select, Textarea, cx } from './ui.tsx';
 
 const INTERVAL_LABEL: Record<number, string> = {
@@ -79,14 +79,22 @@ export function WatchlistStrip({ status }: { status: CrawlStatus | undefined }) 
       <span className="font-medium">Watchlist</span>
       {p.running ? (
         <span className="text-accent">
-          Checking… {p.boardsDone}/{p.boards} boards, {plural(p.matched, 'matching job')}, {p.added}{' '}
-          added
+          Checking… {p.boardsDone}/{p.boards} boards, {plural(p.matched, 'matching job')}
+          {status.prescreen ? `, ${p.screened} pre-screened` : ''}, {p.added} added
         </span>
       ) : (
         <span className="text-ink-2">{lastCheck(status)}</span>
       )}
+      {status.waitingCount > 0 && !p.running && (
+        <span className="text-warn">
+          {plural(status.waitingCount, 'job')} waiting for the pre-screen.
+        </span>
+      )}
       {status.lastError && !p.running && <span className="text-warn">{status.lastError}</span>}
       <span className="ml-auto flex items-center gap-2">
+        <span className="text-xs text-ink-3">
+          {status.prescreen ? `Pre-screen: ${status.prescreen.model}` : 'Rules only'}
+        </span>
         {status.nextRunAt && !p.running && (
           <span className="text-xs text-ink-3">Next check {when(status.nextRunAt)}</span>
         )}
@@ -104,6 +112,7 @@ export function WatchlistStrip({ status }: { status: CrawlStatus | undefined }) 
 
 const REASON_TONE: Record<string, string> = {
   duplicate: 'text-ink-3',
+  waiting: 'text-ink-3',
   error: 'text-bad',
 };
 
@@ -182,7 +191,12 @@ function LeadLine({ lead, busy, onAdd }: { lead: LeadRow; busy: boolean; onAdd: 
             .join(' · ')}
         </div>
       </div>
-      <span className={cx('max-w-md text-xs', REASON_TONE[lead.verdict] ?? 'text-warn')}>
+      <span
+        className={cx('max-w-md text-xs', REASON_TONE[lead.verdict] ?? 'text-warn')}
+        title={lead.model ? `Judged by ${lead.model}` : undefined}
+      >
+        {lead.verdict === 'no-ai' && 'Pre-screen: '}
+        {lead.verdict === 'waiting' && 'Waiting — '}
         {lead.reason}
       </span>
       {lead.verdict === 'duplicate' && lead.applicationId && (
@@ -288,7 +302,8 @@ export function WatchlistCard() {
         <p className="mb-3 text-sm text-ink-2">
           Company job boards to follow. New jobs with a title you look for are added to the
           Screening inbox, unless a rule below filters them out. Checking is free: it reads each
-          company's public board (Greenhouse, Ashby, Lever or Workday) and uses no AI.
+          company's public board (Greenhouse, Ashby, Lever or Workday). A free model can then look
+          at what the rules let through (set it up below).
         </p>
 
         {sources.length > 0 && (
@@ -420,7 +435,174 @@ export function WatchlistCard() {
           </Button>
         </div>
         <ErrorText error={settings.error} />
+        <PrescreenSettings />
       </Card>
+    </div>
+  );
+}
+
+// ---------- the pre-screen model ----------
+
+type Provider = Settings['prescreen']['provider'];
+
+const PROVIDER_OPTION: Record<Provider, string> = {
+  off: 'Off — rules only',
+  groq: 'Groq — Llama 3.3 70B, free (recommended)',
+  gemini: 'Google Gemini — Flash-Lite, free, fastest',
+  openrouter: 'OpenRouter — a free model',
+  ollama: 'Ollama — a model running on this PC',
+  custom: 'Another OpenAI-compatible service',
+  anthropic: 'Claude Haiku 4.5 — paid, about 0.2¢ a job',
+};
+
+const PROVIDER_NOTE: Record<Provider, string> = {
+  off: 'Every job the rules let through goes to the inbox.',
+  groq: 'Free: 1,000 jobs a day, about 7 a minute, so a first check of a big board takes a few minutes. Groq does not train on what it is sent.',
+  gemini:
+    'Free: about 1,000 jobs a day, 15 a minute. On the free tier Google may use what it is sent to improve its models.',
+  openrouter:
+    'Free models are limited to 50 requests a day (1,000 once the account has ever bought $10 of credit), and their quality varies.',
+  ollama:
+    'Nothing leaves this PC. Needs Ollama running with the model pulled; a small model judges less well.',
+  custom: 'Any service with an OpenAI-style /chat/completions address.',
+  anthropic:
+    'Uses your Anthropic key. Unlike the rest of Job Matrix, this spends money without being asked each time: every new job that passes the rules costs about 0.2¢ on each check.',
+};
+
+/**
+ * Which model, if any, looks at jobs the rules let through and answers yes / maybe / no.
+ * "No" keeps a job out of the inbox (listed under Filtered out with the reason).
+ */
+function PrescreenSettings() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
+  const pre = data?.prescreen;
+  const [key, setKey] = useState('');
+  const [model, setModel] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  useEffect(() => {
+    setModel(pre?.model ?? '');
+    setBaseUrl(pre?.baseUrl ?? '');
+  }, [pre?.model, pre?.baseUrl]);
+  const save = useMutation({
+    mutationFn: api.updateSettings,
+    onSuccess: (next) => {
+      qc.setQueryData(['settings'], next);
+      qc.invalidateQueries({ queryKey: ['crawl-status'] });
+      setKey('');
+    },
+  });
+  if (!pre) return null;
+  const preset = pre.presets[pre.provider];
+  const wantsKey = preset.needsKey || pre.provider === 'custom';
+  const wantsUrl = pre.provider === 'custom' || pre.provider === 'ollama';
+  const dirty = model.trim() !== pre.model || (wantsUrl && baseUrl.trim() !== pre.baseUrl);
+
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <h3 className="text-sm font-semibold">Pre-screen</h3>
+      <p className="mb-3 mt-1 text-sm text-ink-2">
+        A quick yes / maybe / no from a small model on each job the rules let through. Only a clear
+        “no” (a deal-breaker, or a different kind of job) keeps a job out of the inbox. The model is
+        sent the posting and your goals, pay floor, must-haves and deal-breakers — never your resume
+        or career profile.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label="Model" className="min-w-72">
+          <Select
+            value={pre.provider}
+            onChange={(e) =>
+              // A different service: its own address, model and key.
+              save.mutate({
+                prescreenProvider: e.target.value as Provider,
+                prescreenBaseUrl: null,
+                prescreenModel: null,
+                prescreenApiKey: null,
+              })
+            }
+          >
+            {(Object.keys(PROVIDER_OPTION) as Provider[]).map((id) => (
+              <option key={id} value={id}>
+                {PROVIDER_OPTION[id]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {pre.provider !== 'off' && pre.provider !== 'anthropic' && (
+          <Field label="Model name" className="min-w-56">
+            <Input value={model} onChange={(e) => setModel(e.target.value)} />
+          </Field>
+        )}
+        {wantsUrl && (
+          <Field label="Address" className="min-w-72 flex-1">
+            <Input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://…/v1"
+            />
+          </Field>
+        )}
+        {dirty && (
+          <Button
+            variant="primary"
+            disabled={save.isPending}
+            onClick={() =>
+              save.mutate({
+                prescreenModel: model.trim() || null,
+                ...(wantsUrl && { prescreenBaseUrl: baseUrl.trim() || null }),
+              })
+            }
+          >
+            Save
+          </Button>
+        )}
+      </div>
+      {wantsKey && (
+        <form
+          className="mt-3 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (key.trim()) save.mutate({ prescreenApiKey: key.trim() });
+          }}
+        >
+          <Field
+            label={pre.apiKeyHint ? `API key (saved: ${pre.apiKeyHint})` : 'API key'}
+            className="min-w-64 flex-1"
+          >
+            <Input
+              type="password"
+              autoComplete="off"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder={pre.apiKeyHint ? 'Paste a new key to replace it' : 'Paste the key'}
+            />
+          </Field>
+          <Button type="submit" variant="primary" disabled={!key.trim() || save.isPending}>
+            Save key
+          </Button>
+          {preset.keyUrl && (
+            <a
+              href={preset.keyUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="pb-2 text-sm text-accent hover:underline"
+            >
+              Get a free key
+            </a>
+          )}
+        </form>
+      )}
+      <p className="mt-2 text-xs text-ink-3">{PROVIDER_NOTE[pre.provider]}</p>
+      {pre.provider !== 'off' && (
+        <p className={cx('mt-1 text-xs', pre.ready ? 'text-good' : 'text-warn')}>
+          {pre.ready
+            ? `Ready: new jobs are pre-screened by ${pre.model} on the next check.`
+            : pre.provider === 'anthropic'
+              ? 'Add your Anthropic API key under AI settings to use this.'
+              : 'Not set up yet (a key, a model name and an address are needed). Until then jobs that pass the rules go straight to the inbox.'}
+        </p>
+      )}
+      <ErrorText error={save.error} />
     </div>
   );
 }

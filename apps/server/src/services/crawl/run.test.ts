@@ -82,7 +82,7 @@ describe('checking the watchlist', () => {
     await addSource(db, { url: 'https://jobs.ashbyhq.com/openai' }, { fetchFn: f });
     const r = await runCrawl(db, { fetchFn: f });
 
-    expect(r).toEqual({ boards: 2, seen: 7, matched: 6, added: 2, filtered: 4 });
+    expect(r).toMatchObject({ boards: 2, seen: 7, matched: 6, added: 2, filtered: 4 });
     expect(inbox()).toEqual([
       'Anthropic — Staff Technical Program Manager, Compute',
       'Openai — Technical Program Manager, Compute Infrastructure',
