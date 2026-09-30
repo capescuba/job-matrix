@@ -3,16 +3,22 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.ts';
 import { ScreeningCard } from '../components/ScreeningCard.tsx';
+import { FilteredList, WatchlistStrip, useCrawlStatus } from '../components/Watchlist.tsx';
 import { Button, ErrorText, Input, cx } from '../components/ui.tsx';
 
+const TABS = ['inbox', 'passed', 'filtered'] as const;
+type Tab = (typeof TABS)[number];
+
 /**
- * The Screening inbox: jobs captured (by the extension or "Screen a URL") waiting for a decision.
- * Capturing is free; scoring costs an AI call, so it only happens when you press Score.
+ * The Screening inbox: jobs captured (by the extension or "Screen a URL") or found on a watched
+ * job board, waiting for a decision. Capturing is free; scoring costs an AI call, so it only
+ * happens when you press Score.
  */
 export default function ScreeningPage() {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'passed' ? 'passed' : 'inbox';
+  const tab: Tab = TABS.find((t) => t === params.get('tab')) ?? 'inbox';
+  const watchlist = useCrawlStatus();
   const focus = Number(params.get('focus')) || null;
   const {
     data = [],
@@ -63,11 +69,15 @@ export default function ScreeningPage() {
             [
               ['inbox', `Inbox (${inbox.length})`],
               ['passed', `Passed (${passed.length})`],
+              // Only once a job board is followed (or something was filtered out).
+              ...(watchlist?.sources || watchlist?.filteredCount
+                ? ([['filtered', `Filtered out (${watchlist.filteredCount})`]] as const)
+                : []),
             ] as const
           ).map(([key, label]) => (
             <button
               key={key}
-              onClick={() => setParams(key === 'passed' ? { tab: 'passed' } : {})}
+              onClick={() => setParams(key === 'inbox' ? {} : { tab: key })}
               className={cx(
                 'rounded px-2.5 py-1 text-sm',
                 tab === key ? 'bg-surface-2 font-medium' : 'text-ink-2',
@@ -113,9 +123,12 @@ export default function ScreeningPage() {
       </div>
 
       <ScreenUrl onAdded={(id) => setParams({ focus: String(id) })} />
+      <WatchlistStrip status={watchlist} />
       <ErrorText error={error ?? scoreAll.error} />
 
-      {isLoading ? (
+      {tab === 'filtered' ? (
+        <FilteredList onAdded={(id) => setParams({ focus: String(id) })} />
+      ) : isLoading ? (
         <p className="text-ink-2">Loading…</p>
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-ink-2">

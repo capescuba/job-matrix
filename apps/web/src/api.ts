@@ -33,6 +33,27 @@ import type { EmailUpdateRow } from '../../server/src/services/mail/updates.ts';
 import type { EmailKind } from '../../server/src/services/mail/rules.ts';
 import type { LogEntry, listLogs } from '../../server/src/services/logs.ts';
 import type { MailStatus as MailConnection } from '@jm/mail';
+import type { CrawlProgress } from '../../server/src/services/crawl/run.ts';
+import type { LeadRow, SourceRow } from '../../server/src/services/crawl/watchlist.ts';
+
+export type { LeadRow, SourceRow };
+/** The watchlist: what to look for, and how the last check went. */
+export interface CrawlStatus {
+  enabled: boolean;
+  intervalMinutes: number;
+  intervals: readonly number[];
+  titleInclude: string[];
+  titleExclude: string[];
+  locations: string[];
+  lastRunAt: string | null;
+  lastError: string | null;
+  last: { boards: number; seen: number; matched: number; added: number; filtered: number };
+  nextRunAt: string | null;
+  progress: CrawlProgress;
+  /** Boards followed, and jobs currently filtered out. */
+  sources: number;
+  filteredCount: number;
+}
 
 export type Settings = ReturnType<typeof getSettings>;
 export type { EmailKind, EmailUpdateRow, LogEntry };
@@ -209,7 +230,10 @@ export const api = {
   // ----- email -----
   mailStatus: () => request<MailStatus>('GET', '/api/mail/status'),
   mailConnect: () =>
-    request<{ userCode: string; verificationUri: string; expiresAt: number }>('POST', '/api/mail/connect'),
+    request<{ userCode: string; verificationUri: string; expiresAt: number }>(
+      'POST',
+      '/api/mail/connect',
+    ),
   mailSettings: (patch: { enabled?: boolean; intervalMinutes?: number }) =>
     request<MailStatus>('POST', '/api/mail/settings', patch),
   mailSync: () => request<MailStatus>('POST', '/api/mail/sync'),
@@ -235,8 +259,7 @@ export const api = {
       companyId?: number;
       rememberAlias?: boolean;
     },
-  ) =>
-    request('POST', `/api/email-updates/${id}/relabel`, body),
+  ) => request('POST', `/api/email-updates/${id}/relabel`, body),
   trackEmailUpdate: (id: number, body: { company: string; title: string }) =>
     request('POST', `/api/email-updates/${id}/track`, body),
   classifyEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/classify`),
@@ -244,10 +267,35 @@ export const api = {
   // ----- companies and the other names they go by -----
   companies: () => request<{ id: number; name: string }[]>('GET', '/api/companies'),
   aliases: (companyId: number) =>
-    request<{ id: number; alias: string; createdAt: string }[]>('GET', `/api/companies/${companyId}/aliases`),
+    request<{ id: number; alias: string; createdAt: string }[]>(
+      'GET',
+      `/api/companies/${companyId}/aliases`,
+    ),
   addAlias: (companyId: number, alias: string) =>
     request('POST', `/api/companies/${companyId}/aliases`, { alias }),
   removeAlias: (id: number) => request<void>('DELETE', `/api/aliases/${id}`),
+
+  // ----- watchlist: company job boards checked for new jobs -----
+  crawlStatus: () => request<CrawlStatus>('GET', '/api/crawl/status'),
+  crawlSettings: (patch: {
+    enabled?: boolean;
+    intervalMinutes?: number;
+    titleInclude?: string[];
+    titleExclude?: string[];
+    locations?: string[];
+  }) => request<CrawlStatus>('POST', '/api/crawl/settings', patch),
+  /** Starts a check; follow it through crawlStatus().progress. */
+  crawlRun: () => request<CrawlStatus>('POST', '/api/crawl/run'),
+  crawlSources: () => request<SourceRow[]>('GET', '/api/crawl/sources'),
+  /** Follow the board behind a board, job or careers-page address. */
+  addCrawlSource: (url: string, companyName?: string | null) =>
+    request<SourceRow>('POST', '/api/crawl/sources', { url, companyName }),
+  updateCrawlSource: (id: number, patch: { enabled?: boolean; companyName?: string }) =>
+    request<SourceRow>('PATCH', `/api/crawl/sources/${id}`, patch),
+  removeCrawlSource: (id: number) => request<void>('DELETE', `/api/crawl/sources/${id}`),
+  /** Jobs that matched a watched title but were kept out of the inbox. */
+  crawlLeads: () => request<LeadRow[]>('GET', '/api/crawl/leads'),
+  addCrawlLead: (id: number) => request<CaptureResult>('POST', `/api/crawl/leads/${id}/add`),
 
   // ----- logs -----
   logs: () => request<{ dir: string; files: LogFile[] }>('GET', '/api/logs'),

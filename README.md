@@ -51,6 +51,18 @@ The **Email** page reads your Hotmail / Outlook.com mailbox (read-only, Microsof
 - **Where it looks.** Every folder (Inbox, Junk, Deleted Items, your own folders) except Sent, Drafts and Outbox. Only job-related emails are kept, and only a short excerpt of each.
 - **Sign-in.** Shared with the [email-mcp](https://github.com/capescuba/mcp/tree/master/email-mcp) server: `%USERPROFILE%\.email-mcp\config.json` holds the Azure app ID, and `token.json` holds the sign-in. **Connect Outlook** shows a code to enter at microsoft.com/link. `OUTLOOK_CLIENT_ID` in `.env` overrides the app ID.
 
+## Watchlist
+
+The **Watchlist** card on the Profile page follows company job boards, so new jobs reach the Screening inbox on their own.
+
+- **Follow a company.** Paste its careers page, its job board or any one of its job postings. Greenhouse, Ashby, Lever and Workday boards are supported. The board is read once straight away, so a wrong address is reported there and then.
+- **What is picked up.** Jobs whose title contains one of your **titles to look for**. "TPM" and "Sr." are read as "technical program manager" and "senior".
+- **What is filtered out.** Titles on your skip list, contracts, internships and hourly pay, a posted range whose top is below your minimum base, a place that is neither remote nor on your list, and jobs you already track. A posting that doesn't state its pay or place passes.
+- **Where the rest goes.** Into the Screening inbox, with a timeline note naming the board. Filtered-out jobs are listed on Screening under **Filtered out**, each with its reason and an **Add anyway** button.
+- **Decided once.** A job added or filtered out is remembered by its address and not looked at again. The exception is a job a rule filtered out: it is judged again on each check, so a change to the rules takes effect.
+- **When it checks.** When Job Matrix opens, by default. You can choose manual only, or also every 1, 3 or 6 hours while the app is open. **Check now** is on both pages.
+- **Cost.** None. It reads each company's public board and uses no AI.
+
 ## Log
 
 The **Log** page shows the app's log files from `data/`:
@@ -58,7 +70,7 @@ The **Log** page shows the app's log files from `data/`:
 - `server-error.log` for errors;
 - `build.log` for the web build.
 
-The log has one line per API call, with the polled ones left out, plus named events (`mail.sync.*`, `mail.update.*`, `ai.call`, `app.start`, `app.idle-exit`). The page has filters for level and routine requests, a search box, and **Follow**.
+The log has one line per API call, with the polled ones left out, plus named events (`mail.sync.*`, `mail.update.*`, `crawl.*`, `ai.call`, `app.start`, `app.idle-exit`). The page has filters for level and routine requests, a search box, and **Follow**.
 
 ## Development
 

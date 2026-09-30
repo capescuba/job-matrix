@@ -112,6 +112,24 @@ import {
   trackFromUpdate,
   trackSchema,
 } from './services/mail/updates.ts';
+import {
+  addLead,
+  crawlProgress,
+  nextCrawlAt,
+  runCrawl,
+  scheduleCrawl,
+} from './services/crawl/run.ts';
+import {
+  CRAWL_INTERVALS,
+  addSource,
+  crawlSettings,
+  filteredCount,
+  listFiltered,
+  listSources,
+  removeSource,
+  updateCrawlSettings,
+  updateSource,
+} from './services/crawl/watchlist.ts';
 
 const idParam = z.object({ id: z.coerce.number().int() });
 
@@ -141,7 +159,7 @@ export function buildApp(
   });
 
   /** Polled or streamed routes that would drown the log. */
-  const QUIET = /^\/api\/(health|ai\/events|logs|mail\/status)(\/|\?|$)/;
+  const QUIET = /^\/api\/(health|ai\/events|logs|mail\/status|crawl\/status)(\/|\?|$)/;
   app.addHook('onResponse', async (req, reply) => {
     if (!req.url.startsWith('/api/') || QUIET.test(req.url)) return;
     const status = reply.statusCode;
@@ -166,7 +184,8 @@ export function buildApp(
     if (err instanceof NotFoundError) return reply.status(404).send({ error: err.message });
     if (err instanceof UpdateStateError) return reply.status(409).send({ error: err.message });
     if (err instanceof AliasError) return reply.status(400).send({ error: err.message });
-    if (err instanceof NeedsSignIn) return reply.status(401).send({ error: err.message, signIn: true });
+    if (err instanceof NeedsSignIn)
+      return reply.status(401).send({ error: err.message, signIn: true });
     if (err instanceof GraphError) return reply.status(502).send({ error: err.message });
     if (
       err instanceof FitError ||
@@ -279,6 +298,95 @@ export function buildApp(
     const r = await captureJob(db, { url }, { fetchFn: opts.fetchFn });
     return reply.status(r.existing ? 200 : 201).send(r);
   });
+  // ----- watchlist: company job boards checked for new jobs -----
+  const crawlDeps = { fetchFn: opts.fetchFn };
+  const crawlStatus = () => {
+    const s = crawlSettings(db);
+    return {
+      enabled: s.enabled,
+      intervalMinutes: s.intervalMinutes,
+      intervals: CRAWL_INTERVALS,
+      titleInclude: s.titleInclude,
+      titleExclude: s.titleExclude,
+      locations: s.locations,
+      lastRunAt: s.lastRunAt,
+      lastError: s.lastError,
+      last: {
+        boards: s.boards,
+        seen: s.seen,
+        matched: s.matched,
+        added: s.added,
+        filtered: s.filtered,
+      },
+      nextRunAt: nextCrawlAt(),
+      progress: crawlProgress(),
+      sources: listSources(db).length,
+      filteredCount: filteredCount(db),
+    };
+  };
+  app.get('/api/crawl/status', crawlStatus);
+  app.post('/api/crawl/settings', (req) => {
+    const list = z.array(z.string().max(200)).max(200).optional();
+    const body = z
+      .object({
+        enabled: z.boolean().optional(),
+        intervalMinutes: z
+          .number()
+          .int()
+          .refine((v) => (CRAWL_INTERVALS as readonly number[]).includes(v), 'Unknown interval')
+          .optional(),
+        titleInclude: list,
+        titleExclude: list,
+        locations: list,
+      })
+      .parse(req.body);
+    updateCrawlSettings(db, body);
+    scheduleCrawl(db, crawlDeps);
+    logEvent('crawl.settings', 'Watchlist settings changed', body);
+    return crawlStatus();
+  });
+  // Starts a check and returns at once; the page follows progress through /api/crawl/status.
+  app.post('/api/crawl/run', () => {
+    runCrawl(db, crawlDeps)
+      .catch((e: Error) =>
+        logEvent('crawl.error', `Watchlist check failed: ${e.message}`, {}, 'error'),
+      )
+      .finally(() => scheduleCrawl(db, crawlDeps));
+    return crawlStatus();
+  });
+  app.get('/api/crawl/sources', () => listSources(db));
+  app.post('/api/crawl/sources', async (req, reply) => {
+    const body = z
+      .object({
+        url: z.string().trim().url(),
+        companyName: z.string().trim().max(200).nullable().optional(),
+      })
+      .parse(req.body);
+    const s = await addSource(db, body, crawlDeps);
+    logEvent('crawl.source', `Now watching ${s.companyName}'s job board`, { boardUrl: s.boardUrl });
+    return reply.status(201).send(s);
+  });
+  app.patch('/api/crawl/sources/:id', (req) =>
+    updateSource(
+      db,
+      idParam.parse(req.params).id,
+      z
+        .object({
+          enabled: z.boolean().optional(),
+          companyName: z.string().trim().min(1).max(200).optional(),
+        })
+        .parse(req.body),
+    ),
+  );
+  app.delete('/api/crawl/sources/:id', (req, reply) => {
+    removeSource(db, idParam.parse(req.params).id);
+    return reply.status(204).send();
+  });
+  app.get('/api/crawl/leads', () => listFiltered(db));
+  app.post('/api/crawl/leads/:id/add', (req) =>
+    addLead(db, idParam.parse(req.params).id, crawlDeps),
+  );
+
   // Is this posting already tracked? (the extension popup asks before capturing)
   app.get('/api/screen/lookup', { preHandler: requireToken }, (req) => {
     const { url } = z.object({ url: z.string().url() }).parse(req.query);
@@ -549,8 +657,10 @@ export function buildApp(
     const s = await mail.startSignIn();
     logEvent('mail.signin.start', 'Outlook sign-in started (waiting for the code)');
     s.done.then(
-      async () => logEvent('mail.signin.done', `Connected to Outlook as ${(await mail.status()).account}`),
-      (e: Error) => logEvent('mail.signin.error', `Outlook sign-in failed: ${e.message}`, {}, 'warn'),
+      async () =>
+        logEvent('mail.signin.done', `Connected to Outlook as ${(await mail.status()).account}`),
+      (e: Error) =>
+        logEvent('mail.signin.error', `Outlook sign-in failed: ${e.message}`, {}, 'warn'),
     );
     return { userCode: s.userCode, verificationUri: s.verificationUri, expiresAt: s.expiresAt };
   });
@@ -581,14 +691,20 @@ export function buildApp(
   app.post('/api/mail/rescan', () => startSync(true));
 
   app.get('/api/email-updates', (req) => {
-    const { state } = z.object({ state: z.enum(['pending', 'done']).default('pending') }).parse(req.query);
+    const { state } = z
+      .object({ state: z.enum(['pending', 'done']).default('pending') })
+      .parse(req.query);
     return listUpdates(db, state);
   });
   app.post('/api/email-updates/:id/apply', (req) =>
     applyUpdate(db, idParam.parse(req.params).id, applyInputSchema.parse(req.body ?? {})),
   );
-  app.post('/api/email-updates/:id/dismiss', (req) => dismissUpdate(db, idParam.parse(req.params).id));
-  app.post('/api/email-updates/:id/restore', (req) => restoreUpdate(db, idParam.parse(req.params).id));
+  app.post('/api/email-updates/:id/dismiss', (req) =>
+    dismissUpdate(db, idParam.parse(req.params).id),
+  );
+  app.post('/api/email-updates/:id/restore', (req) =>
+    restoreUpdate(db, idParam.parse(req.params).id),
+  );
   app.post('/api/email-updates/:id/relabel', (req) =>
     relabelUpdate(db, idParam.parse(req.params).id, relabelSchema.parse(req.body)),
   );
@@ -605,7 +721,10 @@ export function buildApp(
     const { id } = idParam.parse(req.params);
     const { alias } = z.object({ alias: z.string().trim().min(1).max(200) }).parse(req.body);
     addAlias(db, id, alias);
-    logEvent('company.alias', `Added “${alias}” as another name for company ${id}`, { companyId: id, alias });
+    logEvent('company.alias', `Added “${alias}” as another name for company ${id}`, {
+      companyId: id,
+      alias,
+    });
     rematchPending(db);
     return reply.status(201).send(listAliases(db, id));
   });
@@ -619,7 +738,9 @@ export function buildApp(
   app.get('/api/logs', () => ({ dir: DATA_DIR, files: listLogs() }));
   app.get('/api/logs/:name', (req, reply) => {
     const { name } = z.object({ name: z.string() }).parse(req.params);
-    const { lines } = z.object({ lines: z.coerce.number().int().min(1).max(20_000).default(2000) }).parse(req.query);
+    const { lines } = z
+      .object({ lines: z.coerce.number().int().min(1).max(20_000).default(2000) })
+      .parse(req.query);
     try {
       return readLog(name, lines);
     } catch {

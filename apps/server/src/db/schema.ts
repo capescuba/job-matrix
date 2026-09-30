@@ -368,5 +368,84 @@ export const companyAliases = sqliteTable(
     aliasKey: text('alias_key').notNull(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('company_aliases_key').on(t.aliasKey), index('company_aliases_company').on(t.companyId)],
+  (t) => [
+    uniqueIndex('company_aliases_key').on(t.aliasKey),
+    index('company_aliases_company').on(t.companyId),
+  ],
 );
+
+/** The watchlist: company career boards checked for new jobs. */
+export const crawlSources = sqliteTable(
+  'crawl_sources',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /** greenhouse | ashby | lever | workday */
+    kind: text('kind').notNull(),
+    companyName: text('company_name').notNull(),
+    /** The board's name at the job site: "anthropic", or "nvidia/NVIDIAExternalCareerSite" on Workday. */
+    slug: text('slug').notNull(),
+    /** The board's public page, e.g. https://jobs.ashbyhq.com/openai. */
+    boardUrl: text('board_url').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    lastCheckedAt: text('last_checked_at'),
+    lastError: text('last_error'),
+    /** Last check: open jobs on the board, and how many had a title you watch for. */
+    lastCount: integer('last_count'),
+    lastMatched: integer('last_matched'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('crawl_sources_board').on(t.kind, t.slug)],
+);
+
+/**
+ * Jobs found on watched boards whose title matched, each with what was decided about it. A job
+ * is decided once: added to the Screening inbox, or kept here with the reason it wasn't.
+ */
+export const crawlLeads = sqliteTable(
+  'crawl_leads',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sourceId: integer('source_id').references(() => crawlSources.id, { onDelete: 'cascade' }),
+    /** Normalized posting URL (see normalizeUrl). */
+    url: text('url').notNull(),
+    company: text('company').notNull(),
+    title: text('title').notNull(),
+    location: text('location'),
+    remoteType: text('remote_type'),
+    salaryMin: integer('salary_min'),
+    salaryMax: integer('salary_max'),
+    postedAt: text('posted_at'),
+    /** yes | maybe (in the inbox) · no-rules | no-ai | duplicate (filtered out) · waiting | error (try again) */
+    verdict: text('verdict').notNull(),
+    reason: text('reason'),
+    /** The model that judged it, when one did. */
+    model: text('model'),
+    usageId: integer('usage_id'),
+    applicationId: integer('application_id').references(() => applications.id, {
+      onDelete: 'set null',
+    }),
+    decidedAt: text('decided_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('crawl_leads_url').on(t.url), index('crawl_leads_verdict').on(t.verdict)],
+);
+
+/** One row (id 1): watchlist settings and the last check. */
+export const crawlState = sqliteTable('crawl_state', {
+  id: integer('id').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  /** -1 manual only, 0 when the app opens (default), else minutes between checks. */
+  intervalMinutes: integer('interval_minutes').notNull().default(0),
+  /** Newline-separated lists; null = the built-in defaults. */
+  titleInclude: text('title_include'),
+  titleExclude: text('title_exclude'),
+  locations: text('locations'),
+  lastRunAt: text('last_run_at'),
+  lastError: text('last_error'),
+  /** Last check: boards read, jobs seen, titles matched, added to the inbox, filtered out. */
+  boards: integer('boards').notNull().default(0),
+  seen: integer('seen').notNull().default(0),
+  matched: integer('matched').notNull().default(0),
+  added: integer('added').notNull().default(0),
+  filtered: integer('filtered').notNull().default(0),
+});

@@ -76,7 +76,7 @@ const positive = (n: number | null | undefined) => (typeof n === 'number' && n >
 const CLOSED_TEXT =
   /no longer (accepting applications|available|open|active)|(position|job|role) (has been|is) (filled|closed)|(job|posting) (has )?(expired|closed)|this (job|role|position|posting) is no longer/i;
 
-type FetchFn = typeof fetch;
+export type FetchFn = typeof fetch;
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
@@ -165,7 +165,7 @@ export function parseSalaryRange(text: string): { min: number; max: number } | n
   return { min: Math.min(...found.map((r) => r.min)), max: Math.max(...found.map((r) => r.max)) };
 }
 
-function remoteFrom(s: string | null | undefined): FetchedJob['remoteType'] {
+export function remoteFrom(s: string | null | undefined): FetchedJob['remoteType'] {
   if (!s) return null;
   if (/remote|telecommute/i.test(s)) return 'Remote';
   if (/hybrid/i.test(s)) return 'Hybrid';
@@ -202,11 +202,18 @@ function finish(
 
 // ---------- strategies ----------
 
-async function getText(f: FetchFn, url: string, accept = 'text/html') {
+/** GET (or, with a body, a JSON POST) as a browser would, with the usual failures named. */
+export async function getText(f: FetchFn, url: string, accept = 'text/html', body?: unknown) {
   let res: Response;
   try {
     res = await f(url, {
-      headers: { 'User-Agent': UA, Accept: accept, 'Accept-Language': 'en-US,en;q=0.9' },
+      ...(body !== undefined && { method: 'POST', body: JSON.stringify(body) }),
+      headers: {
+        'User-Agent': UA,
+        Accept: accept,
+        'Accept-Language': 'en-US,en;q=0.9',
+        ...(body !== undefined && { 'Content-Type': 'application/json' }),
+      },
       redirect: 'follow',
       signal: AbortSignal.timeout(20_000),
     });
@@ -223,10 +230,10 @@ async function getText(f: FetchFn, url: string, accept = 'text/html') {
   return res.text();
 }
 
-async function getJson<T>(f: FetchFn, url: string): Promise<T> {
-  const body = await getText(f, url, 'application/json');
+export async function getJson<T>(f: FetchFn, url: string, body?: unknown): Promise<T> {
+  const text = await getText(f, url, 'application/json', body);
   try {
-    return JSON.parse(body) as T;
+    return JSON.parse(text) as T;
   } catch {
     throw new JobFetchError(`Unexpected response from ${new URL(url).hostname}.`);
   }
@@ -598,7 +605,10 @@ async function embedded(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/embed\/job_board(?:\/js)?\?for=([\w-]+)/i,
   )?.[1];
   if (!board) return null;
-  const r = await greenhouse(f, new URL(`https://job-boards.greenhouse.io/${board}/jobs/${job.id}`));
+  const r = await greenhouse(
+    f,
+    new URL(`https://job-boards.greenhouse.io/${board}/jobs/${job.id}`),
+  );
   return r && { ...r, via: `Greenhouse API (embedded on ${u.hostname})` };
 }
 
