@@ -9,7 +9,7 @@ import {
 } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import { applications, companies, contacts, jobs } from '../db/schema.ts';
-import { addActivity, createApplication, findOrCreateCompany } from './applications.ts';
+import { addActivity, createApplication, findOrCreateCompany, sha256 } from './applications.ts';
 import {
   decodeEntities,
   fetchJobPosting,
@@ -105,8 +105,10 @@ export function findTrackedByUrl(db: Db, url: string) {
   const rows = db
     .select({
       applicationId: applications.id,
+      jobId: jobs.id,
       status: applications.status,
       url: jobs.url,
+      descriptionText: jobs.descriptionText,
       title: jobs.title,
       company: companies.name,
     })
@@ -258,12 +260,37 @@ export interface CaptureResult {
   company: string;
   title: string;
   descriptionSource?: string | null;
+  /** A job you already track had no description, and this capture supplied one. */
+  descriptionAdded?: boolean;
 }
 
 const clean = (s: string | null | undefined) => {
   const t = s?.replace(/\s+\n/g, '\n').trim();
   return t ? t : null;
 };
+
+/**
+ * The description a capture carries, with where it came from: your selection, then the site
+ * template, the server's own read of the posting, the page's structured data, the whole page.
+ */
+function descriptionFrom(
+  input: CaptureInput,
+  fetched: FetchedJob | null,
+): [string, string | null] | undefined {
+  const ld = jobPostingFromJsonLd(input.jsonLd);
+  return (
+    [
+      [clean(input.selectionText), 'Your selection'],
+      [
+        clean(input.fields?.descriptionText),
+        input.templateName ? `${input.templateName} template` : 'Site template',
+      ],
+      [clean(fetched?.descriptionText), fetched?.via ?? null],
+      [ld?.description ? clean(htmlToText(ld.description)) : null, 'Page structured data'],
+      [clean(input.pageText), 'Page text (whole page)'],
+    ] as [string | null, string | null][]
+  ).find((d): d is [string, string | null] => !!d[0] && d[0].length >= 40);
+}
 
 /**
  * Adds a job to the Screening inbox from whatever the capture provides — no AI involved.
@@ -280,14 +307,34 @@ export async function captureJob(
   const url = normalizeUrl(input.url);
 
   const tracked = findTrackedByUrl(db, url);
-  if (tracked)
+  if (tracked) {
+    // Already tracked: the only thing a capture adds is a description the job is missing (a
+    // saved-search listing, whose posting the server couldn't read).
+    const desc = tracked.descriptionText?.trim() ? undefined : descriptionFrom(input, null);
+    if (desc) {
+      db.update(jobs)
+        .set({
+          descriptionText: desc[0],
+          descriptionHash: sha256(desc[0]),
+          descriptionSource: desc[1],
+        })
+        .where(eq(jobs.id, tracked.jobId))
+        .run();
+      addActivity(db, tracked.applicationId, {
+        at: new Date().toISOString().slice(0, 10),
+        kind: 'Note',
+        summary: `Description added from ${desc[1] ?? 'the page'}`,
+      });
+    }
     return {
       applicationId: tracked.applicationId,
       existing: true,
       status: tracked.status,
       company: tracked.company,
       title: tracked.title,
+      ...(desc && { descriptionSource: desc[1], descriptionAdded: true }),
     };
+  }
 
   let fetched: FetchedJob | null = null;
   try {
@@ -300,18 +347,7 @@ export async function captureJob(
   const fromTitle = parsePageTitle(input.pageTitle ?? fetched?.pageTitle);
   const f: Partial<NonNullable<typeof input.fields>> = input.fields ?? {};
 
-  const desc = (
-    [
-      [clean(input.selectionText), 'Your selection'],
-      [
-        clean(f.descriptionText),
-        input.templateName ? `${input.templateName} template` : 'Site template',
-      ],
-      [clean(fetched?.descriptionText), fetched?.via ?? null],
-      [ld?.description ? clean(htmlToText(ld.description)) : null, 'Page structured data'],
-      [clean(input.pageText), 'Page text (whole page)'],
-    ] as [string | null, string | null][]
-  ).find(([text]) => text && text.length >= 40);
+  const desc = descriptionFrom(input, fetched);
 
   const orgName =
     typeof ld?.hiringOrganization === 'string'

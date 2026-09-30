@@ -57,13 +57,19 @@ describe('normalizeUrl', () => {
       'https://job-boards.greenhouse.io/acme/jobs/123',
     ],
     ['https://jobs.lever.co/zoox/5c37/', 'https://jobs.lever.co/zoox/5c37'],
-    ['https://jobs.lever.co/zoox/5c37/apply?lever-origin=applied', 'https://jobs.lever.co/zoox/5c37'],
+    [
+      'https://jobs.lever.co/zoox/5c37/apply?lever-origin=applied',
+      'https://jobs.lever.co/zoox/5c37',
+    ],
     // Greenhouse: every form of one job is the same job.
     [
       'https://boards.greenhouse.io/embed/job_app?for=acme&token=99',
       'https://job-boards.greenhouse.io/acme/jobs/99',
     ],
-    ['https://boards.greenhouse.io/Acme/jobs/99?t=abc', 'https://job-boards.greenhouse.io/acme/jobs/99'],
+    [
+      'https://boards.greenhouse.io/Acme/jobs/99?t=abc',
+      'https://job-boards.greenhouse.io/acme/jobs/99',
+    ],
     [
       'https://www.acme.com/careers/job?gh_jid=99&utm_source=li&foo=bar',
       'https://www.acme.com/careers/job?gh_jid=99',
@@ -101,9 +107,14 @@ describe('findTrackedByUrl', () => {
       url: 'https://careers.oracle.com/en/sites/jobsearch/job/334011?keyword=Principal%20Technical%20Program%20Manager&location=United%20States',
     });
     expect(
-      findTrackedByUrl(db, 'https://careers.oracle.com/en/sites/jobsearch/my-profile/preview/334011'),
+      findTrackedByUrl(
+        db,
+        'https://careers.oracle.com/en/sites/jobsearch/my-profile/preview/334011',
+      ),
     ).toMatchObject({ applicationId: id, status: 'Screening' });
-    expect(findTrackedByUrl(db, 'https://careers.oracle.com/en/sites/jobsearch/job/334012')).toBeNull();
+    expect(
+      findTrackedByUrl(db, 'https://careers.oracle.com/en/sites/jobsearch/job/334012'),
+    ).toBeNull();
   });
 });
 
@@ -260,6 +271,50 @@ describe('captureJob', () => {
     expect(db.$client.prepare('SELECT count(*) FROM applications').pluck().get()).toBe(1);
   });
 
+  it('fills in the description of a tracked job that has none, and only then', async () => {
+    // A saved-search listing: added with no description, since the server can't read Indeed.
+    const first = await captureJob(
+      db,
+      {
+        url: 'https://www.indeed.com/viewjob?jk=abc123',
+        fields: { title: 'Senior TPM', company: 'Acme' },
+      },
+      { skipFetch: true },
+    );
+    expect(row(first.applicationId).d).toBeNull();
+
+    const filled = await captureJob(
+      db,
+      {
+        url: 'https://www.indeed.com/viewjob?jk=abc123&from=serp',
+        fields: { descriptionText: LONG },
+        templateName: 'Built-in Indeed',
+      },
+      { fetchFn: offline },
+    );
+    expect(filled).toMatchObject({
+      existing: true,
+      applicationId: first.applicationId,
+      descriptionAdded: true,
+      descriptionSource: 'Built-in Indeed template',
+    });
+    expect(row(first.applicationId)).toMatchObject({
+      d: LONG.trim(),
+      src: 'Built-in Indeed template',
+      title: 'Senior TPM',
+      company: 'Acme',
+    });
+
+    // One it already has is left alone.
+    const again = await captureJob(
+      db,
+      { url: 'https://www.indeed.com/viewjob?jk=abc123', pageText: `Other text. ${LONG}` },
+      { fetchFn: offline },
+    );
+    expect(again.descriptionAdded).toBeUndefined();
+    expect(row(first.applicationId).d).toBe(LONG.trim());
+  });
+
   it('stores LinkedIn signed-in extras: applicants, insights, hiring team as contacts', async () => {
     const r = await captureJob(
       db,
@@ -325,6 +380,29 @@ describe('screening routes & inbox behaviour', () => {
       applicationId: ok.json().applicationId,
       status: 'Screening',
     });
+  });
+
+  it('lists inbox jobs from search sites that still need a description', async () => {
+    const app = buildApp(db, { extensionToken: TOKEN, fetchFn: offline });
+    const add = (url: string, extra: Record<string, unknown> = {}) =>
+      createApplication(db, { company: 'Acme', title: url, url, status: 'Screening', ...extra });
+    const indeed = add('https://www.indeed.com/viewjob?jk=1');
+    add('https://www.glassdoor.com/job-listing/x?jl=2', { descriptionText: LONG });
+    add('https://jobs.lever.co/acme/3'); // the server reads this one itself
+    add('https://www.indeed.com/viewjob?jk=4', { status: 'Applied' });
+    const zip = add('https://www.ziprecruiter.com/jobs-search?lk=5');
+
+    const url = '/api/crawl/searches/missing-descriptions';
+    expect((await app.inject({ url })).statusCode).toBe(401);
+    const r = await app.inject({ url, headers: { 'x-jm-token': TOKEN } });
+    expect(r.json()).toEqual([
+      expect.objectContaining({ applicationId: zip, site: 'ziprecruiter' }),
+      expect.objectContaining({
+        applicationId: indeed,
+        site: 'indeed',
+        url: 'https://www.indeed.com/viewjob?jk=1',
+      }),
+    ]);
   });
 
   it('keeps Screening and Passed out of pipeline stats; Pass logs the reason', async () => {

@@ -8,7 +8,15 @@
 import { eq, sql } from 'drizzle-orm';
 import { RateLimitError, getPrescreenProvider } from '@jm/ai';
 import type { Db } from '../../db/client.ts';
-import { crawlLeads, crawlSearches, crawlSources, crawlState } from '../../db/schema.ts';
+import {
+  applications,
+  companies,
+  crawlLeads,
+  crawlSearches,
+  crawlSources,
+  crawlState,
+  jobs,
+} from '../../db/schema.ts';
 import { NotFoundError, addActivity } from '../applications.ts';
 import { companyKey } from '../extension.ts';
 import { fetchJobPosting, type FetchFn } from '../jobfetch.ts';
@@ -16,7 +24,7 @@ import { logEvent } from '../log.ts';
 import { captureJob, normalizeUrl, type CaptureResult } from '../screening.ts';
 import { BOARD_LABEL, listBoard, rememberingFetch, type BoardJob } from './boards.ts';
 import { prescreenJob, type Prescreener } from './prescreen.ts';
-import { listingToJob, type SearchListing } from './searches.ts';
+import { listingToJob, postingSiteOf, type SearchListing } from './searches.ts';
 import { buildTracked, prefilter, titleWatched, type Tracked } from './rules.ts';
 import {
   crawlCriteria,
@@ -590,6 +598,33 @@ export async function addLead(db: Db, id: number, deps: CrawlDeps = {}): Promise
     .where(eq(crawlLeads.id, id))
     .run();
   return r;
+}
+
+/**
+ * Jobs in the Screening inbox from a search site (Indeed, Glassdoor, …) that still have no
+ * description, newest first: the server can't read those postings, so the extension opens each
+ * in your Chrome after a search run and sends the description back.
+ */
+export function searchJobsMissingDescriptions(db: Db, limit = 20) {
+  return db
+    .select({
+      applicationId: applications.id,
+      url: jobs.url,
+      title: jobs.title,
+      company: companies.name,
+    })
+    .from(applications)
+    .innerJoin(jobs, eq(jobs.id, applications.jobId))
+    .innerJoin(companies, eq(companies.id, jobs.companyId))
+    .where(
+      sql`${applications.status} = 'Screening' AND ${jobs.url} IS NOT NULL
+          AND trim(coalesce(${jobs.descriptionText}, '')) = ''`,
+    )
+    .orderBy(sql`${applications.id} DESC`)
+    .all()
+    .filter((j) => postingSiteOf(j.url!))
+    .slice(0, limit)
+    .map((j) => ({ ...j, url: j.url!, site: postingSiteOf(j.url!)! }));
 }
 
 // ---------- schedule ----------
