@@ -4,6 +4,7 @@ import { createMailClient } from '@jm/mail';
 import { buildApp } from './app.ts';
 import { openDb } from './db/client.ts';
 import { WEB_DIST } from './paths.ts';
+import { scheduleCrawl } from './services/crawl/run.ts';
 import { logEvent, setLogSink } from './services/log.ts';
 import { scheduleMail } from './services/mail/sync.ts';
 import { rematchPending } from './services/mail/updates.ts';
@@ -49,6 +50,8 @@ app
     // Emails waiting for review may match better now (new aliases, jobs added since).
     rematchPending(db);
     scheduleMail(db, mail, { startup: true });
+    // Watchlist: checks the followed job boards when the app opens, unless set to manual.
+    scheduleCrawl(db, {}, { startup: true });
   })
   .catch((err) => {
     app.log.error(err);

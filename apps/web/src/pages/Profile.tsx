@@ -5,6 +5,7 @@ import { AiSettings } from '../components/AiSettings.tsx';
 import { CareerProfileCard } from '../components/CareerProfileCard.tsx';
 import { LinkedInCard } from '../components/LinkedInCard.tsx';
 import { CriteriaEditor } from '../components/CriteriaEditor.tsx';
+import { WatchlistCard } from '../components/Watchlist.tsx';
 import { Button, Card, ErrorText, Field, Input } from '../components/ui.tsx';
 
 export default function ProfilePage() {
@@ -119,6 +120,7 @@ export default function ProfilePage() {
       <LinkedInCard summary={data?.linkedin} />
       <CareerProfileCard />
       <CriteriaEditor profile={data?.profile} />
+      <WatchlistCard />
     </div>
   );
 }
