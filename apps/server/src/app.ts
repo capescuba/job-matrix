@@ -386,6 +386,14 @@ export function buildApp(
       .finally(() => scheduleCrawl(db, crawlDeps));
     return crawlStatus();
   });
+  // One company's Check now: its board alone, like a job site's Search now.
+  app.post('/api/crawl/sources/:id/check', (req) => {
+    const { id } = idParam.parse(req.params);
+    runCrawl(db, crawlDeps, { sourceIds: [id] }).catch((e: Error) =>
+      logEvent('crawl.error', `Watchlist check failed: ${e.message}`, {}, 'error'),
+    );
+    return crawlStatus();
+  });
   app.get('/api/crawl/sources', () => listSources(db));
   app.post('/api/crawl/sources', async (req, reply) => {
     const body = z

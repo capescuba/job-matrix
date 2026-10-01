@@ -1,0 +1,1 @@
+ALTER TABLE `crawl_sources` ADD `last_added` integer;

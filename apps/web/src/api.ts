@@ -304,6 +304,8 @@ export const api = {
   }) => request<CrawlStatus>('POST', '/api/crawl/settings', patch),
   /** Starts a check; follow it through crawlStatus().progress. */
   crawlRun: () => request<CrawlStatus>('POST', '/api/crawl/run'),
+  /** Checks one company's board now; follow it through crawlStatus().progress. */
+  checkCrawlSource: (id: number) => request<CrawlStatus>('POST', `/api/crawl/sources/${id}/check`),
   crawlSources: () => request<SourceRow[]>('GET', '/api/crawl/sources'),
   /** Follow the board behind a board, job or careers-page address. */
   addCrawlSource: (url: string, companyName?: string | null) =>

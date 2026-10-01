@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../app.ts';
 import { openDb, type Db } from '../../db/client.ts';
-import { crawlLeads } from '../../db/schema.ts';
+import { eq } from 'drizzle-orm';
+import { crawlLeads, crawlSources } from '../../db/schema.ts';
 import { createApplication, getApplicationDetail, listApplications } from '../applications.ts';
 import { updateProfile } from '../resume.ts';
 import { addLead, nextCrawlAt, runCrawl, scheduleCrawl, stopCrawlSchedule } from './run.ts';
@@ -266,6 +267,54 @@ describe('routes', () => {
       (await app.inject({ method: 'DELETE', url: `/api/crawl/sources/${id}` })).statusCode,
     ).toBe(204);
     expect(listSources(db)).toEqual([]);
+  });
+});
+
+describe('checking one company', () => {
+  it('Check now on a company reads only its board, even paused, and records what it added', async () => {
+    const f = fakeWeb();
+    const app = buildApp(db, { fetchFn: f });
+    const anthropic = await addSource(
+      db,
+      { url: 'https://job-boards.greenhouse.io/anthropic' },
+      { fetchFn: f },
+    );
+    await addSource(db, { url: 'https://jobs.ashbyhq.com/openai' }, { fetchFn: f });
+    db.update(crawlSources).set({ enabled: false }).where(eq(crawlSources.id, anthropic.id)).run();
+
+    const started = await app.inject({
+      method: 'POST',
+      url: `/api/crawl/sources/${anthropic.id}/check`,
+    });
+    expect(started.statusCode).toBe(200);
+    expect(started.json().progress).toMatchObject({ running: true, sourceIds: [anthropic.id] });
+    await expect
+      .poll(async () => (await app.inject({ url: '/api/crawl/status' })).json().progress.running)
+      .toBe(false);
+
+    expect(inbox()).toEqual(['Anthropic — Staff Technical Program Manager, Compute']);
+    const [a, o] = [anthropic.id, anthropic.id + 1].map((id) =>
+      listSources(db).find((s) => s.id === id)!,
+    );
+    expect(a).toMatchObject({ lastMatched: 4, lastAdded: 1 });
+    expect(o!.lastAdded).toBeNull(); // OpenAI wasn't checked
+  });
+
+  it('a full check asked for during a one-company check runs after it', async () => {
+    const f = fakeWeb();
+    const one = await addSource(
+      db,
+      { url: 'https://job-boards.greenhouse.io/anthropic' },
+      { fetchFn: f },
+    );
+    await addSource(db, { url: 'https://jobs.ashbyhq.com/openai' }, { fetchFn: f });
+    const first = runCrawl(db, { fetchFn: f }, { sourceIds: [one.id] });
+    const again = runCrawl(db, { fetchFn: f }, { sourceIds: [one.id] });
+    const all = runCrawl(db, { fetchFn: f });
+    expect(again).toBe(first); // the same check, joined
+    expect(await first).toMatchObject({ boards: 1 });
+    expect(await all).toMatchObject({ boards: 2 });
+    expect(inbox()).toHaveLength(2);
   });
 });
 
