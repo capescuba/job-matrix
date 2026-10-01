@@ -232,13 +232,41 @@ function PrescreenRing({ row: r }: { row: ApplicationRow }) {
 }
 
 /** The free pre-screen, offered before a paid score when a pre-screen model is set up. */
-function PrescreenButton({ row: r, onChanged }: { row: ApplicationRow; onChanged: () => void }) {
+function PrescreenButton({
+  row: r,
+  onChanged,
+  link,
+}: {
+  row: ApplicationRow;
+  onChanged: () => void;
+  /** A small link in the meta line (scored rows), rather than a button. */
+  link?: boolean;
+}) {
   const { data: status } = useQuery({ queryKey: ['crawl-status'], queryFn: api.crawlStatus });
   const run = useMutation({
     mutationFn: () => api.prescreenApplication(r.id),
     onSettled: onChanged,
   });
   if (!status?.prescreen) return null;
+  const label = run.isPending
+    ? 'Pre-screening…'
+    : r.prescreenVerdict
+      ? 'Pre-screen again'
+      : 'Pre-screen · free';
+  if (link)
+    return (
+      <>
+        <button
+          className="text-accent hover:underline disabled:text-ink-3"
+          disabled={run.isPending}
+          onClick={() => run.mutate()}
+          title={`A quick yes / maybe / no and 0–10 from ${status.prescreen.model}, free`}
+        >
+          {label.toLowerCase()}
+        </button>
+        <ErrorText error={run.error} />
+      </>
+    );
   return (
     <>
       <Button
@@ -247,11 +275,7 @@ function PrescreenButton({ row: r, onChanged }: { row: ApplicationRow; onChanged
         onClick={() => run.mutate()}
         title={`A quick yes / maybe / no and 0–10 from ${status.prescreen.model}, before you pay for a fit score`}
       >
-        {run.isPending
-          ? 'Pre-screening…'
-          : r.prescreenVerdict
-            ? 'Pre-screen again'
-            : 'Pre-screen · free'}
+        {label}
       </Button>
       <ErrorText error={run.error} />
     </>
@@ -334,6 +358,7 @@ function Scored({
             <span>{metaLine(r).join(' · ')}</span>
             <WatchlistChips row={r} />
             <JobLinks row={r} />
+            <PrescreenButton row={r} onChanged={onChanged} link />
           </div>
         </div>
         <Verdict
