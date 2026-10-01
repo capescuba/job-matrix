@@ -8,9 +8,9 @@ import { createApplication, getApplicationDetail, listApplications } from '../ap
 import { updateProfile } from '../resume.ts';
 import { getSettings } from '../settings.ts';
 import { buildPrescreenPrompt, type PrescreenResult } from './prescreen.ts';
-import { runCrawl, stopCrawlSchedule } from './run.ts';
+import { runCrawl, searchProgress, stopCrawlSchedule } from './run.ts';
 import { fakeWeb } from './testWeb.ts';
-import { addSource, listFiltered } from './watchlist.ts';
+import { addSearch, addSource, listFiltered } from './watchlist.ts';
 
 type Answer = PrescreenResult | Error;
 
@@ -240,6 +240,50 @@ describe('checking the watchlist with a pre-screen', () => {
     const r = await runCrawl(db, { fetchFn: f, prescreen: null });
     expect(r).toMatchObject({ screened: 0, added: 1 });
     expect(verdicts()['Staff Technical Program Manager, Compute']).toBe('yes');
+  });
+});
+
+describe('a saved search being sorted', () => {
+  it('says which job the pre-screen is on, for the side panel, and clears when done', async () => {
+    const seen: string[] = [];
+    const { screener } = fakeScreener((title) => {
+      const [p] = searchProgress();
+      seen.push(`${p!.checking}/${p!.matched} +${p!.added} -${p!.filtered}`);
+      return title.includes('Policy') ? no : yes;
+    });
+    const token = 't'.repeat(48);
+    const app = buildApp(db, {
+      extensionToken: token,
+      fetchFn: fakeWeb(),
+      crawl: { prescreen: screener, prescreenGapMs: 0 },
+    });
+    const s = addSearch(db, {
+      url: 'https://www.ziprecruiter.com/jobs-search?search=technical+program+manager&location=San+Francisco%2C+CA',
+    });
+    const listing = (n: number, title: string) => ({
+      url: `https://www.ziprecruiter.com/jobs-search?lk=${n}`,
+      title,
+      company: `Co ${n}`,
+      location: 'San Francisco, CA',
+      snippet: 'Lead programs across teams.',
+    });
+    const r = await app.inject({
+      method: 'POST',
+      url: `/api/crawl/searches/${s.id}/results`,
+      headers: { 'x-jm-token': token },
+      payload: {
+        listings: [
+          listing(1, 'Staff Technical Program Manager'),
+          listing(2, 'Senior Program Manager, Policy'),
+          listing(3, 'Technical Program Manager, Infra'),
+        ],
+      },
+    });
+    expect(r.json()).toMatchObject({ matched: 3, added: 2, filtered: 1 });
+    expect(seen).toEqual(['1/3 +0 -0', '2/3 +1 -0', '3/3 +1 -1']);
+    expect(searchProgress()).toEqual([]);
+    const status = (await app.inject({ url: '/api/crawl/status' })).json();
+    expect(status.searching).toEqual([]);
   });
 });
 

@@ -136,7 +136,26 @@ interface Origin {
   note: string;
   /** Whether the server can read the posting itself (not on sites that block it). */
   fetchable: boolean;
+  /** Called as each job with a watched title is taken up: which one (1-based) of how many. */
+  onJob?: (n: number, of: number) => void;
 }
+
+/**
+ * A saved search's listings being sorted right now (reading postings, the pre-screen): the
+ * extension waits on this for minutes, so the side panel and the page show how far it has got.
+ */
+export interface SearchProgress {
+  searchId: number;
+  label: string;
+  listings: number;
+  /** Listings with a title you watch for, and which of them is being checked now. */
+  matched: number;
+  checking: number;
+  added: number;
+  filtered: number;
+}
+const searching = new Map<number, SearchProgress>();
+export const searchProgress = () => [...searching.values()];
 
 /** A found job, with the company it is at and (for searches) the snippet the results page showed. */
 export type FoundJob = BoardJob & { company: string; snippet?: string | null };
@@ -318,7 +337,8 @@ async function judge(
   let added = 0;
   counts.seen += jobs.length;
   counts.matched += watched.length;
-  for (const job of watched) {
+  for (const [i, job] of watched.entries()) {
+    origin.onJob?.(i + 1, watched.length);
     const before = known.get(job.url);
     if (before && !UNDECIDED.has(before)) continue;
     // Not yet counted as filtered out by an earlier check.
@@ -584,12 +604,29 @@ export async function ingestSearch(
       // Blocked or gone: skipped this time, tried again on the next run.
     }
   }
+  const live: SearchProgress = {
+    searchId,
+    label: search.label,
+    listings: jobs.length,
+    matched: 0,
+    checking: 0,
+    added: 0,
+    filtered: 0,
+  };
+  searching.set(searchId, live);
   const { watched } = await judge(check, jobs, {
     searchId,
     note: `Found by your saved search “${search.label}”`,
     // LinkedIn and Dice postings can be read by the server; the other sites block it.
     fetchable: search.site === 'linkedin' || search.site === 'dice',
-  });
+    onJob: (n, of) =>
+      Object.assign(live, {
+        matched: of,
+        checking: n,
+        added: counts.added,
+        filtered: counts.filtered,
+      }),
+  }).finally(() => searching.delete(searchId));
   db.update(crawlSearches)
     .set({
       lastRunAt: now,

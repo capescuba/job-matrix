@@ -303,7 +303,11 @@ function searchStrip() {
       ? `<div class="row"><span class="grow">Reading job descriptions (${r.reading.index} of ${r.reading.total})…</span></div>`
       : r.current === 'job descriptions'
         ? `<div class="row"><span class="grow">Checking for missing job descriptions…</span></div>`
-        : `<div class="row"><span class="grow">Searching <strong>${esc(r.current ?? '…')}</strong> (${r.index} of ${r.total})…</span></div>`
+        : `<div class="row"><span class="grow">Searching <strong>${esc(r.current ?? '…')}</strong> (${r.index} of ${r.total})…${
+            r.server?.matched
+              ? `<br><span class="muted small">Pre-screening ${r.server.checking} of ${r.server.matched} matching · ${r.server.added} added · ${r.server.filtered} filtered out</span>`
+              : ''
+          }</span></div>`
     : `<div class="row"><span class="grow">Done: ${added} new ${added === 1 ? 'job' : 'jobs'} in the inbox${r.problem ? ` <span class="warn">${esc(r.problem)}</span>` : ''}</span>
          ${added ? '<button class="primary" data-action="open" data-path="/screening?from=watchlist">See them</button>' : ''}
          <button class="link small" data-action="run-dismiss" title="Close">✕</button></div>`;

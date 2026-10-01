@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { parseLooseJson } from './json.ts';
-import { OpenAICompatProvider, RateLimitError } from './openaiCompat.ts';
+import { OpenAICompatProvider, RateLimitError, retryAfter } from './openaiCompat.ts';
 
 const schema = z.object({ verdict: z.enum(['yes', 'maybe', 'no']), reason: z.string() });
 
@@ -115,6 +115,15 @@ describe('OpenAICompatProvider', () => {
     });
     const second = await p.completeStructured({ system: 's', prompt: 'p', schema }).catch((e) => e);
     expect(second.retryAfterSeconds).toBeNull();
+  });
+
+  it('reads the wait from the message when there is no Retry-After header (Groq TPM)', () => {
+    const groq =
+      'Rate limit reached for model `openai/gpt-oss-120b` on tokens per minute (TPM): Limit 8000, Used 5288, Requested 3277. Please try again in 4.2375s.';
+    expect(retryAfter(null, groq)).toBe(5);
+    expect(retryAfter(null, 'Please try again in 1m12.5s')).toBe(73);
+    expect(retryAfter('7', groq)).toBe(7);
+    expect(retryAfter(null, 'Daily limit')).toBeNull();
   });
 
   it('a model without JSON mode is asked again without it', async () => {

@@ -19,6 +19,20 @@ export class RateLimitError extends LLMError {
   }
 }
 
+/**
+ * Seconds to wait before trying again: the Retry-After header, else the wait the message names
+ * (Groq leaves the header out of tokens-per-minute limits: "Please try again in 4.2375s",
+ * "in 1m12.5s"). Null when neither says.
+ */
+export function retryAfter(header: string | null, message: string): number | null {
+  const h = Number(header);
+  if (header && Number.isFinite(h) && h > 0) return h;
+  const m = message.match(/try again in\s+(?:(\d+)m)?\s*(?:([\d.]+)s)?/i);
+  if (!m || (!m[1] && !m[2])) return null;
+  const s = Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0);
+  return s > 0 ? Math.ceil(s) : null;
+}
+
 interface ChatReply {
   model?: string;
   choices?: { message?: { content?: string | null }; finish_reason?: string | null }[];
@@ -80,10 +94,9 @@ export class OpenAICompatProvider implements LLMProvider {
       text.slice(0, 300) ??
       '';
     if (res.status === 429) {
-      const after = Number(res.headers.get('retry-after'));
       throw new RateLimitError(
         `${this.name} rate limit reached: ${detail}`.trim(),
-        Number.isFinite(after) && after > 0 ? after : null,
+        retryAfter(res.headers.get('retry-after'), detail),
       );
     }
     // A model the account can't use: say what to do, not just the code.
