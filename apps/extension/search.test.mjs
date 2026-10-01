@@ -149,13 +149,22 @@ describe('saved-search progress for the side panel', () => {
     expect(last).toMatchObject({ running: false, current: null });
     expect(last.finishedAt).toBeGreaterThan(0);
     expect(last.results).toEqual([
-      { label: 'LinkedIn', read: 1, matched: 1, added: 1, filtered: 0, problem: null },
+      {
+        label: 'LinkedIn',
+        read: 1,
+        matched: 1,
+        added: 1,
+        filtered: 0,
+        seenBefore: 0,
+        problem: null,
+      },
       {
         label: 'Indeed',
         read: 0,
         matched: 0,
         added: 0,
         filtered: 0,
+        seenBefore: 0,
         problem: 'The site asked for a robot check.',
       },
     ]);
