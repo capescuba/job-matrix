@@ -717,25 +717,47 @@ export function embeddedJobId(u: URL): { ats: 'ashby' | 'greenhouse'; id: string
   return null;
 }
 
+/**
+ * Board names a careers site's address suggests, for pages that don't name their board:
+ * careers.nebius.com → "nebius"; jobs.acme-robotics.com → "acme-robotics", "acmerobotics".
+ */
+export function boardGuesses(host: string): string[] {
+  const labels = host.toLowerCase().split('.');
+  const twoLevelTld = /^(co|com|org|net|ac)\.[a-z]{2}$/.test(labels.slice(-2).join('.'));
+  const out = labels
+    .slice(0, twoLevelTld ? -2 : -1)
+    .filter((l) => !/^(www\d*|careers?|jobs?|apply|work|join|hiring|talent|en|us)$/.test(l))
+    .flatMap((l) => [l, l.replace(/-/g, '')]);
+  return [...new Set(out)].slice(0, 3);
+}
+
 async function embedded(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   const job = embeddedJobId(u);
   if (!job) return null;
   const html = await getText(f, u.toString());
-  if (job.ats === 'ashby') {
-    const org = html.match(/jobs\.ashbyhq\.com\/([\w.-]+)\/embed/i)?.[1];
-    if (!org) return null;
-    const r = await ashby(f, new URL(`https://jobs.ashbyhq.com/${org}/${job.id}`));
-    return r && { ...r, via: `Ashby API (embedded on ${u.hostname})` };
+  // The board the page embeds, else the ones its address suggests (Nebius builds its own job
+  // list, so the page never names its board "nebius").
+  const named =
+    job.ats === 'ashby'
+      ? html.match(/jobs\.ashbyhq\.com\/([\w.-]+)\/embed/i)?.[1]
+      : html.match(
+          /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/embed\/job_board(?:\/js)?\?for=([\w-]+)/i,
+        )?.[1];
+  for (const board of named ? [named] : boardGuesses(u.hostname)) {
+    const r =
+      job.ats === 'ashby'
+        ? await ashby(f, new URL(`https://jobs.ashbyhq.com/${board}/${job.id}`)).catch(() => null)
+        : await greenhouse(
+            f,
+            new URL(`https://job-boards.greenhouse.io/${board}/jobs/${job.id}`),
+          ).catch(() => null);
+    if (r)
+      return {
+        ...r,
+        via: `${job.ats === 'ashby' ? 'Ashby' : 'Greenhouse'} API (embedded on ${u.hostname})`,
+      };
   }
-  const board = html.match(
-    /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/embed\/job_board(?:\/js)?\?for=([\w-]+)/i,
-  )?.[1];
-  if (!board) return null;
-  const r = await greenhouse(
-    f,
-    new URL(`https://job-boards.greenhouse.io/${board}/jobs/${job.id}`),
-  );
-  return r && { ...r, via: `Greenhouse API (embedded on ${u.hostname})` };
+  return null;
 }
 
 export async function fetchJobPosting(url: string, f: FetchFn = fetch): Promise<FetchedJob> {
