@@ -32,6 +32,20 @@ describe('sourceFromUrl', () => {
         boardUrl: 'https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite',
       },
     ],
+    [
+      // The search you pasted keeps its place; the keywords are the titles you watch for.
+      'https://www.amazon.jobs/en/search?base_query=technical+program&loc_query=San+Francisco+Bay+Area%2C+CA%2C+United+States&latitude=&longitude=&loc_group_id=san-francisco-bay-area&invalid_location=false&country=&city=&region=&county=',
+      {
+        kind: 'amazon',
+        slug: 'loc_group_id=san-francisco-bay-area&loc_query=San+Francisco+Bay+Area%2C+CA%2C+United+States',
+        boardUrl:
+          'https://www.amazon.jobs/en/search?loc_group_id=san-francisco-bay-area&loc_query=San+Francisco+Bay+Area%2C+CA%2C+United+States',
+      },
+    ],
+    [
+      'https://www.amazon.jobs/en/jobs/10562876/technical-program-management',
+      { kind: 'amazon', slug: 'anywhere', boardUrl: 'https://www.amazon.jobs/en/search' },
+    ],
   ])('%s', (url, ref) => {
     expect(sourceFromUrl(url)).toEqual(ref);
   });
@@ -53,7 +67,7 @@ describe('resolveSource', () => {
 
   it('says so when there is no board to find', async () => {
     await expect(resolveSource('https://www.nothing.example/careers', fakeWeb())).rejects.toThrow(
-      /Couldn't find a Greenhouse, Ashby, Lever or Workday job board/,
+      /Couldn't find a Greenhouse, Ashby, Lever, Workday or Amazon jobs board/,
     );
   });
 });
@@ -111,6 +125,66 @@ describe('listBoard', () => {
     await expect(listBoard(sourceFromUrl('https://jobs.lever.co/nosuch')!, f)).rejects.toThrow(
       /Lever has no board called "nosuch"/,
     );
+  });
+
+  it('Amazon: searches each watched title in your place, newest first, descriptions included', async () => {
+    const LONG = 'You will lead programs across teams. '.repeat(10);
+    const listing = (id: string, title: string) => ({
+      id_icims: id,
+      title,
+      company_name: 'Amazon.com Services LLC',
+      job_path: `/en/jobs/${id}/x`,
+      normalized_location: 'San Diego, California, USA',
+      locations: [
+        JSON.stringify({ normalizedLocation: 'San Diego, California, USA', type: 'ONSITE' }),
+        JSON.stringify({ normalizedLocation: 'Sunnyvale, California, USA', type: 'ONSITE' }),
+      ],
+      posted_date: 'September 29, 2026',
+      description: `<p>${LONG}</p>`,
+      basic_qualifications: '- 5+ years of program management',
+      preferred_qualifications:
+        'The base pay for this position ranges from $136,000/year in our lowest geographic market up to $212,800/year in our highest geographic market.',
+      job_schedule_type: 'full-time',
+    });
+    const calls: URL[] = [];
+    const f = (async (input: string | URL | Request) => {
+      const u = new URL(String(input));
+      calls.push(u);
+      const jobs =
+        u.searchParams.get('base_query') === 'technical program'
+          ? [
+              listing('1', 'Sr. Technical Program Manager'),
+              listing('2', 'Technical Program Manager II'),
+            ]
+          : [listing('1', 'Sr. Technical Program Manager')];
+      return new Response(JSON.stringify({ hits: jobs.length, jobs }));
+    }) as typeof fetch;
+    const jobs = await listBoard(
+      sourceFromUrl(
+        'https://www.amazon.jobs/en/search?base_query=tpm&loc_group_id=san-francisco-bay-area',
+      )!,
+      f,
+      { keywords: ['technical program', 'program manager'] },
+    );
+    expect(calls.map((u) => u.pathname)).toEqual(['/en/search.json', '/en/search.json']);
+    expect(Object.fromEntries(calls[0]!.searchParams)).toMatchObject({
+      base_query: 'technical program',
+      loc_group_id: 'san-francisco-bay-area',
+      sort: 'recent',
+    });
+    expect(jobs).toHaveLength(2); // job 1 came back from both searches, kept once
+    expect(jobs[0]).toMatchObject({
+      url: 'https://www.amazon.jobs/en/jobs/1/x',
+      title: 'Sr. Technical Program Manager',
+      location: 'San Diego, California, USA | Sunnyvale, California, USA',
+      remoteType: 'Onsite',
+      salaryMin: 136_000,
+      salaryMax: 212_800,
+      employmentType: 'full-time',
+      postedAt: '2026-09-29',
+    });
+    expect(jobs[0]!.descriptionText).toContain(`Basic qualifications
+- 5+ years`);
   });
 
   it('Workday: searches for each watched title; titles and places only', async () => {
