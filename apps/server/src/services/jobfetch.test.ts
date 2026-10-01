@@ -176,6 +176,41 @@ describe('fetchJobPosting', () => {
     ).toMatch(/FILLED/);
   });
 
+  it('reads amazon.jobs postings through the site search, qualifications included', async () => {
+    const hit = {
+      id_icims: '10562876',
+      title: 'Technical Program Management',
+      company_name: 'Amazon.com Services LLC',
+      normalized_location: 'Sunnyvale, California, USA',
+      posted_date: 'September 28, 2026',
+      description: `<p>${LONG}</p>`,
+      basic_qualifications: '- 7+ years of working directly with engineering teams experience',
+      preferred_qualifications:
+        '- Experience with consumer electronics<br/><br/>The base pay for this position ranges from $136,000/year in our lowest geographic market up to $212,800/year in our highest geographic market.',
+    };
+    const { f, calls } = fakeFetch({
+      'https://www.amazon.jobs/en/search.json': {
+        body: JSON.stringify({ hits: 2, jobs: [{ ...hit, id_icims: '999' }, hit] }),
+      },
+    });
+    const job = await fetchJobPosting(
+      'https://www.amazon.jobs/en/jobs/10562876/technical-program-management',
+      f,
+    );
+    expect(calls[0]).toContain('base_query=10562876');
+    expect(job).toMatchObject({
+      title: 'Technical Program Management',
+      company: 'Amazon',
+      location: 'Sunnyvale, California, USA',
+      posted: { date: '2026-09-28', approx: false },
+      salaryMin: 136_000,
+      salaryMax: 212_800,
+      via: 'Amazon jobs API',
+    });
+    expect(job.descriptionText).toContain('Basic qualifications\n- 7+ years');
+    expect(job.descriptionText).toContain('Preferred qualifications\n- Experience with consumer');
+  });
+
   it('passes the page title along when it falls back to page text', async () => {
     const { f } = fakeFetch({
       'https://careers.example.com/': {

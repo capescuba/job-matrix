@@ -448,6 +448,59 @@ async function walmart(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   });
 }
 
+/**
+ * amazon.jobs: the page has no job data and its text is mostly menus, but the site's own search
+ * (search.json) finds a job by its id with the description and both qualification lists.
+ */
+async function amazonJobs(f: FetchFn, u: URL): Promise<FetchedJob | null> {
+  const id = u.pathname.match(/\/jobs\/(\d+)/)?.[1];
+  if (!id) return null;
+  const q = new URLSearchParams({ base_query: id, result_limit: '10' });
+  const body = await getText(f, `https://www.amazon.jobs/en/search.json?${q}`, 'application/json');
+  let jobs: {
+    id_icims?: string;
+    title?: string;
+    company_name?: string;
+    normalized_location?: string;
+    location?: string;
+    posted_date?: string;
+    description?: string;
+    basic_qualifications?: string;
+    preferred_qualifications?: string;
+  }[];
+  try {
+    jobs = JSON.parse(body).jobs ?? [];
+  } catch {
+    return null;
+  }
+  // Not listed: it may have closed; the page itself says so.
+  const j = jobs.find((x) => x.id_icims === id);
+  if (!j?.description) return null;
+  const section = (heading: string, html?: string) =>
+    html?.trim() ? `\n\n${heading}\n${htmlToText(html)}` : '';
+  const place = j.normalized_location ?? j.location ?? null;
+  const descriptionText =
+    htmlToText(j.description) +
+    section('Basic qualifications', j.basic_qualifications) +
+    section('Preferred qualifications', j.preferred_qualifications);
+  // Amazon's pay line: "ranges from $136,000/year in our lowest geographic market up to
+  // $212,800/year in our highest" (many postings have none).
+  const pay = descriptionText.match(/from \$([\d,]+)\/year[^$]{0,160}?up to \$([\d,]+)\/year/i);
+  const dollars = (s?: string) => (s ? Number(s.replace(/,/g, '')) : null);
+  return finish({
+    title: j.title ? decodeEntities(j.title) : null,
+    // "Amazon.com Services LLC", "Amazon Web Services, Inc.", …: one company, except AWS.
+    company: /web services/i.test(j.company_name ?? '') ? 'Amazon Web Services' : 'Amazon',
+    location: place,
+    remoteType: remoteFrom(place),
+    descriptionText,
+    salaryMin: dollars(pay?.[1]),
+    salaryMax: dollars(pay?.[2]),
+    posted: exact(j.posted_date, 'Amazon jobs search (posted_date)'),
+    via: 'Amazon jobs API',
+  });
+}
+
 async function linkedin(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   const id =
     u.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d+)/)?.[1] ?? u.searchParams.get('currentJobId');
@@ -664,7 +717,9 @@ export async function fetchJobPosting(url: string, f: FetchFn = fetch): Promise<
             ? linkedin
             : h === 'careers.walmart.com'
               ? walmart
-              : null;
+              : h === 'www.amazon.jobs' || h === 'amazon.jobs'
+                ? amazonJobs
+                : null;
   if (!specific) {
     // A careers page embedding Ashby/Greenhouse: read the posting from the board, not the shell.
     if (embeddedJobId(u)) {
