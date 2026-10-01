@@ -426,7 +426,8 @@ describe('screening routes & inbox behaviour', () => {
       method: 'POST',
       url: `/api/applications/${b.applicationId}/activities`,
       payload: {
-        at: '2026-09-24',
+        // Today: "passed this week" counts the last 7 days.
+        at: new Date().toISOString().slice(0, 10),
         kind: 'Note',
         summary: 'Passed: 5 days onsite',
         setStatus: 'Passed',

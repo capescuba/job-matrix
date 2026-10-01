@@ -115,12 +115,13 @@ export function ScreeningCard({
             <Title row={r} onChanged={onChanged} />
             <span className="text-ink-3"> · </span>
             <span className="text-ink-2">{metaLine(r).join(' · ')}</span>
-            <WatchlistChips row={r} />
+            <WatchlistChips row={r} prescreen={false} />
             <span className="ml-2 inline-flex gap-x-2 text-xs">
               <JobLinks row={r} />
             </span>
           </div>
           {!r.hasDescription && <span className="text-xs text-warn">No description captured</span>}
+          <PrescreenRing row={r} />
           <PrescreenButton row={r} onChanged={onChanged} />
           {scoreButton}
           <Button variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
@@ -158,8 +159,15 @@ export function ScreeningCard({
  * Where the watchlist found this job, and the pre-screen's answer (its rough 0–10 match, with
  * the reason on hover). Jobs you added yourself show nothing.
  */
-export function WatchlistChips({ row: r }: { row: ApplicationRow }) {
-  if (!r.foundBy && !r.prescreenVerdict) return null;
+export function WatchlistChips({
+  row: r,
+  prescreen = true,
+}: {
+  row: ApplicationRow;
+  /** Off where the pre-screen has its own ring (unscored rows). */
+  prescreen?: boolean;
+}) {
+  if (!r.foundBy && !(prescreen && r.prescreenVerdict)) return null;
   return (
     <span className="ml-2 inline-flex flex-wrap items-center gap-1 align-middle text-xs">
       {r.foundBy && (
@@ -170,7 +178,7 @@ export function WatchlistChips({ row: r }: { row: ApplicationRow }) {
           Watchlist · {r.foundBy}
         </span>
       )}
-      {r.prescreenVerdict && (
+      {prescreen && r.prescreenVerdict && (
         <span
           className={cx(
             'rounded px-1.5 py-0.5',
@@ -187,6 +195,39 @@ export function WatchlistChips({ row: r }: { row: ApplicationRow }) {
         </span>
       )}
     </span>
+  );
+}
+
+/**
+ * The free pre-screen's 0–10 in a ring like the fit score's, so it reads at a glance on rows not
+ * scored yet. Dashed and coloured by its yes / maybe / no: a quick read, not the paid score.
+ */
+function PrescreenRing({ row: r }: { row: ApplicationRow }) {
+  if (!r.prescreenVerdict) return null;
+  const tone =
+    r.prescreenVerdict === 'yes'
+      ? 'border-good/70 text-good'
+      : r.prescreenVerdict === 'no'
+        ? 'border-bad/60 text-bad'
+        : 'border-warn/70 text-warn';
+  return (
+    <div
+      className="flex items-center gap-2"
+      title={`Pre-screen by ${r.prescreenModel}: ${r.prescreenReason ?? ''}`}
+    >
+      <div className="text-right text-xs leading-tight">
+        <div className="text-ink-3">Pre-screen</div>
+        <div className={tone}>{r.prescreenVerdict}</div>
+      </div>
+      <div
+        className={cx(
+          'flex size-10 shrink-0 items-center justify-center rounded-full border-2 border-dashed text-sm font-semibold tabular-nums',
+          tone,
+        )}
+      >
+        {r.prescreenScore != null ? formatScore(r.prescreenScore) : '–'}
+      </div>
+    </div>
   );
 }
 
