@@ -189,6 +189,7 @@ describe('results from the extension', () => {
     });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ seen: 3, matched: 2, added: 1, filtered: 1 });
+
     const inbox = listApplications(db).filter((a) => a.status === 'Screening');
     expect(inbox.map((a) => `${a.company} — ${a.title}`)).toEqual([
       'LinkedIn — Staff Technical Program Manager',
@@ -274,6 +275,35 @@ describe('results from the extension', () => {
     expect(r.statusCode).toBe(200);
     expect(getSearch(db, s.id).lastError).toBe('The site asked for a robot check.');
     expect(db.select().from(crawlLeads).all()).toEqual([]);
+  });
+
+  it('says how many matching jobs an earlier run had already decided', async () => {
+    const app = buildApp(db, {
+      extensionToken: TOKEN,
+      fetchFn: fakeWeb(),
+      crawl: { prescreen: null },
+    });
+    const s = addSearch(db, { url: LI_SEARCH });
+    const listings = [
+      {
+        url: 'https://www.linkedin.com/jobs/view/111/',
+        title: 'Staff Technical Program Manager',
+        company: 'LinkedIn',
+        location: 'Mountain View, CA (Hybrid)',
+      },
+      {
+        url: 'https://www.linkedin.com/jobs/view/222/',
+        title: 'Program Manager, Cyber Fund Operations',
+        company: 'Swoon',
+        location: 'San Francisco, CA (Hybrid)',
+        pay: '$35/hr - $38/hr',
+      },
+    ];
+    const first = await post(app, s.id, { listings });
+    expect(first.json()).toMatchObject({ matched: 2, added: 1, filtered: 1, seenBefore: 0 });
+    // The added one is skipped; the one the rules kept out is looked at again but not recounted.
+    const again = await post(app, s.id, { listings });
+    expect(again.json()).toMatchObject({ matched: 2, added: 0, filtered: 0, seenBefore: 2 });
   });
 
   it('only the extension may post results', async () => {

@@ -54,6 +54,8 @@ export interface CrawlProgress {
   matched: number;
   added: number;
   filtered: number;
+  /** Matching jobs an earlier check had already decided: skipped, or kept out by the rules again. */
+  seenBefore: number;
   /** Asked of the pre-screen model this check, and left waiting for it (rate limit, error). */
   screened: number;
   waiting: number;
@@ -64,7 +66,7 @@ export interface CrawlProgress {
 
 export type CrawlResult = Pick<
   CrawlProgress,
-  'boards' | 'seen' | 'matched' | 'added' | 'filtered' | 'screened' | 'waiting'
+  'boards' | 'seen' | 'matched' | 'added' | 'filtered' | 'seenBefore' | 'screened' | 'waiting'
 >;
 
 const idle = (): CrawlProgress => ({
@@ -75,6 +77,7 @@ const idle = (): CrawlProgress => ({
   matched: 0,
   added: 0,
   filtered: 0,
+  seenBefore: 0,
   screened: 0,
   waiting: 0,
   startedAt: null,
@@ -221,13 +224,14 @@ type Screened =
 /** What one check (or one saved search) found and did. */
 type Counts = Pick<
   CrawlProgress,
-  'seen' | 'matched' | 'added' | 'filtered' | 'screened' | 'waiting'
+  'seen' | 'matched' | 'added' | 'filtered' | 'seenBefore' | 'screened' | 'waiting'
 >;
 const noCounts = (): Counts => ({
   seen: 0,
   matched: 0,
   added: 0,
   filtered: 0,
+  seenBefore: 0,
   screened: 0,
   waiting: 0,
 });
@@ -340,7 +344,10 @@ async function judge(
   for (const [i, job] of watched.entries()) {
     origin.onJob?.(i + 1, watched.length);
     const before = known.get(job.url);
-    if (before && !UNDECIDED.has(before)) continue;
+    if (before && !UNDECIDED.has(before)) {
+      counts.seenBefore++;
+      continue;
+    }
     // Not yet counted as filtered out by an earlier check.
     const fresh = !before || before === 'waiting';
     const rule = prefilter(job, criteria, tracked);
@@ -348,6 +355,7 @@ async function judge(
       decide(db, job, origin, rule);
       known.set(job.url, rule.verdict);
       if (fresh) counts.filtered++;
+      else counts.seenBefore++;
       continue;
     }
     let note = origin.note;
@@ -386,6 +394,7 @@ async function judge(
           decide(db, job, origin, { ...s, verdict: 'no-ai' });
           known.set(job.url, 'no-ai');
           if (fresh) counts.filtered++;
+          else counts.seenBefore++;
           continue;
         }
         passed = { ...s, verdict: s.verdict };
@@ -497,6 +506,7 @@ async function run(
     matched: progress.matched,
     added: progress.added,
     filtered: progress.filtered,
+    seenBefore: progress.seenBefore,
     screened: progress.screened,
     waiting: progress.waiting,
   };

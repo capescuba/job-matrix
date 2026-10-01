@@ -284,7 +284,7 @@ export const RUN_KEY = 'jmSearchRun';
 
 /**
  * The run's progress, shared with the side panel: { running, total, index, current, results:
- * [{ label, read, matched, added, filtered, problem }], server: { matched, checking, added,
+ * [{ label, read, matched, added, filtered, seenBefore, problem }], server: { matched, checking, added,
  * filtered } while Job Matrix sorts a site's listings, reading: { index, total } while
  * descriptions are read, descriptions: { added, tried, problem }, startedAt, finishedAt }.
  */
@@ -304,6 +304,7 @@ const finished = (label, read, counts, problem) =>
         matched: counts?.matched ?? 0,
         added: counts?.added ?? 0,
         filtered: counts?.filtered ?? 0,
+        seenBefore: counts?.seenBefore ?? 0,
         problem: problem ?? null,
       },
     ],

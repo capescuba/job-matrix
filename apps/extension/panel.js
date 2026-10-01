@@ -288,7 +288,15 @@ function searchStrip() {
     .map((x) =>
       x.problem
         ? `<li><span class="warn">!</span><span><strong>${esc(x.label)}</strong> <span class="muted">${esc(x.problem)}</span></span></li>`
-        : `<li><span class="good">✓</span><span><strong>${esc(x.label)}</strong> <span class="muted">${x.read} read · ${x.matched} matching · ${x.added} added${x.filtered ? ` · ${x.filtered} filtered out` : ''}</span></span></li>`,
+        : `<li><span class="good">✓</span><span><strong>${esc(x.label)}</strong> <span class="muted">${[
+            `${x.read} read`,
+            x.matched < x.read && `${x.matched} matching`,
+            x.seenBefore && `${x.seenBefore} seen before`,
+            `${x.added} added`,
+            x.filtered && `${x.filtered} filtered out`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}</span></span></li>`,
     )
     .join('');
   const d = r.descriptions;
