@@ -129,6 +129,11 @@ describe('title/company without AI', () => {
       'Distinguished, Technical Program Manager',
       'Walmart',
     ],
+    [
+      'Technical Program Management - Job ID: 10562876 | Amazon.jobs',
+      'Technical Program Management',
+      'Amazon',
+    ],
     ['Careers page', 'Careers page', null],
   ])('%s', (title, t, c) => expect(parsePageTitle(title)).toEqual({ title: t, company: c }));
 

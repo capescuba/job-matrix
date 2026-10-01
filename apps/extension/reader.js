@@ -139,8 +139,12 @@ export function readPage(selectors) {
     if (!visible(el) || el.disabled || el.readOnly) continue;
     // Dropdowns built from text inputs (yes/no, visa, EEO questions) aren't written answers.
     if (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete')) continue;
+    // A site's chat assistant or search box ("Chat message input") isn't an application question.
+    if (el.closest('[role="dialog"][aria-label*="chat" i], [class*="chat" i], [id*="chat" i]'))
+      continue;
     const label = labelOf(el);
-    if (!label || label.length < 8 || SKIP.test(label)) continue;
+    if (!label || label.length < 8 || SKIP.test(label) || /\b(chat|search)\b/i.test(label))
+      continue;
     const isArea = el.tagName === 'TEXTAREA' || el.isContentEditable;
     const max = Number(el.getAttribute('maxlength')) || null;
     if (!isArea && !(ASK.test(label) && (!max || max >= 150))) continue;
@@ -266,7 +270,10 @@ export function startPicker(field) {
       sample: (el.innerText || el.textContent || '').trim().slice(0, 200),
       // How big the pick is: a one-line field that's long or multi-line is probably too big.
       chars: (el.innerText || el.textContent || '').trim().length,
-      lines: (el.innerText || '').trim().split('\n').filter((l) => l.trim()).length,
+      lines: (el.innerText || '')
+        .trim()
+        .split('\n')
+        .filter((l) => l.trim()).length,
     });
   };
   const key = (e) => {

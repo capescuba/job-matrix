@@ -139,6 +139,8 @@ export function parsePageTitle(pageTitle: string | null | undefined): {
 } {
   let t = decodeEntities(pageTitle ?? '')
     .replace(/^\(\d+\)\s*/, '') // "(3) " notification count
+    .replace(/\s*[-–—(|]?\s*(?:Job|Req(?:uisition)?)\s*(?:ID|#)\s*:?\s*[\w-]+\)?/i, '') // "- Job ID: 10562876"
+    .replace(/\b([A-Z][\w&-]*)\.(?:jobs|careers)\b/, '$1') // "Amazon.jobs" → "Amazon"
     .trim();
   if (!t) return { title: null, company: null };
   let m = t.match(/^(.+?) hiring (.+?)(?: in .+?)?(?:\s*\|\s*LinkedIn)?$/i); // "Acme hiring TPM in SF | LinkedIn"
