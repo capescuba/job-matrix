@@ -392,6 +392,8 @@ export const crawlSources = sqliteTable(
     /** Last check: open jobs on the board, and how many had a title you watch for. */
     lastCount: integer('last_count'),
     lastMatched: integer('last_matched'),
+    /** Last check: how many of its jobs went to the inbox. */
+    lastAdded: integer('last_added'),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('crawl_sources_board').on(t.kind, t.slug)],

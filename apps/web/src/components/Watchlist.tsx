@@ -297,6 +297,15 @@ export function WatchlistCompanies() {
     onSuccess: refresh,
   });
   const remove = useMutation({ mutationFn: api.removeCrawlSource, onSuccess: refresh });
+  // Check now for one company: its board alone, like a job site's Search now.
+  const status = useCrawlStatus();
+  const check = useMutation({
+    mutationFn: api.checkCrawlSource,
+    onSuccess: (s) => qc.setQueryData(['crawl-status'], s),
+  });
+  const p = status?.progress;
+  const checking = (s: SourceRow) =>
+    Boolean(p?.running && (!p.sourceIds || p.sourceIds.includes(s.id)));
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (url.trim()) add.mutate();
@@ -316,7 +325,7 @@ export function WatchlistCompanies() {
           {add.isPending ? 'Reading the board…' : 'Follow'}
         </Button>
       </form>
-      <ErrorText error={add.error ?? update.error ?? remove.error} />
+      <ErrorText error={add.error ?? update.error ?? remove.error ?? check.error} />
 
       {sources.length === 0 ? (
         <p className="mt-3 text-sm text-ink-3">
@@ -357,16 +366,31 @@ export function WatchlistCompanies() {
                 className="ml-auto text-xs text-ink-3"
                 title={s.lastCheckedAt ? `Checked ${when(s.lastCheckedAt)}` : undefined}
               >
-                {s.lastError ? (
+                {checking(s) ? (
+                  <span className="text-accent">
+                    Checking… {p!.matched} matching · {p!.added} added
+                  </span>
+                ) : s.lastError ? (
                   <span className="text-bad">{s.lastError}</span>
                 ) : s.lastCount == null ? (
                   'Not checked yet'
-                ) : s.kind === 'workday' || s.kind === 'amazon' ? (
-                  plural(s.lastMatched ?? 0, 'matching job')
                 ) : (
-                  `${s.lastMatched ?? 0} matching of ${s.lastCount}`
+                  <>
+                    {/* Workday and Amazon are searched for your titles, so all they return match. */}
+                    {s.kind === 'workday' || s.kind === 'amazon'
+                      ? plural(s.lastMatched ?? 0, 'matching job')
+                      : `${s.lastMatched ?? 0} matching of ${s.lastCount}`}
+                    {s.lastAdded != null && ` · ${s.lastAdded} added`} · {when(s.lastCheckedAt)}
+                  </>
                 )}
               </span>
+              <Button
+                onClick={() => check.mutate(s.id)}
+                disabled={check.isPending || Boolean(p?.running)}
+                title="Check this company's jobs now"
+              >
+                {checking(s) ? 'Checking…' : 'Check now'}
+              </Button>
               <button
                 className="px-1 text-ink-3 hover:text-bad"
                 title="Stop following"

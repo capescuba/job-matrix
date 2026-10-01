@@ -58,6 +58,8 @@ export interface CrawlProgress {
   screened: number;
   waiting: number;
   startedAt: string | null;
+  /** The companies this check is for; null = all you follow. */
+  sourceIds: number[] | null;
 }
 
 export type CrawlResult = Pick<
@@ -76,9 +78,11 @@ const idle = (): CrawlProgress => ({
   screened: 0,
   waiting: 0,
   startedAt: null,
+  sourceIds: null,
 });
 const progress: CrawlProgress = idle();
-let current: Promise<CrawlResult> | null = null;
+/** The check running now, and which companies it is for ("all", or their ids). */
+let current: { key: string; done: Promise<CrawlResult> } | null = null;
 
 export const crawlProgress = (): CrawlProgress => ({ ...progress });
 
@@ -301,11 +305,17 @@ function startCheck(db: Db, deps: CrawlDeps, counts: Counts): Check {
 
 /**
  * Sorts found jobs: those without a watched title are dropped; the rest go through the rules and
- * the pre-screen, then into the inbox or the filtered-out list. Returns the watched ones.
+ * the pre-screen, then into the inbox or the filtered-out list. Returns the watched ones, and
+ * how many of them went to the inbox.
  */
-async function judge(c: Check, jobs: FoundJob[], origin: Origin): Promise<FoundJob[]> {
+async function judge(
+  c: Check,
+  jobs: FoundJob[],
+  origin: Origin,
+): Promise<{ watched: FoundJob[]; added: number }> {
   const { db, f, criteria, tracked, known, pre, counts } = c;
   const watched = jobs.filter((j) => titleWatched(j.title, criteria.include));
+  let added = 0;
   counts.seen += jobs.length;
   counts.matched += watched.length;
   for (const job of watched) {
@@ -379,6 +389,7 @@ async function judge(c: Check, jobs: FoundJob[], origin: Origin): Promise<FoundJ
       });
       if (!r.existing) {
         counts.added++;
+        added++;
         logEvent('crawl.added', `Added ${job.company} — ${job.title} to the inbox`, {
           applicationId: r.applicationId,
           url: job.url,
@@ -389,12 +400,12 @@ async function judge(c: Check, jobs: FoundJob[], origin: Origin): Promise<FoundJ
       known.set(job.url, 'error');
     }
   }
-  return watched;
+  return { watched, added };
 }
 
 async function checkBoard(c: Check, source: SourceRow) {
   const jobs = await listBoard(sourceRef(source), c.f, { keywords: c.criteria.include });
-  const watched = await judge(
+  const { watched, added } = await judge(
     c,
     jobs.map((j) => ({ ...j, company: source.companyName })),
     {
@@ -410,17 +421,25 @@ async function checkBoard(c: Check, source: SourceRow) {
       lastError: null,
       lastCount: jobs.length,
       lastMatched: watched.length,
+      lastAdded: added,
     })
     .where(eq(crawlSources.id, source.id))
     .run();
 }
 
-async function run(db: Db, deps: CrawlDeps, trigger: string): Promise<CrawlResult> {
-  const sources = listSources(db).filter((s) => s.enabled);
+async function run(
+  db: Db,
+  deps: CrawlDeps,
+  trigger: string,
+  sourceIds: number[] | null,
+): Promise<CrawlResult> {
+  // Companies you asked for by name are checked even while paused.
+  const sources = listSources(db).filter((s) => (sourceIds ? sourceIds.includes(s.id) : s.enabled));
   Object.assign(progress, idle(), {
     running: true,
     boards: sources.length,
     startedAt: new Date().toISOString(),
+    sourceIds,
   });
   logEvent('crawl.start', `Checking ${sources.length} watched job boards`, {
     boards: sources.length,
@@ -486,17 +505,29 @@ async function run(db: Db, deps: CrawlDeps, trigger: string): Promise<CrawlResul
   return result;
 }
 
-/** Checks every followed board. One check at a time; a second call joins the one running. */
+/**
+ * Checks every followed board, or only `sourceIds`. One check at a time: asking for the same
+ * thing again joins the one running; asking for something else waits for it, then runs.
+ */
 export function runCrawl(
   db: Db,
   deps: CrawlDeps = {},
-  opts: { trigger?: string } = {},
+  opts: { trigger?: string; sourceIds?: number[] } = {},
 ): Promise<CrawlResult> {
-  current ??= run(db, deps, opts.trigger ?? 'manual').finally(() => {
+  const ids = opts.sourceIds ? [...new Set(opts.sourceIds)].sort((a, b) => a - b) : null;
+  const key = ids ? ids.join(',') : 'all';
+  if (current?.key === key) return current.done;
+  const start = () => run(db, deps, opts.trigger ?? 'manual', ids);
+  // Nothing running: start now, so the status returned straight after says it's running.
+  const done: Promise<CrawlResult> = (
+    current ? current.done.catch(() => undefined).then(start) : start()
+  ).finally(() => {
+    if (current?.done !== done) return;
     current = null;
     progress.running = false;
   });
-  return current;
+  current = { key, done };
+  return done;
 }
 
 /**
@@ -553,7 +584,7 @@ export async function ingestSearch(
       // Blocked or gone: skipped this time, tried again on the next run.
     }
   }
-  const watched = await judge(check, jobs, {
+  const { watched } = await judge(check, jobs, {
     searchId,
     note: `Found by your saved search “${search.label}”`,
     // LinkedIn and Dice postings can be read by the server; the other sites block it.
