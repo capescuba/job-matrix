@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/client.ts';
 import { pageContext } from './extension.ts';
-import { embeddedJobId, fetchJobPosting } from './jobfetch.ts';
+import { boardGuesses, embeddedJobId, fetchJobPosting } from './jobfetch.ts';
 import { normalizeUrl } from './screening.ts';
 
 const JID = '44ecb2e4-1ad5-4c2d-a4bb-6c401d1d9d37';
@@ -87,6 +87,34 @@ describe('careers pages that embed a job board', () => {
       company: 'Acme',
       via: 'Greenhouse API (embedded on www.acme.com)',
     });
+  });
+
+  it('tries the board the address suggests when the page builds its own job list', async () => {
+    const f = fakeWeb({
+      // Nebius lists its jobs itself: no embed script, only links back with ?gh_jid=.
+      'https://careers.nebius.com/': {
+        body: `<html><head><title>Find your role: Open positions</title></head><body><main>${'<a href="?gh_jid=1">Account Executive</a> '.repeat(40)}</main></body></html>`,
+      },
+      'https://boards-api.greenhouse.io/v1/boards/nebius/jobs/4817210101': {
+        body: JSON.stringify({
+          title: 'Senior Technical Program Manager',
+          content: `&lt;p&gt;${'Drive data center build-outs across teams. '.repeat(8)}&lt;/p&gt;`,
+          company_name: 'Nebius',
+        }),
+      },
+    });
+    const job = await fetchJobPosting('https://careers.nebius.com/?gh_jid=4817210101', f);
+    expect(job).toMatchObject({
+      title: 'Senior Technical Program Manager',
+      company: 'Nebius',
+      via: 'Greenhouse API (embedded on careers.nebius.com)',
+    });
+  });
+
+  it('guesses board names from the careers address', () => {
+    expect(boardGuesses('careers.nebius.com')).toEqual(['nebius']);
+    expect(boardGuesses('jobs.acme-robotics.com')).toEqual(['acme-robotics', 'acmerobotics']);
+    expect(boardGuesses('www.example.co.uk')).toEqual(['example']);
   });
 
   it('falls back to reading the page when the board can’t be found', async () => {
