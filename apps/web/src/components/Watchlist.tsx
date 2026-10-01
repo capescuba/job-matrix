@@ -25,6 +25,7 @@ const BOARD: Record<SourceRow['kind'], string> = {
   ashby: 'Ashby',
   lever: 'Lever',
   workday: 'Workday',
+  amazon: 'amazon.jobs',
 };
 
 const when = (iso: string | null) =>
@@ -319,8 +320,8 @@ export function WatchlistCompanies() {
 
       {sources.length === 0 ? (
         <p className="mt-3 text-sm text-ink-3">
-          No companies yet. Greenhouse, Ashby, Lever and Workday boards can be followed. New jobs
-          with a title you look for are added to the Screening inbox.
+          No companies yet. Greenhouse, Ashby, Lever and Workday boards and Amazon jobs searches can
+          be followed. New jobs with a title you look for are added to the Screening inbox.
         </p>
       ) : (
         <ul className="mt-3 divide-y divide-border text-sm">
@@ -360,7 +361,7 @@ export function WatchlistCompanies() {
                   <span className="text-bad">{s.lastError}</span>
                 ) : s.lastCount == null ? (
                   'Not checked yet'
-                ) : s.kind === 'workday' ? (
+                ) : s.kind === 'workday' || s.kind === 'amazon' ? (
                   plural(s.lastMatched ?? 0, 'matching job')
                 ) : (
                   `${s.lastMatched ?? 0} matching of ${s.lastCount}`

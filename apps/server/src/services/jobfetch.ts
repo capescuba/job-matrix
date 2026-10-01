@@ -448,54 +448,96 @@ async function walmart(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   });
 }
 
+/** One job as amazon.jobs's search lists it (the fields Job Matrix reads). */
+export interface AmazonJob {
+  id_icims?: string;
+  title?: string;
+  company_name?: string;
+  normalized_location?: string;
+  location?: string;
+  /** JSON strings, one per place: { normalizedLocation, type: "ONSITE" | … }. */
+  locations?: string[];
+  posted_date?: string;
+  description?: string;
+  basic_qualifications?: string;
+  preferred_qualifications?: string;
+  job_path?: string;
+  job_schedule_type?: string;
+}
+
+/** amazon.jobs's own search (search.json): what its search page shows, as JSON. */
+export async function amazonSearch(f: FetchFn, params: URLSearchParams) {
+  const r = await getJson<{ hits?: number; jobs?: AmazonJob[] }>(
+    f,
+    `https://www.amazon.jobs/en/search.json?${params}`,
+  );
+  return { hits: r.hits ?? 0, jobs: r.jobs ?? [] };
+}
+
+/**
+ * An amazon.jobs listing in Job Matrix's terms: the description with both qualification lists,
+ * every place it's open in, and pay from Amazon's "from $X/year … up to $Y/year" line (many
+ * postings have none).
+ */
+export function amazonJobFields(j: AmazonJob) {
+  const section = (heading: string, html?: string) =>
+    html?.trim() ? `\n\n${heading}\n${htmlToText(html)}` : '';
+  const descriptionText = j.description
+    ? htmlToText(j.description) +
+      section('Basic qualifications', j.basic_qualifications) +
+      section('Preferred qualifications', j.preferred_qualifications)
+    : null;
+  const places = (j.locations ?? []).map((raw) => {
+    try {
+      return JSON.parse(raw) as { normalizedLocation?: string; type?: string };
+    } catch {
+      return {};
+    }
+  });
+  const location =
+    joinPlaces(places.map((p) => p.normalizedLocation)) ??
+    j.normalized_location ??
+    j.location ??
+    null;
+  const pay = descriptionText?.match(/from \$([\d,]+)\/year[^$]{0,160}?up to \$([\d,]+)\/year/i);
+  const dollars = (s?: string) => (s ? Number(s.replace(/,/g, '')) : null);
+  return {
+    title: j.title ? decodeEntities(j.title).trim() : null,
+    // "Amazon.com Services LLC", "Amazon Web Services, Inc.", …: one company, except AWS.
+    company: /web services/i.test(j.company_name ?? '') ? 'Amazon Web Services' : 'Amazon',
+    url: j.job_path ? `https://www.amazon.jobs${j.job_path}` : null,
+    location,
+    remoteType: remoteFrom(places.map((p) => p.type).join(' ')) ?? remoteFrom(location),
+    descriptionText,
+    salaryMin: dollars(pay?.[1]),
+    salaryMax: dollars(pay?.[2]),
+    postedDate: toDate(j.posted_date),
+  };
+}
+
 /**
  * amazon.jobs: the page has no job data and its text is mostly menus, but the site's own search
- * (search.json) finds a job by its id with the description and both qualification lists.
+ * finds a job by its id.
  */
 async function amazonJobs(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   const id = u.pathname.match(/\/jobs\/(\d+)/)?.[1];
   if (!id) return null;
-  const q = new URLSearchParams({ base_query: id, result_limit: '10' });
-  const body = await getText(f, `https://www.amazon.jobs/en/search.json?${q}`, 'application/json');
-  let jobs: {
-    id_icims?: string;
-    title?: string;
-    company_name?: string;
-    normalized_location?: string;
-    location?: string;
-    posted_date?: string;
-    description?: string;
-    basic_qualifications?: string;
-    preferred_qualifications?: string;
-  }[];
-  try {
-    jobs = JSON.parse(body).jobs ?? [];
-  } catch {
-    return null;
-  }
+  const { jobs } = await amazonSearch(
+    f,
+    new URLSearchParams({ base_query: id, result_limit: '10' }),
+  );
   // Not listed: it may have closed; the page itself says so.
   const j = jobs.find((x) => x.id_icims === id);
   if (!j?.description) return null;
-  const section = (heading: string, html?: string) =>
-    html?.trim() ? `\n\n${heading}\n${htmlToText(html)}` : '';
-  const place = j.normalized_location ?? j.location ?? null;
-  const descriptionText =
-    htmlToText(j.description) +
-    section('Basic qualifications', j.basic_qualifications) +
-    section('Preferred qualifications', j.preferred_qualifications);
-  // Amazon's pay line: "ranges from $136,000/year in our lowest geographic market up to
-  // $212,800/year in our highest" (many postings have none).
-  const pay = descriptionText.match(/from \$([\d,]+)\/year[^$]{0,160}?up to \$([\d,]+)\/year/i);
-  const dollars = (s?: string) => (s ? Number(s.replace(/,/g, '')) : null);
+  const a = amazonJobFields(j);
   return finish({
-    title: j.title ? decodeEntities(j.title) : null,
-    // "Amazon.com Services LLC", "Amazon Web Services, Inc.", …: one company, except AWS.
-    company: /web services/i.test(j.company_name ?? '') ? 'Amazon Web Services' : 'Amazon',
-    location: place,
-    remoteType: remoteFrom(place),
-    descriptionText,
-    salaryMin: dollars(pay?.[1]),
-    salaryMax: dollars(pay?.[2]),
+    title: a.title,
+    company: a.company,
+    location: a.location,
+    remoteType: a.remoteType,
+    descriptionText: a.descriptionText!,
+    salaryMin: a.salaryMin,
+    salaryMax: a.salaryMax,
     posted: exact(j.posted_date, 'Amazon jobs search (posted_date)'),
     via: 'Amazon jobs API',
   });

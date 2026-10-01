@@ -2,9 +2,12 @@
  * Reading a company's whole job board. Greenhouse, Ashby and Lever publish every open job as
  * JSON, descriptions included, so one request covers a company. Workday only answers searches,
  * so it is asked for each title you watch for and returns titles and places (no descriptions).
+ * Amazon is searched the same way, in the place you chose, and does return descriptions.
  */
 import {
   JobFetchError,
+  amazonJobFields,
+  amazonSearch,
   getJson,
   getText,
   htmlToText,
@@ -18,7 +21,7 @@ import {
 } from '../jobfetch.ts';
 import { normalizeUrl } from '../screening.ts';
 
-export const BOARD_KINDS = ['greenhouse', 'ashby', 'lever', 'workday'] as const;
+export const BOARD_KINDS = ['greenhouse', 'ashby', 'lever', 'workday', 'amazon'] as const;
 export type BoardKind = (typeof BOARD_KINDS)[number];
 
 export const BOARD_LABEL: Record<BoardKind, string> = {
@@ -26,11 +29,15 @@ export const BOARD_LABEL: Record<BoardKind, string> = {
   ashby: 'Ashby',
   lever: 'Lever',
   workday: 'Workday',
+  amazon: 'amazon.jobs',
 };
 
 export interface BoardRef {
   kind: BoardKind;
-  /** "anthropic"; on Workday "tenant/site". */
+  /**
+   * "anthropic"; on Workday "tenant/site"; on Amazon the place to search, as amazon.jobs
+   * words it in its search address ("loc_group_id=san-francisco-bay-area&…"), or "anywhere".
+   */
   slug: string;
   boardUrl: string;
 }
@@ -89,6 +96,14 @@ export function sourceFromUrl(raw: string): BoardRef | null {
     if (!slug) return null;
     return { kind: 'lever', slug, boardUrl: `https://${host}/${slug}` };
   }
+  if (host === 'www.amazon.jobs' || host === 'amazon.jobs') {
+    const place = amazonPlace(u.searchParams);
+    return {
+      kind: 'amazon',
+      slug: place || 'anywhere',
+      boardUrl: `https://www.amazon.jobs/en/search${place ? `?${place}` : ''}`,
+    };
+  }
   if (host.endsWith('.myworkdayjobs.com')) {
     const site = parts.find((p) => !LOCALE.test(p));
     if (!site || site === 'job') return null;
@@ -96,6 +111,27 @@ export function sourceFromUrl(raw: string): BoardRef | null {
     return { kind: 'workday', slug: `${tenant}/${site}`, boardUrl: `https://${host}/${site}` };
   }
   return null;
+}
+
+/** The parts of an amazon.jobs search address that say where (the keywords are yours). */
+const AMAZON_PLACE = [
+  'loc_group_id',
+  'loc_query',
+  'country',
+  'region',
+  'city',
+  'county',
+  'latitude',
+  'longitude',
+] as const;
+
+function amazonPlace(params: URLSearchParams): string {
+  const out = new URLSearchParams();
+  for (const k of AMAZON_PLACE) {
+    const v = params.get(k)?.trim();
+    if (v) out.set(k, v);
+  }
+  return out.toString();
 }
 
 /** A company's own careers page names the board it embeds somewhere in its HTML. */
@@ -127,7 +163,7 @@ export async function resolveSource(raw: string, f: FetchFn = fetch): Promise<Bo
     if (ref && ref.slug !== 'embed') return ref;
   }
   throw new BoardError(
-    `Couldn't find a Greenhouse, Ashby, Lever or Workday job board at ${url.hostname}. Paste the address of one of its job postings instead.`,
+    `Couldn't find a Greenhouse, Ashby, Lever, Workday or Amazon jobs board at ${url.hostname}. Paste the address of one of its job postings instead.`,
   );
 }
 
@@ -339,9 +375,47 @@ async function workday(ref: BoardRef, f: FetchFn, keywords: string[]): Promise<B
   return [...found.values()];
 }
 
+/** amazon.jobs returns up to 100 results a page, newest first when asked. */
+const AMAZON_PAGE = 100;
+const AMAZON_PAGES = 3;
+
+async function amazon(ref: BoardRef, f: FetchFn, keywords: string[]): Promise<BoardJob[]> {
+  const place = ref.slug === 'anywhere' ? '' : ref.slug;
+  const found = new Map<string, BoardJob>();
+  // No titles to look for: one page of the newest jobs there, enough to show the search works.
+  for (const query of keywords.length ? keywords : ['']) {
+    for (let page = 0; page < (query ? AMAZON_PAGES : 1); page++) {
+      const params = new URLSearchParams(place);
+      params.set('base_query', query);
+      params.set('sort', 'recent');
+      params.set('result_limit', String(AMAZON_PAGE));
+      params.set('offset', String(page * AMAZON_PAGE));
+      const { hits, jobs } = await amazonSearch(f, params);
+      for (const j of jobs) {
+        const a = amazonJobFields(j);
+        if (!a.url || !a.title) continue;
+        found.set(a.url, {
+          url: a.url,
+          title: a.title,
+          location: a.location,
+          remoteType: a.remoteType,
+          salaryMin: a.salaryMin,
+          salaryMax: a.salaryMax,
+          hourly: false,
+          employmentType: j.job_schedule_type ?? null,
+          postedAt: a.postedDate,
+          descriptionText: a.descriptionText,
+        });
+      }
+      if (jobs.length < AMAZON_PAGE || (page + 1) * AMAZON_PAGE >= hits) break;
+    }
+  }
+  return [...found.values()];
+}
+
 /**
- * Every open job on a board. `keywords` are the titles you watch for; only Workday needs them
- * (it is searched, not listed), so its results are already narrowed to those.
+ * Every open job on a board. `keywords` are the titles you watch for; only Workday and Amazon
+ * need them (they are searched, not listed), so their results are already narrowed to those.
  */
 export async function listBoard(
   ref: BoardRef,
@@ -355,7 +429,9 @@ export async function listBoard(
         ? await ashby(ref, f)
         : ref.kind === 'lever'
           ? await lever(ref, f)
-          : await workday(ref, f, opts.keywords ?? []);
+          : ref.kind === 'amazon'
+            ? await amazon(ref, f, opts.keywords ?? [])
+            : await workday(ref, f, opts.keywords ?? []);
   const seen = new Set<string>();
   const out: BoardJob[] = [];
   for (const j of jobs) {
