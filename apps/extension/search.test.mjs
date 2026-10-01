@@ -93,6 +93,12 @@ globalThis.fetch = vi.fn(async (url, init) => {
     ]);
   if (path === '/api/crawl/searches/started') return json({ ok: true });
   if (path === '/api/crawl/searches/missing-descriptions') return json(missing);
+  if (path === '/api/crawl/status')
+    return json({
+      searching: slowResults
+        ? [{ searchId: 1, label: 'LinkedIn', matched: 4, checking: 2, added: 1, filtered: 0 }]
+        : [],
+    });
   if (path === '/api/screen/capture') {
     const body = JSON.parse(init.body);
     captures.push(body);
@@ -207,6 +213,9 @@ describe('a long run', () => {
     slowResults = false;
     // Two searches, a minute each: a call at least every 20 seconds.
     expect(keptAlive).toBeGreaterThanOrEqual(6);
+    // Meanwhile the panel heard how far Job Matrix had got with LinkedIn's listings.
+    expect(reports.some((p) => p.server?.checking === 2 && p.server.matched === 4)).toBe(true);
+    expect(reports.at(-1).server).toBeNull();
     const after = keptAlive;
     vi.useFakeTimers({ toFake: ['setInterval'] });
     await vi.advanceTimersByTimeAsync(60_000);

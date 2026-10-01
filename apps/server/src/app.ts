@@ -120,6 +120,7 @@ import {
   runCrawl,
   scheduleCrawl,
   searchJobsMissingDescriptions,
+  searchProgress,
   type CrawlDeps,
 } from './services/crawl/run.ts';
 import {
@@ -337,6 +338,8 @@ export function buildApp(
       },
       nextRunAt: nextCrawlAt(),
       progress: crawlProgress(),
+      /** Saved searches whose listings are being sorted now (minutes, with the pre-screen). */
+      searching: searchProgress(),
       sources: listSources(db).length,
       filteredCount: filteredCount(db),
       waitingCount: waitingCount(db),

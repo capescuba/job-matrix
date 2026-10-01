@@ -429,7 +429,14 @@ export function JobSites() {
     queryFn: () => 0,
     staleTime: Infinity,
   });
-  const following = Date.now() - runStarted < 4 * 60_000;
+  // Sorting a site's listings can take minutes (the pre-screen): keep following while it does.
+  const { data: status } = useQuery({
+    queryKey: ['crawl-status'],
+    queryFn: api.crawlStatus,
+    refetchInterval: (q) =>
+      Date.now() - runStarted < 4 * 60_000 || q.state.data?.searching.length ? 3000 : false,
+  });
+  const following = Date.now() - runStarted < 4 * 60_000 || Boolean(status?.searching.length);
   const { data } = useQuery({
     queryKey: ['job-sites'],
     queryFn: api.jobSites,
@@ -491,8 +498,14 @@ export function JobSites() {
     !!started &&
     (started.ids ? started.ids.includes(x.id) : x.enabled) &&
     (!x.lastRunAt || x.lastRunAt < started.at);
+  const sorting = (x: SearchRow) => status?.searching.find((p) => p.searchId === x.id);
   const result = (x: SearchRow) =>
-    inRun(x) ? (
+    sorting(x) ? (
+      <span className="text-accent">
+        Pre-screening {sorting(x)!.checking} of {sorting(x)!.matched} matching · {sorting(x)!.added}{' '}
+        added
+      </span>
+    ) : inRun(x) ? (
       <span className="text-accent">Searching in Chrome…</span>
     ) : x.lastError ? (
       <span className="text-warn">{x.lastError}</span>

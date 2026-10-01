@@ -284,7 +284,8 @@ export const RUN_KEY = 'jmSearchRun';
 
 /**
  * The run's progress, shared with the side panel: { running, total, index, current, results:
- * [{ label, read, matched, added, filtered, problem }], reading: { index, total } while
+ * [{ label, read, matched, added, filtered, problem }], server: { matched, checking, added,
+ * filtered } while Job Matrix sorts a site's listings, reading: { index, total } while
  * descriptions are read, descriptions: { added, tried, problem }, startedAt, finishedAt }.
  */
 let progress = null;
@@ -418,6 +419,7 @@ export function runSearches(ids = null) {
         index: 0,
         current: null,
         results: [],
+        server: null,
         reading: null,
         descriptions: null,
         startedAt: Date.now(),
@@ -458,10 +460,18 @@ export function runSearches(ids = null) {
             target: { tabId: tab.id },
             func: readSearchPage,
           });
+          // Job Matrix reads postings and pre-screens the matches before it answers, which can
+          // take minutes: show how far it has got meanwhile.
+          const following = setInterval(async () => {
+            const st = await api('/api/crawl/status').catch(() => null);
+            const at = st?.searching?.find((x) => x.searchId === s.id);
+            if (at) await report({ server: at });
+          }, 2000);
           const counts = await api(`/api/crawl/searches/${s.id}/results`, {
             method: 'POST',
             body: { listings: result?.listings ?? [], problem: result?.problem ?? null },
-          });
+          }).finally(() => clearInterval(following));
+          await report({ server: null });
           ran++;
           if (result?.problem) errors.push(`${s.label}: ${result.problem}`);
           await finished(s.label, result?.listings?.length ?? 0, counts, result?.problem);

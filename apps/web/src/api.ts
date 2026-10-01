@@ -33,7 +33,7 @@ import type { EmailUpdateRow } from '../../server/src/services/mail/updates.ts';
 import type { EmailKind } from '../../server/src/services/mail/rules.ts';
 import type { LogEntry, listLogs } from '../../server/src/services/logs.ts';
 import type { MailStatus as MailConnection } from '@jm/mail';
-import type { CrawlProgress } from '../../server/src/services/crawl/run.ts';
+import type { CrawlProgress, SearchProgress } from '../../server/src/services/crawl/run.ts';
 import type { LeadRow, SearchRow, SourceRow } from '../../server/src/services/crawl/watchlist.ts';
 
 export type { LeadRow, SearchRow, SourceRow };
@@ -50,6 +50,8 @@ export interface CrawlStatus {
   last: { boards: number; seen: number; matched: number; added: number; filtered: number };
   nextRunAt: string | null;
   progress: CrawlProgress;
+  /** Saved searches whose listings Job Matrix is sorting now (reading postings, pre-screen). */
+  searching: SearchProgress[];
   /** Boards followed, and jobs currently filtered out (including those waiting). */
   sources: number;
   filteredCount: number;
