@@ -149,11 +149,13 @@ export function parsePageTitle(pageTitle: string | null | undefined): {
   if (m) return { title: m[1].trim(), company: m[2].trim() };
   m = t.match(/^(.+?)\s+[|–—-]\s+(.+?)\s+(?:Careers?|Jobs)$/i); // "TPM - Walmart Careers"
   if (m) return { title: m[1].trim(), company: m[2].trim() };
-  t = t.replace(SITE_SUFFIX, '').trim();
+  // LinkedIn sometimes says it twice: "TPM | LinkedIn | LinkedIn".
+  while (SITE_SUFFIX.test(t)) t = t.replace(SITE_SUFFIX, '').trim();
   m = t.match(/^(.+?) at (.+)$/); // "TPM at Acme"
   if (m) return { title: m[1].trim(), company: m[2].trim() };
-  const parts = t.split(/\s+[|]\s+/);
-  if (parts.length >= 2) return { title: parts[0].trim(), company: parts[1].trim() }; // "TPM | Acme"
+  // "TPM | Acme", but not a "|" inside the title: "TPM, Core AI (Mountain View, CA | New York, NY)".
+  const parts = t.split(/\s+[|]\s+(?![^(]*\))/);
+  if (parts.length >= 2) return { title: parts[0].trim(), company: parts[1].trim() };
   return { title: t, company: null };
 }
 
