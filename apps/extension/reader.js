@@ -199,6 +199,23 @@ export function readPage(selectors) {
         text(e).length >= 200 &&
         !e.closest('[id*="chat" i], [class*="chat" i], [role="dialog"], [aria-modal="true"]'),
     ) || document.body;
+  // For telling one posting from a list of them: an "Apply" button or link, and how many links
+  // go to job postings (a careers index has many and nothing to apply to).
+  const signals = {
+    apply: [...document.querySelectorAll('a, button, [role="button"]')].some((e) => {
+      const t = text(e);
+      return t.length <= 40 && /^(apply|easy apply|i.m interested)/i.test(t);
+    }),
+    jobLinks: new Set(
+      [...document.querySelectorAll('a[href]')]
+        .map((a) => a.href.split('#')[0])
+        .filter(
+          (h) =>
+            h !== location.href.split('#')[0] &&
+            /[?&](gh_jid|ashby_jid)=|\/(careers?|jobs?|positions?|openings?)\/[^/?#]+/i.test(h),
+        ),
+    ).size,
+  };
   return {
     url: location.href,
     pageTitle: document.title,
@@ -209,6 +226,7 @@ export function readPage(selectors) {
     liFields,
     linkedin,
     questions,
+    signals,
   };
 }
 
