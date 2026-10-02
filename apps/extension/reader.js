@@ -163,7 +163,14 @@ export function readPage(selectors) {
     .map((s) => s.textContent || '')
     .filter(Boolean)
     .slice(0, 20);
-  const main = document.querySelector('main, [role="main"], article') || document.body;
+  // The page's main content, skipping widgets that call themselves "main": Amazon's hiring
+  // assistant chat is an empty role="main" box, which read as a page with no job on it.
+  const main =
+    [...document.querySelectorAll('main, [role="main"], article')].find(
+      (e) =>
+        text(e).length >= 200 &&
+        !e.closest('[id*="chat" i], [class*="chat" i], [role="dialog"], [aria-modal="true"]'),
+    ) || document.body;
   return {
     url: location.href,
     pageTitle: document.title,
