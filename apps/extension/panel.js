@@ -1,6 +1,7 @@
 // The Job Matrix side panel: what Job Matrix knows about the page you're on, and actions for it.
 import { api, openInApp } from './api.js';
 import { captureBody, contextBody, readTab } from './capture.js';
+import { looksLikeJob } from './jobpage.js';
 import { fillField, startPicker } from './reader.js';
 import { connectLive, isRunning, renderLive, toggleStream } from './live.js';
 import { RUN_KEY } from './search.js';
@@ -383,21 +384,6 @@ function appLine(a) {
     ${a.fitScore != null ? `<span class="small">${a.fitScore.toFixed(1)}</span>` : ''}
     <button class="link small" data-action="open" data-path="/applications/${a.applicationId}">Open</button>
   </li>`;
-}
-
-/** A posting has job data, a template/LinkedIn description, your selection, or reads like a JD. */
-function looksLikeJob(page) {
-  return (
-    // A careers page embedding an Ashby/Greenhouse job (Job Matrix reads it from the board).
-    /[?&](ashby_jid|gh_jid)=/.test(page.url ?? '') ||
-    page.jsonLd.some((b) => /JobPosting/.test(b)) ||
-    !!page.fields?.descriptionText ||
-    !!page.liFields?.descriptionText ||
-    !!page.selectionText ||
-    /responsibilit|qualifications|requirements|what you.ll do|about the role|about the job/i.test(
-      page.pageText ?? '',
-    )
-  );
 }
 
 function postingSection() {
