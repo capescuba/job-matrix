@@ -65,11 +65,39 @@ export function readPage(selectors) {
       location: null,
       descriptionText: first('#job-details', '.jobs-description__content', '.description__text'),
     };
-    const top = first(
+    let top = first(
       '.job-details-jobs-unified-top-card__primary-description-container',
       '.job-details-jobs-unified-top-card__tertiary-description-container',
       '.jobs-unified-top-card__primary-description',
     );
+    // LinkedIn's newer jobs pages have scrambled class names. A few hooks remain in the details
+    // column: "About the job" under a componentkey, a "Company, X." label, and a link to the job.
+    const about = document.querySelector('[componentkey^="JobDetails_AboutTheJob_"]');
+    const details = about?.closest('[data-testid="lazy-column"]') ?? about?.parentElement;
+    if (details) {
+      const titleLink = [...details.querySelectorAll('a')].find(
+        (a) => /\/jobs\/view\//.test(a.pathname) && text(a),
+      );
+      const label = details.querySelector('[aria-label^="Company, "]');
+      liFields.title ||= text(titleLink).replace(/\s+/g, ' ') || null;
+      liFields.company ||=
+        label
+          ?.getAttribute('aria-label')
+          .replace(/^Company,\s*/, '')
+          .replace(/\.$/, '')
+          .trim() || null;
+      liFields.descriptionText ||= text(about).replace(/^About the job\s*/i, '') || null;
+      // The top card's line under the title: "Mountain View, CA · 1 week ago · Over 100 applicants".
+      let card = titleLink;
+      while (card && card !== details && !(label && card.contains(label)))
+        card = card.parentElement;
+      const lines = text(card)
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const at = lines.indexOf(liFields.title);
+      if (!top && at >= 0 && lines[at + 1]?.includes('·')) top = lines[at + 1];
+    }
     if (top) {
       const parts = top.split(/\s*·\s*/).map((s) => s.trim());
       liFields.location = parts[0] || null;

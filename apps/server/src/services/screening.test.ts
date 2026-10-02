@@ -134,6 +134,11 @@ describe('title/company without AI', () => {
       'Technical Program Management',
       'Amazon',
     ],
+    [
+      'Sr. Staff Technical Program Manager, Core AI (Mountain View, CA | New York, NY) | LinkedIn | LinkedIn',
+      'Sr. Staff Technical Program Manager, Core AI (Mountain View, CA | New York, NY)',
+      null,
+    ],
     ['Careers page', 'Careers page', null],
   ])('%s', (title, t, c) => expect(parsePageTitle(title)).toEqual({ title: t, company: c }));
 
