@@ -187,27 +187,37 @@ export function readPage(selectors) {
     if (questions.length >= 15) break;
   }
 
-  const ld = [...document.querySelectorAll('script[type="application/ld+json"]')]
+  // The page and any frames from the same site: iCIMS shows the posting in an iframe, under a
+  // page of menus and links to other jobs.
+  const docs = [document];
+  for (const f of document.querySelectorAll('iframe, frame')) {
+    const d = f.contentDocument; // null for another site's frame
+    if (d?.body && (f.offsetWidth || f.offsetHeight)) docs.push(d);
+  }
+  const all = (sel) => docs.flatMap((d) => [...d.querySelectorAll(sel)]);
+  const ld = all('script[type="application/ld+json"]')
     .map((s) => s.textContent || '')
     .filter(Boolean)
     .slice(0, 20);
   // The page's main content, skipping widgets that call themselves "main": Amazon's hiring
-  // assistant chat is an empty role="main" box, which read as a page with no job on it.
-  const main =
-    [...document.querySelectorAll('main, [role="main"], article')].find(
+  // assistant chat is an empty role="main" box, which read as a page with no job on it. With
+  // frames, the document with the most to read.
+  const mainOf = (d) =>
+    [...d.querySelectorAll('main, [role="main"], article')].find(
       (e) =>
         text(e).length >= 200 &&
         !e.closest('[id*="chat" i], [class*="chat" i], [role="dialog"], [aria-modal="true"]'),
-    ) || document.body;
+    ) || d.body;
+  const main = docs.map(mainOf).reduce((a, b) => (text(b).length > text(a).length ? b : a));
   // For telling one posting from a list of them: an "Apply" button or link, and how many links
   // go to job postings (a careers index has many and nothing to apply to).
   const signals = {
-    apply: [...document.querySelectorAll('a, button, [role="button"]')].some((e) => {
+    apply: all('a, button, [role="button"]').some((e) => {
       const t = text(e);
-      return t.length <= 40 && /^(apply|easy apply|i.m interested)/i.test(t);
+      return t.length <= 40 && /^(apply|easy apply|i.m interested)/i.test(t);
     }),
     jobLinks: new Set(
-      [...document.querySelectorAll('a[href]')]
+      all('a[href]')
         .map((a) => a.href.split('#')[0])
         .filter(
           (h) =>
@@ -220,7 +230,7 @@ export function readPage(selectors) {
     url: location.href,
     pageTitle: document.title,
     jsonLd: ld,
-    selectionText: String(getSelection() || '').trim(),
+    selectionText: docs.map((d) => String(d.getSelection() || '').trim()).find(Boolean) ?? '',
     pageText: text(main).slice(0, 150_000),
     fields,
     liFields,

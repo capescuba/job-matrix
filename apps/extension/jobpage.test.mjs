@@ -38,6 +38,14 @@ describe('is this page one job posting?', () => {
       page('https://careers.nebius.com/?gh_jid=4817210101', { signals: { jobLinks: 378 } }),
     ],
     [
+      // The page is menus and 27 job links; the reader now reads the posting's iframe too.
+      'iCIMS, the posting in an iframe from the same site',
+      page(
+        'https://careers-americas.icims.com/jobs/27573/principal-technical-program-manager/job',
+        { jsonLd: ['{"@type":"JobPosting"}'], signals: { apply: true, jobLinks: 27 } },
+      ),
+    ],
+    [
       'a page with schema.org job data',
       page('https://jobs.example.com/x', { jsonLd: ['{"@type":"JobPosting"}'] }),
     ],
