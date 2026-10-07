@@ -3,7 +3,7 @@ import path from 'node:path';
 import { desc, eq } from 'drizzle-orm';
 import mammoth from 'mammoth';
 import { PDFParse } from 'pdf-parse';
-import type { ProfilePatch } from '@jm/shared';
+import type { ProfilePatch, RoleTrack } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import { profile, resumeVersions } from '../db/schema.ts';
 import { RESUME_DIR } from '../paths.ts';
@@ -56,6 +56,23 @@ export function getDefaultResume(db: Db) {
   return (
     db.select().from(resumeVersions).where(eq(resumeVersions.isDefault, true)).get() ??
     db.select().from(resumeVersions).orderBy(desc(resumeVersions.id)).get()
+  );
+}
+
+/** Use this resume for jobs on a track (null = none); a track has one resume at a time. */
+export function setResumeTrack(db: Db, id: number, track: RoleTrack | null) {
+  db.transaction((tx) => {
+    if (track)
+      tx.update(resumeVersions).set({ track: null }).where(eq(resumeVersions.track, track)).run();
+    tx.update(resumeVersions).set({ track }).where(eq(resumeVersions.id, id)).run();
+  });
+}
+
+/** The resume for a track's jobs, else the default. */
+export function resumeForTrack(db: Db, track: RoleTrack) {
+  return (
+    db.select().from(resumeVersions).where(eq(resumeVersions.track, track)).get() ??
+    getDefaultResume(db)
   );
 }
 

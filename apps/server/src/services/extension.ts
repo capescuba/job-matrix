@@ -2,6 +2,7 @@ import { and, desc, eq, like } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProvider, prescreenConfig, type LLMProvider } from '@jm/ai';
 import {
+  jobTrack,
   looksLikeCompanyName,
   shortText,
   type CompanyResearch,
@@ -22,7 +23,7 @@ import {
 import { allAliases } from './aliases.ts';
 import { NotFoundError, listApplications, type ApplicationRow } from './applications.ts';
 import { latestResearch, isStale } from './research.ts';
-import { getDefaultResume, getProfile } from './resume.ts';
+import { getProfile, resumeForTrack } from './resume.ts';
 import {
   SHARED_HOSTS,
   companyFromBoardUrl,
@@ -545,7 +546,7 @@ export async function suggestAnswer(
       company: row.company.name,
       title: row.job.title,
       description: row.job.descriptionText,
-      resume: getDefaultResume(db)?.rawText ?? null,
+      resume: resumeForTrack(db, jobTrack(row.job))?.rawText ?? null,
       careerProfile: getProfile(db).careerProfile,
       linkedin: getProfile(db).linkedinText,
       goals: getProfile(db).goals,

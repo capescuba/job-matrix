@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { ROLE_TRACKS, ROLE_TRACK_LABELS, type RoleTrack } from '@jm/shared';
 import { api, type ProfileResponse } from '../api.ts';
 import { AiSettings } from '../components/AiSettings.tsx';
 import { CareerProfileCard } from '../components/CareerProfileCard.tsx';
 import { LinkedInCard } from '../components/LinkedInCard.tsx';
 import { CriteriaEditor } from '../components/CriteriaEditor.tsx';
-import { Button, Card, ErrorText, Input, cx } from '../components/ui.tsx';
+import { Button, Card, ErrorText, Input, Select, cx } from '../components/ui.tsx';
 
 const TABS = [
   ['about', 'About you'],
@@ -64,7 +65,10 @@ export default function ProfilePage() {
   );
 }
 
-/** Uploaded resumes; the default one is what fit scoring reads. */
+/**
+ * Uploaded resumes. Fit scoring reads the resume set for a job's track (TPM or FDE), else the
+ * default one.
+ */
 function Resumes({ resumes }: { resumes: ProfileResponse['resumes'] | undefined }) {
   const qc = useQueryClient();
   const [label, setLabel] = useState('');
@@ -81,6 +85,11 @@ function Resumes({ resumes }: { resumes: ProfileResponse['resumes'] | undefined 
     },
   });
   const makeDefault = useMutation({ mutationFn: api.setDefaultResume, onSuccess: refresh });
+  const setTrack = useMutation({
+    mutationFn: ({ id, track }: { id: number; track: RoleTrack | null }) =>
+      api.setResumeTrack(id, track),
+    onSuccess: refresh,
+  });
   const remove = useMutation({ mutationFn: api.deleteResume, onSuccess: refresh });
   const previewQuery = useQuery({
     queryKey: ['resume', preview],
@@ -98,14 +107,30 @@ function Resumes({ resumes }: { resumes: ProfileResponse['resumes'] | undefined 
               {r.isDefault && (
                 <span
                   className="ml-2 rounded-full border border-accent/40 px-2 py-0.5 text-xs text-accent"
-                  title="Used for fit scoring"
+                  title="Used for fit scoring when no resume is set for the job's track"
                 >
                   Default
                 </span>
               )}
               <span className="ml-2 text-xs text-ink-3">{r.createdAt.slice(0, 10)}</span>
             </span>
-            <span className="flex gap-1">
+            <span className="flex items-center gap-1">
+              <Select
+                className="w-auto py-1"
+                value={r.track ?? ''}
+                aria-label={`Jobs scored with "${r.label}"`}
+                title="Fit scoring reads this resume for jobs on this track"
+                onChange={(e) =>
+                  setTrack.mutate({ id: r.id, track: (e.target.value || null) as RoleTrack | null })
+                }
+              >
+                <option value="">No track</option>
+                {ROLE_TRACKS.map((t) => (
+                  <option key={t} value={t}>
+                    {t} jobs ({ROLE_TRACK_LABELS[t]})
+                  </option>
+                ))}
+              </Select>
               <Button variant="ghost" onClick={() => setPreview(preview === r.id ? null : r.id)}>
                 {preview === r.id ? 'Hide' : 'View'}
               </Button>
@@ -151,7 +176,7 @@ function Resumes({ resumes }: { resumes: ProfileResponse['resumes'] | undefined 
           {upload.isPending ? 'Uploading…' : 'Upload'}
         </Button>
       </div>
-      <ErrorText error={upload.error} />
+      <ErrorText error={upload.error ?? setTrack.error} />
       {preview != null && (
         <pre className="mt-4 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md bg-surface-2 p-3 text-xs">
           {previewQuery.data?.rawText ?? 'Loading…'}

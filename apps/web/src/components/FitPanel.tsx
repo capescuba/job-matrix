@@ -2,10 +2,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   FIT_PARTS,
+  ROLE_TRACKS,
+  ROLE_TRACK_LABELS,
+  trackFromTitle,
   type CompanyResearch,
   type FitPartKey,
   type FitResult,
   type Gate,
+  type RoleTrack,
 } from '@jm/shared';
 import { api, type ApplicationDetail, type FitAssessment } from '../api.ts';
 import { useAiRuns } from '../aiActivity.ts';
@@ -13,7 +17,7 @@ import { fitTone, formatScore } from './badges.tsx';
 import { CallInspector } from './CallInspector.tsx';
 import { DecisionBody, Verdict, barTone, useDecisionData } from './Decision.tsx';
 import { LiveRun } from './LiveRun.tsx';
-import { Button, Card, ErrorText, cx } from './ui.tsx';
+import { Button, Card, ErrorText, Select, cx } from './ui.tsx';
 
 const severityTone = { Minor: 'text-ink-3', Moderate: 'text-warn', Major: 'text-bad' } as const;
 const statusIcon = { ok: '✓', fails: '✕', unclear: '?' } as const;
@@ -51,11 +55,29 @@ export function FitSummary({
       qc.invalidateQueries({ queryKey: ['usage'] });
     },
   });
+  const setTrack = useMutation({
+    mutationFn: (track: RoleTrack | null) => api.updateJob(job.id, { track }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['application', app.id] }),
+  });
 
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <h2 className="text-sm font-semibold">AI fit</h2>
+        <Select
+          className="w-auto py-1"
+          value={job.track ?? ''}
+          aria-label="Score this job as"
+          title="Which kind of role this is scored as: picks the resume and how the AI judges it"
+          onChange={(e) => setTrack.mutate((e.target.value || null) as RoleTrack | null)}
+        >
+          <option value="">{trackFromTitle(job.title)} role (from the title)</option>
+          {ROLE_TRACKS.map((t) => (
+            <option key={t} value={t}>
+              {ROLE_TRACK_LABELS[t]}
+            </option>
+          ))}
+        </Select>
         {!fit && (
           <span className="text-sm text-ink-2">
             {!hasDescription
@@ -83,7 +105,7 @@ export function FitSummary({
           {score.isPending ? <Elapsed label="Scoring" /> : latest ? 'Re-score' : 'Score fit'}
         </Button>
       </div>
-      <ErrorText error={score.error} />
+      <ErrorText error={score.error ?? setTrack.error} />
 
       {fit && <p className="mt-2 text-sm text-ink-2">{fit.whyNotHigher}</p>}
 
