@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import type { LLMProvider, StructuredRequest } from '@jm/ai';
-import type { FitResult } from '@jm/shared';
+import { trackFromTitle, type FitResult } from '@jm/shared';
 import { buildApp } from '../app.ts';
 import { openDb, type Db } from '../db/client.ts';
 import { resumeVersions } from '../db/schema.ts';
-import { createApplication } from './applications.ts';
+import { createApplication, updateJob } from './applications.ts';
 import { buildCareerProfile } from './careerProfile.ts';
 import { suggestAnswer } from './extension.ts';
 import {
@@ -17,7 +17,7 @@ import {
   startFitBatch,
 } from './fit.ts';
 import { linkedinTextOf, profileUrl, saveLinkedIn } from './linkedin.ts';
-import { getProfile, updateProfile } from './resume.ts';
+import { getProfile, resumeForTrack, setResumeTrack, updateProfile } from './resume.ts';
 
 const TOKEN = 't'.repeat(48);
 
@@ -169,7 +169,7 @@ describe('using it', () => {
     });
 
   it('fit scoring reads the career profile, and editing it makes scores stale', async () => {
-    expect(FIT_PROMPT_VERSION).toBe('tpm-v5');
+    expect(FIT_PROMPT_VERSION).toBe('tracks-v6');
     const open = addJob();
     const closed = addJob('Rejected');
     const { provider, prompts } = fake(() => sampleFit);
@@ -221,5 +221,100 @@ describe('using it', () => {
       staleJobs: 0,
     });
     expect(r.buildUsd).toBeGreaterThan(0);
+  });
+});
+
+describe('role tracks', () => {
+  const addJob = (title: string) =>
+    createApplication(db, {
+      company: 'Acme',
+      title,
+      status: 'Saved',
+      descriptionText: 'Build it.',
+    });
+  const jobIdOf = (applicationId: number) =>
+    db.$client
+      .prepare('SELECT job_id FROM applications WHERE id = ?')
+      .pluck()
+      .get(applicationId) as number;
+
+  it('reads the track from the title', () => {
+    for (const t of [
+      'Forward Deployed Engineer',
+      'Forward-Deployed Software Engineer, Enterprise',
+      'Senior FDE',
+      'AI Deployment Strategist',
+      'Applied AI Engineer',
+      'Solutions Architect, Agents',
+    ])
+      expect(trackFromTitle(t), t).toBe('FDE');
+    for (const t of [
+      'Principal TPM',
+      'Staff Technical Program Manager, Infra',
+      'Engineering Manager',
+    ])
+      expect(trackFromTitle(t), t).toBe('TPM');
+  });
+
+  it('one resume per track, falling back to the default', () => {
+    const fde = db
+      .insert(resumeVersions)
+      .values({ label: 'fde', rawText: 'Embedded at banks.' })
+      .returning()
+      .get();
+    expect(resumeForTrack(db, 'FDE')!.label).toBe('main');
+    setResumeTrack(db, fde.id, 'FDE');
+    expect(resumeForTrack(db, 'FDE')!.label).toBe('fde');
+    expect(resumeForTrack(db, 'TPM')!.label).toBe('main');
+    const other = db
+      .insert(resumeVersions)
+      .values({ label: 'fde2', rawText: 'x' })
+      .returning()
+      .get();
+    setResumeTrack(db, other.id, 'FDE');
+    expect(resumeForTrack(db, 'FDE')!.label).toBe('fde2');
+  });
+
+  it('scores an FDE job with the FDE resume and lens; your choice overrides the title', async () => {
+    const fde = db
+      .insert(resumeVersions)
+      .values({ label: 'fde', rawText: 'Embedded at banks.' })
+      .returning()
+      .get();
+    setResumeTrack(db, fde.id, 'FDE');
+    const tpmJob = addJob('Principal TPM');
+    const fdeJob = addJob('Forward Deployed Engineer');
+    const { provider, prompts } = fake(() => sampleFit);
+    await assessFit(db, tpmJob, { provider });
+    await assessFit(db, fdeJob, { provider });
+    expect(prompts[0]).toContain('Technical Program Manager hiring manager');
+    expect(prompts[0]).toContain('<resume>\nPrincipal TPM, Workday.');
+    expect(prompts[0]).toContain('"FDE roles:" or "FDE:"');
+    expect(prompts[1]).toContain('Forward Deployed Engineering teams');
+    expect(prompts[1]).toContain('<resume>\nEmbedded at banks.');
+    expect(prompts[1]).toContain('"TPM roles:" or "TPM:"');
+
+    const before = fitInputsFor(db, tpmJob, 'fake-model', 'low').inputHash;
+    updateJob(db, jobIdOf(tpmJob), { track: 'FDE' });
+    const after = fitInputsFor(db, tpmJob, 'fake-model', 'low');
+    expect(after.inputs.track).toBe('FDE');
+    expect(after.resume.label).toBe('fde');
+    expect(after.inputHash).not.toBe(before);
+    updateJob(db, jobIdOf(tpmJob), { track: null });
+    expect(fitInputsFor(db, tpmJob, 'fake-model', 'low').inputHash).toBe(before);
+  });
+
+  it('answers application questions from the track resume', async () => {
+    const fde = db
+      .insert(resumeVersions)
+      .values({ label: 'fde', rawText: 'Embedded at banks.' })
+      .returning()
+      .get();
+    setResumeTrack(db, fde.id, 'FDE');
+    const app = addJob('Forward Deployed Engineer');
+    const { provider, prompts } = fake(() => ({ answer: 'Because.', basedOn: 'Resume' }));
+    await suggestAnswer(db, { applicationId: app, question: 'Why us?' }, { provider });
+    expect(prompts[0]).toContain('Embedded at banks.');
+    expect(prompts[0]).not.toContain('Principal TPM, Workday.');
   });
 });

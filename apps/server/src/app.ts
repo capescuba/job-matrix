@@ -12,6 +12,7 @@ import {
   contactSchema,
   jobPatchSchema,
   profilePatchSchema,
+  ROLE_TRACKS,
   quickAddSchema,
 } from '@jm/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -60,6 +61,7 @@ import {
   getDefaultResume,
   getProfile,
   setDefaultResume,
+  setResumeTrack,
   updateProfile,
 } from './services/resume.ts';
 import { currentEffort, getSettings, updateSettings } from './services/settings.ts';
@@ -611,6 +613,7 @@ export function buildApp(
         id: resumeVersions.id,
         label: resumeVersions.label,
         isDefault: resumeVersions.isDefault,
+        track: resumeVersions.track,
         createdAt: resumeVersions.createdAt,
         chars: resumeVersions.rawText,
       })
@@ -682,6 +685,11 @@ export function buildApp(
   });
   app.post('/api/resumes/:id/default', (req) => {
     setDefaultResume(db, idParam.parse(req.params).id);
+    return { ok: true };
+  });
+  app.put('/api/resumes/:id/track', (req) => {
+    const { track } = z.object({ track: z.enum(ROLE_TRACKS).nullable() }).parse(req.body);
+    setResumeTrack(db, idParam.parse(req.params).id, track);
     return { ok: true };
   });
   app.delete('/api/resumes/:id', (req, reply) => {

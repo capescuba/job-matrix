@@ -6,7 +6,11 @@ import {
   fitResultSchema,
   fitTotal,
   pricingFor,
+  jobTrack,
+  ROLE_TRACK_LABELS,
+  ROLE_TRACKS,
   type FitPartKey,
+  type RoleTrack,
   splitLines,
   type FitResult,
   type Status,
@@ -18,24 +22,56 @@ import { applications, companies, contacts, fitAssessments, fitGaps, jobs } from
 import { startRun } from './aiEvents.ts';
 import { NotFoundError, sha256 } from './applications.ts';
 import { gateOf, payCheck, payRangeOf } from './pay.ts';
-import { getDefaultResume, getProfile } from './resume.ts';
+import { getProfile, resumeForTrack } from './resume.ts';
 import { currentEffort } from './settings.ts';
 import { recordUsage } from './usage.ts';
 
 /** Bump when the prompt or schema changes so cached assessments are recomputed. */
-export const FIT_PROMPT_VERSION = 'tpm-v5';
+export const FIT_PROMPT_VERSION = 'tracks-v6';
 
-export const FIT_SYSTEM_PROMPT = `You are a seasoned Technical Program Manager hiring manager and recruiter who has hired TPMs at large tech companies and startups. You assess how well a specific candidate fits a specific job posting, honestly and specifically, the way a trusted advisor would.
+/** What changes in the assessment between the kinds of role you're pursuing. */
+const TRACK_LENS: Record<
+  RoleTrack,
+  { who: string; reads: string; skills: string; level: string; logistics: string }
+> = {
+  TPM: {
+    who: 'a seasoned Technical Program Manager hiring manager and recruiter who has hired TPMs at large tech companies and startups',
+    reads:
+      'program scope and scale, the technical domain, the level (TPM, Senior, Staff, Principal, Director), years required, office days, travel, employment type and hard requirements',
+    skills: 'program types, domain and technical depth vs. the resume and career profile.',
+    level:
+      "title, years and scope vs. the candidate's target level. A mid-level role for a Principal-level candidate scores low here.",
+    logistics: "location, office days per week, commute from the candidate's home base, travel.",
+  },
+  FDE: {
+    who: 'a seasoned hiring manager for Forward Deployed Engineering teams (engineers embedded with customers who scope their workflows, build and integrate software, increasingly LLM and agentic systems, and carry it into production) who has hired FDEs at AI companies, large tech companies and startups',
+    reads:
+      'the customers and their domain, how much hands-on building versus advising or selling, the stack, the seniority implied by scope and pay, years required, office days, customer travel, employment type and hard requirements',
+    skills:
+      'hands-on building (code, integrations, LLM and agentic systems), customer-facing discovery and delivery to production, and domain, vs. the resume and career profile.',
+    level:
+      'scope, customer seniority, years and pay vs. the candidate\'s target level. FDE titles are often flat, so don\'t mark a plain "Forward Deployed Engineer" title down for its wording; a role that is junior in scope still scores low.',
+    logistics:
+      'where the candidate must be based, office days per week and commute from their home base. Travel to customer sites is part of the job: score it against the travel the candidate says they accept.',
+  },
+};
+
+export function fitSystemPrompt(track: RoleTrack): string {
+  const lens = TRACK_LENS[track];
+  const others = ROLE_TRACKS.filter((t) => t !== track);
+  return `You are ${lens.who}. You assess how well a specific candidate fits a specific job posting, honestly and specifically, the way a trusted advisor would.
+
+This job is scored as a ${ROLE_TRACK_LABELS[track]} (${track}) role. The candidate may pursue more than one kind of role; judge it only as a ${ROLE_TRACK_LABELS[track]} role. A must-have, deal-breaker, plus or known gap that starts with another track (${others.map((t) => `"${t} roles:" or "${t}:"`).join(', ')}) doesn't apply here: leave it out of the scores, and give such a must-have or deal-breaker a criteria entry of ok with the note "Applies to ${others.join('/')} roles only".
 
 How to assess:
-- Read the posting for what the role truly needs: program scope and scale, the technical domain, the level (TPM, Senior, Staff, Principal, Director), years required, office days, travel, employment type and hard requirements.
+- Read the posting for what the role truly needs: ${lens.reads}.
 - Compare against the candidate's record only: the resume and, when given, the career profile (a fuller inventory built from their LinkedIn profile and resume — prefer its specifics: scope, numbers, domains). Do not invent experience neither shows. Quote or closely paraphrase lines from them as evidence.
 - Use the candidate's profile: target roles, must-haves, deal-breakers, strong pluses, nice-to-haves and known gaps.
 
 Scoring — five parts, each 0-10 (one decimal allowed):
-- skills: program types, domain and technical depth vs. the resume and career profile.
-- level: title, years and scope vs. the candidate's target level. A mid-level role for a Principal-level candidate scores low here.
-- logistics: location, office days per week, commute from the candidate's home base, travel.
+- skills: ${lens.skills}
+- level: ${lens.level}
+- logistics: ${lens.logistics}
 - pay: the posted range vs. the candidate's minimum base and how high the top end goes; equity. If no range is posted, say so; you may note typical pay for the company and level, but the score is capped at 6.
 - upside: strong pluses and nice-to-haves present, company trajectory, equity upside, how interesting the work is.
 Calibration for each part: 9-10 exceptional, 8 strong, 7 good with a real caveat, 5-6 mixed, 3-4 weak, 0-2 disqualifying. Use the full range and be decisive. The total is computed from the parts by the app, so don't state a total number anywhere. In whyNotHigher, say plainly what holds the score back (e.g. "Held back by the hands-on inference requirement and 4 office days a week").
@@ -54,8 +90,14 @@ Be concise and concrete. Gaps should be actionable. Talking points are the 3 thi
 
 Voice: write every text field to the job seeker directly, in the second person ("you", "your"). Never use their name, "the candidate" or "he/she".
 Labels: every strength and gap has a 3-6 word label that reads on its own in a short list; put the explanation in the other fields.`;
+}
+
+/** The TPM prompt, for size estimates. */
+export const FIT_SYSTEM_PROMPT = fitSystemPrompt('TPM');
 
 export interface FitInputs {
+  /** Which kind of role this job is scored as; picks the resume and the prompt. */
+  track: RoleTrack;
   company: string;
   title: string;
   location: string | null;
@@ -207,12 +249,14 @@ export function fitInputsFor(db: Db, applicationId: number, model: string, effor
   if (!row) throw new NotFoundError(`Application ${applicationId} not found`);
   if (!row.job.descriptionText?.trim())
     throw new FitError('Add the job description before scoring.');
-  const resume = getDefaultResume(db);
+  const track = jobTrack(row.job);
+  const resume = resumeForTrack(db, track);
   if (!resume) throw new FitError('Upload a resume on the Profile page before scoring.');
 
   const range = payRangeOf(row.job);
   const prof = getProfile(db);
   const inputs: FitInputs = {
+    track,
     company: row.company.name,
     title: row.job.title,
     location: row.job.location,
@@ -280,12 +324,14 @@ export async function assessFit(
     }
   }
 
+  const system = fitSystemPrompt(inputs.track);
   const prompt = buildFitPrompt(inputs);
   const p = inputs.profile;
   run.step(
-    `Built the prompt: ~${tokensApprox(FIT_SYSTEM_PROMPT + prompt).toLocaleString()} tokens of text + the answer schema`,
+    `Built the prompt: ~${tokensApprox(system + prompt).toLocaleString()} tokens of text + the answer schema`,
     [
-      `resume ${tokensApprox(inputs.resumeText).toLocaleString()} tok`,
+      `${inputs.track} role`,
+      `resume “${resume.label}” ${tokensApprox(inputs.resumeText).toLocaleString()} tok`,
       inputs.careerProfile
         ? `career profile ${tokensApprox(inputs.careerProfile).toLocaleString()} tok`
         : 'no career profile',
@@ -302,7 +348,7 @@ export async function assessFit(
   let res: Awaited<ReturnType<typeof provider.completeStructured<typeof fitResultSchema>>>;
   try {
     res = await provider.completeStructured({
-      system: FIT_SYSTEM_PROMPT,
+      system,
       prompt,
       schema: fitResultSchema,
       model,

@@ -61,6 +61,28 @@ export const SOURCES = [
   'Other',
 ] as const;
 export const REMOTE_TYPES = ['Remote', 'Hybrid', 'Onsite'] as const;
+
+/** The kinds of role you're pursuing; each job is scored as one, against that track's resume. */
+export const ROLE_TRACKS = ['TPM', 'FDE'] as const;
+export type RoleTrack = (typeof ROLE_TRACKS)[number];
+export const ROLE_TRACK_LABELS: Record<RoleTrack, string> = {
+  TPM: 'Technical Program Manager',
+  FDE: 'Forward Deployed Engineer',
+};
+
+const FDE_TITLE =
+  /forward[\s-]*deploy|\bfde\b|deployment (engineer|strategist|lead)|applied (ai|ml) engineer|solutions? (engineer|architect)|(customer|field) engineer/i;
+
+/** The track a title reads as; anything that isn't plainly FDE is a TPM role. */
+export function trackFromTitle(title: string): RoleTrack {
+  return FDE_TITLE.test(title) ? 'FDE' : 'TPM';
+}
+
+/** The track a job is scored as: your choice, else what its title says. */
+export const jobTrack = (job: { title: string; track?: string | null }): RoleTrack =>
+  ROLE_TRACKS.includes(job.track as RoleTrack)
+    ? (job.track as RoleTrack)
+    : trackFromTitle(job.title);
 export const RELATIONSHIPS = [
   'Connection',
   'Recruiter',
@@ -132,6 +154,8 @@ export const jobPatchSchema = z.object({
   /** Manual override, e.g. when one site says filled and another says open. */
   postingStatus: z.enum(['open', 'closed']).nullable().optional(),
   postingNote: z.string().nullable().optional(),
+  /** Score as this track; null = go by the title. */
+  track: z.enum(ROLE_TRACKS).nullable().optional(),
 });
 export type JobPatch = z.infer<typeof jobPatchSchema>;
 
@@ -215,7 +239,7 @@ export const fitResultSchema = z.object({
     skills: part.describe(
       'Program types, domain and technical depth vs. the resume and career profile',
     ),
-    level: part.describe('Title/level/years/scope vs. Principal/Staff target'),
+    level: part.describe('Title/level/years/scope vs. the target level for this track'),
     logistics: part.describe('Location, office days per week, commute from home base, travel'),
     pay: part.describe('Posted range vs. the minimum base and a high top end; equity'),
     upside: part.describe('Strong pluses, company trajectory, equity upside, how interesting'),

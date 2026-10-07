@@ -7,6 +7,7 @@ import type {
   JobPatch,
   ProfilePatch,
   QuickAddInput,
+  RoleTrack,
   Status,
 } from '@jm/shared';
 import type {
@@ -106,7 +107,14 @@ export interface CareerProfileInfo {
 export interface ProfileResponse {
   profile: Omit<ReturnType<typeof getProfile>, 'linkedinText' | 'linkedinSections'>;
   linkedin: LinkedInSummary;
-  resumes: { id: number; label: string; isDefault: boolean; createdAt: string; chars: number }[];
+  resumes: {
+    id: number;
+    label: string;
+    isDefault: boolean;
+    track: RoleTrack | null;
+    createdAt: string;
+    chars: number;
+  }[];
   aiConfigured: boolean;
 }
 
@@ -223,6 +231,8 @@ export const api = {
   getResume: (id: number) =>
     request<{ id: number; label: string; rawText: string }>('GET', `/api/resumes/${id}`),
   setDefaultResume: (id: number) => request('POST', `/api/resumes/${id}/default`),
+  setResumeTrack: (id: number, track: RoleTrack | null) =>
+    request('PUT', `/api/resumes/${id}/track`, { track }),
   deleteResume: (id: number) => request<void>('DELETE', `/api/resumes/${id}`),
   stats: () => request<Stats>('GET', '/api/stats'),
   usage: () => request<Usage>('GET', '/api/usage'),

@@ -50,6 +50,8 @@ export const jobs = sqliteTable(
     postingStatus: text('posting_status'),
     postingCheckedAt: text('posting_checked_at'),
     postingNote: text('posting_note'),
+    /** 'TPM' | 'FDE' when you've chosen; null = go by the title. */
+    track: text('track'),
     createdAt: createdAt(),
   },
   (t) => [index('jobs_company').on(t.companyId)],
@@ -61,6 +63,8 @@ export const resumeVersions = sqliteTable('resume_versions', {
   rawText: text('raw_text').notNull(),
   filePath: text('file_path'),
   isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+  /** 'TPM' | 'FDE': fit scoring reads this resume for jobs on that track (one resume per track). */
+  track: text('track'),
   createdAt: createdAt(),
 });
 
