@@ -289,12 +289,6 @@ label.field {
   margin-top: 0;
   padding-top: 0;
 }
-.saved {
-  background: var(--surface-2);
-  border-radius: 6px;
-  padding: 0.462rem 0.615rem;
-  font-size: 0.923rem;
-}
 .error {
   color: var(--bad);
 }

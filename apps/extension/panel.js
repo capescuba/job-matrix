@@ -21,7 +21,6 @@ const state = {
   busy: null, // 'add' | 'score' | 'save-template'
   useApp: null, // application chosen for the helper when the page only looks similar
   drafts: {}, // question id → { text, basedOn, loading, error }
-  saved: {}, // question id → earlier answers to similar questions
   teach: null, // { selectors: {}, samples: {} } while teaching this site
   run: null, // the watchlist's saved-search run, as search.js reports it
   runDismissed: null, // startedAt of a finished run you closed
@@ -196,7 +195,6 @@ async function refresh() {
     ...(!samePage && {
       notice: null,
       drafts: {},
-      saved: {},
       teach: null,
       useApp: null,
       showAdd: false,
@@ -226,7 +224,6 @@ async function refresh() {
         ? state.edits
         : { title: ctx.detected.title ?? '', company: ctx.detected.company ?? '' },
     });
-    loadSavedAnswers();
   } catch (e) {
     if (mine !== seq) return;
     Object.assign(state, { page: null, ctx: null, error: e.message || String(e) });
@@ -235,25 +232,10 @@ async function refresh() {
   render();
 }
 
-async function loadSavedAnswers() {
-  // The company this form is for, so answers written about another company aren't offered.
-  const company = (state.ctx && helperApp()?.company) || state.ctx?.detected?.company || '';
-  for (const q of state.page?.questions ?? []) {
-    api(`/api/ext/answers?q=${encodeURIComponent(q.label)}&company=${encodeURIComponent(company)}`)
-      .then((rows) => {
-        if (rows?.length) {
-          state.saved[q.id] = rows;
-          render();
-        }
-      })
-      .catch(() => {});
-  }
-}
-
 // ---------- rendering ----------
 
 function render() {
-  // Keep typing where it was when the panel redraws (e.g. saved answers arriving).
+  // Keep typing where it was when the panel redraws (e.g. a draft arriving).
   const a = document.activeElement;
   const key = a?.dataset?.edit
     ? `[data-edit="${a.dataset.edit}"]`
@@ -572,18 +554,8 @@ function helperSection() {
   const rows = qs
     .map((q) => {
       const d = state.drafts[q.id];
-      const saved = (state.saved[q.id] ?? [])
-        .map(
-          (
-            s,
-          ) => `<div class="saved"><div class="faint small">Your answer for ${esc(s.company)} · ${day(s.createdAt)}</div>
-            <div>${esc(s.answer)}</div>
-            <div class="row" style="margin-top:4px"><button class="link small" data-action="use-saved" data-q="${q.id}" data-id="${s.id}">Use this</button></div></div>`,
-        )
-        .join('');
       return `<div class="q">
         <div><strong>${esc(q.label)}</strong>${q.maxLength ? ` <span class="faint small">(max ${q.maxLength} characters)</span>` : ''}${q.filled ? ' <span class="chip">filled</span>' : ''}</div>
-        ${saved}
         ${
           d?.text != null
             ? `<textarea data-draft="${q.id}">${esc(d.text)}</textarea>
@@ -892,16 +864,7 @@ document.addEventListener('click', async (e) => {
   else if (a === 'insert') insert(el.dataset.q);
   else if (a === 'copy')
     await navigator.clipboard.writeText(state.drafts[el.dataset.q]?.text ?? '');
-  else if (a === 'use-saved') {
-    const s = (state.saved[el.dataset.q] ?? []).find((x) => String(x.id) === el.dataset.id);
-    if (s)
-      state.drafts[el.dataset.q] = {
-        text: s.answer,
-        basedOn: `your ${s.company} answer`,
-        loading: false,
-      };
-    render();
-  } else if (a === 'teach') {
+  else if (a === 'teach') {
     state.teach = { selectors: { ...(state.template?.selectors ?? {}) }, samples: {} };
     render();
   } else if (a === 'teach-cancel') {
