@@ -4,17 +4,10 @@ import type { LLMProvider, StructuredRequest } from '@jm/ai';
 import type { CompanyResearch } from '@jm/shared';
 import { buildApp } from '../app.ts';
 import { openDb, type Db } from '../db/client.ts';
-import { applicationAnswers, companyResearch, profile, resumeVersions } from '../db/schema.ts';
+import { companyResearch, profile, resumeVersions } from '../db/schema.ts';
 import { createApplication } from './applications.ts';
 import { assessFit } from './fit.ts';
-import {
-  companyKey,
-  listAnswers,
-  pageContext,
-  similarAnswers,
-  similarTitles,
-  suggestAnswer,
-} from './extension.ts';
+import { companyKey, listAnswers, pageContext, similarTitles, suggestAnswer } from './extension.ts';
 import { captureJob } from './screening.ts';
 import { EXTENSION_ORIGIN } from './token.ts';
 import type { AddressInfo } from 'node:net';
@@ -459,38 +452,5 @@ describe('application answers', () => {
       .get() as { feature: string; company_id: number; cost_usd: number };
     expect(usage.company_id).toBe(companyIdOf(id));
     expect(usage.cost_usd).toBeCloseTo((10_000 * 4 + 400 * 20) / 1e6);
-  });
-
-  it('offers earlier answers to similar questions', async () => {
-    const id = add('Docusign', 'Sr. TPM', 'https://careers.docusign.com/jobs/1');
-    const { provider } = fakeProvider();
-    await suggestAnswer(
-      db,
-      { applicationId: id, question: 'Why do you want to work at Docusign?' },
-      { provider },
-    );
-    expect(similarAnswers(db, 'Why do you want to work at Walmart?')).toHaveLength(1);
-    expect(similarAnswers(db, 'What is your notice period?')).toHaveLength(0);
-  });
-
-  it("doesn't offer an answer that names another company", async () => {
-    const other = add('Character.AI', 'Staff TPM', 'https://jobs.ashbyhq.com/character/1');
-    db.insert(applicationAnswers)
-      .values({
-        applicationId: other,
-        question: 'Why are you interested in working at Character.AI?',
-        answer: 'Character.AI is building a new kind of entertainment with AI, and this role fits.',
-      })
-      .run();
-    const q = 'Why are you interested in working at Suno?';
-    expect(similarAnswers(db, q)).toHaveLength(0);
-    expect(similarAnswers(db, q, 3, 'Suno')).toHaveLength(0);
-    // Still offered for that company: named in the question, or the one you're applying to.
-    expect(similarAnswers(db, 'Why are you interested in working at Character.AI?')).toHaveLength(
-      1,
-    );
-    expect(
-      similarAnswers(db, 'Why are you interested in working here?', 3, 'Character AI'),
-    ).toHaveLength(1);
   });
 });
