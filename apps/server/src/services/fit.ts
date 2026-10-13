@@ -27,7 +27,7 @@ import { currentEffort } from './settings.ts';
 import { recordUsage } from './usage.ts';
 
 /** Bump when the prompt or schema changes so cached assessments are recomputed. */
-export const FIT_PROMPT_VERSION = 'tracks-v6';
+export const FIT_PROMPT_VERSION = 'tracks-v7';
 
 /** What changes in the assessment between the kinds of role you're pursuing. */
 const TRACK_LENS: Record<
@@ -54,6 +54,16 @@ const TRACK_LENS: Record<
     logistics:
       'where the candidate must be based, office days per week and commute from their home base. Travel to customer sites is part of the job: score it against the travel the candidate says they accept.',
   },
+  CoS: {
+    who: 'a seasoned executive and recruiter who has hired Chiefs of Staff for CTOs, engineering, AI and product leaders, and founder-CEOs at large tech companies and startups',
+    reads:
+      "who the role supports and that leader's scope, how much is strategy, operating cadence (planning, OKRs, staff and exec reviews, board prep) and driving cross-functional initiatives versus scheduling, communications or admin work, the technical depth expected, the seniority implied by the leader, scope and pay, years required, office days, travel, employment type and hard requirements",
+    skills:
+      "running a leader's operating cadence, driving cross-functional programs and special projects to outcomes, influence without authority, executive communication, and technical depth in the leader's domain (engineering, infrastructure, AI), vs. the resume and career profile.",
+    level:
+      "the seniority of the leader supported, the scope (org size, a real seat in the leadership team) and pay vs. the candidate's Principal/Staff-equivalent target. Chief of Staff titles are flat, so don't mark the title down for its wording; a role supporting a first-line manager, or one that is mostly scheduling and admin, scores low.",
+    logistics: "location, office days per week, commute from the candidate's home base, travel.",
+  },
 };
 
 export function fitSystemPrompt(track: RoleTrack): string {
@@ -61,7 +71,7 @@ export function fitSystemPrompt(track: RoleTrack): string {
   const others = ROLE_TRACKS.filter((t) => t !== track);
   return `You are ${lens.who}. You assess how well a specific candidate fits a specific job posting, honestly and specifically, the way a trusted advisor would.
 
-This job is scored as a ${ROLE_TRACK_LABELS[track]} (${track}) role. The candidate may pursue more than one kind of role; judge it only as a ${ROLE_TRACK_LABELS[track]} role. A must-have, deal-breaker, plus or known gap that starts with another track (${others.map((t) => `"${t} roles:" or "${t}:"`).join(', ')}) doesn't apply here: leave it out of the scores, and give such a must-have or deal-breaker a criteria entry of ok with the note "Applies to ${others.join('/')} roles only".
+This job is scored as a ${ROLE_TRACK_LABELS[track]} (${track}) role. The candidate may pursue more than one kind of role; judge it only as a ${ROLE_TRACK_LABELS[track]} role. A must-have, deal-breaker, plus or known gap that starts with track names and a colon (such as ${others.map((t) => `"${t} roles:" or "${t}:"`).join(', ')}, or "${others.join('/')} roles:") applies only to the tracks it names. One that doesn't name ${track} doesn't apply here: leave it out of the scores, and give such a must-have or deal-breaker a criteria entry of ok with the note "Applies to <the tracks it names> roles only". Criteria with no track prefix apply to every track.
 
 How to assess:
 - Read the posting for what the role truly needs: ${lens.reads}.

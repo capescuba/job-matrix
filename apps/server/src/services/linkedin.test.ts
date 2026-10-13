@@ -169,7 +169,7 @@ describe('using it', () => {
     });
 
   it('fit scoring reads the career profile, and editing it makes scores stale', async () => {
-    expect(FIT_PROMPT_VERSION).toBe('tracks-v6');
+    expect(FIT_PROMPT_VERSION).toBe('tracks-v7');
     const open = addJob();
     const closed = addJob('Rejected');
     const { provider, prompts } = fake(() => sampleFit);
@@ -254,6 +254,13 @@ describe('role tracks', () => {
       'Engineering Manager',
     ])
       expect(trackFromTitle(t), t).toBe('TPM');
+    for (const t of [
+      'Chief of Staff',
+      'Chief of Staff to the CTO',
+      'Chief of Staff, Forward Deployed Engineering',
+      'CoS, AI Platform',
+    ])
+      expect(trackFromTitle(t), t).toBe('CoS');
   });
 
   it('one resume per track, falling back to the default', () => {
@@ -290,6 +297,7 @@ describe('role tracks', () => {
     expect(prompts[0]).toContain('Technical Program Manager hiring manager');
     expect(prompts[0]).toContain('<resume>\nPrincipal TPM, Workday.');
     expect(prompts[0]).toContain('"FDE roles:" or "FDE:"');
+    expect(prompts[0]).toContain('"FDE/CoS roles:"');
     expect(prompts[1]).toContain('Forward Deployed Engineering teams');
     expect(prompts[1]).toContain('<resume>\nEmbedded at banks.');
     expect(prompts[1]).toContain('"TPM roles:" or "TPM:"');
@@ -302,6 +310,22 @@ describe('role tracks', () => {
     expect(after.inputHash).not.toBe(before);
     updateJob(db, jobIdOf(tpmJob), { track: null });
     expect(fitInputsFor(db, tpmJob, 'fake-model', 'low').inputHash).toBe(before);
+  });
+
+  it('scores a Chief of Staff job with the CoS lens, on the default resume until one is set', async () => {
+    const cosJob = addJob('Chief of Staff to the CTO');
+    const { provider, prompts } = fake(() => sampleFit);
+    await assessFit(db, cosJob, { provider });
+    expect(prompts[0]).toContain('hired Chiefs of Staff');
+    expect(prompts[0]).toContain('scored as a Chief of Staff (CoS) role');
+    expect(prompts[0]).toContain('<resume>\nPrincipal TPM, Workday.');
+    const cos = db
+      .insert(resumeVersions)
+      .values({ label: 'cos', rawText: 'Ran the CTO staff cadence.' })
+      .returning()
+      .get();
+    setResumeTrack(db, cos.id, 'CoS');
+    expect(fitInputsFor(db, cosJob, 'fake-model', 'low').resume.label).toBe('cos');
   });
 
   it('answers application questions from the track resume', async () => {
