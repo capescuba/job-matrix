@@ -63,18 +63,22 @@ export const SOURCES = [
 export const REMOTE_TYPES = ['Remote', 'Hybrid', 'Onsite'] as const;
 
 /** The kinds of role you're pursuing; each job is scored as one, against that track's resume. */
-export const ROLE_TRACKS = ['TPM', 'FDE'] as const;
+export const ROLE_TRACKS = ['TPM', 'FDE', 'CoS'] as const;
 export type RoleTrack = (typeof ROLE_TRACKS)[number];
 export const ROLE_TRACK_LABELS: Record<RoleTrack, string> = {
   TPM: 'Technical Program Manager',
   FDE: 'Forward Deployed Engineer',
+  CoS: 'Chief of Staff',
 };
 
 const FDE_TITLE =
   /forward[\s-]*deploy|\bfde\b|deployment (engineer|strategist|lead)|applied (ai|ml) engineer|solutions? (engineer|architect)|(customer|field) engineer/i;
 
-/** The track a title reads as; anything that isn't plainly FDE is a TPM role. */
+const COS_TITLE = /chief of staff|\bcos\b/i;
+
+/** The track a title reads as; anything that isn't plainly CoS or FDE is a TPM role. */
 export function trackFromTitle(title: string): RoleTrack {
+  if (COS_TITLE.test(title)) return 'CoS';
   return FDE_TITLE.test(title) ? 'FDE' : 'TPM';
 }
 

@@ -66,7 +66,7 @@ export default function ProfilePage() {
 }
 
 /**
- * Uploaded resumes. Fit scoring reads the resume set for a job's track (TPM or FDE), else the
+ * Uploaded resumes. Fit scoring reads the resume set for a job's track (TPM, FDE or CoS), else the
  * default one.
  */
 function Resumes({ resumes }: { resumes: ProfileResponse['resumes'] | undefined }) {
