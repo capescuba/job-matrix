@@ -209,15 +209,20 @@ export function readPage(selectors) {
         !e.closest('[id*="chat" i], [class*="chat" i], [role="dialog"], [aria-modal="true"]'),
     ) || d.body;
   const main = docs.map(mainOf).reduce((a, b) => (text(b).length > text(a).length ? b : a));
-  // For telling one posting from a list of them: an "Apply" button or link, and how many links
-  // go to job postings (a careers index has many and nothing to apply to).
+  // For telling one posting from a list of them: an "Apply" button or link (Apple's says "Submit
+  // Resume"), and how many links in the main content go to job postings (a careers index has
+  // many and nothing to apply to). Menus and footers don't count: Apple's link to a dozen
+  // /careers/ pages (benefits, life at Apple, …) on every posting.
   const signals = {
     apply: all('a, button, [role="button"]').some((e) => {
       const t = text(e);
-      return t.length <= 40 && /^(apply|easy apply|i.m interested)/i.test(t);
+      return (
+        t.length <= 40 &&
+        /^(apply|easy apply|i.m interested|submit (your )?(resume|cv|application))/i.test(t)
+      );
     }),
     jobLinks: new Set(
-      all('a[href]')
+      [...main.querySelectorAll('a[href]')]
         .map((a) => a.href.split('#')[0])
         .filter(
           (h) =>

@@ -46,6 +46,14 @@ describe('is this page one job posting?', () => {
       ),
     ],
     [
+      // No job data or /jobs/ address; the "Submit Resume" button and the wording say it.
+      'Apple Jobs',
+      page('https://jobs.apple.com/en-us/details/200673538-0836/technical-program-manager-audio', {
+        pageText: 'Technical Program Manager - Audio\nMinimum Qualifications',
+        signals: { apply: true, jobLinks: 0 },
+      }),
+    ],
+    [
       'a page with schema.org job data',
       page('https://jobs.example.com/x', { jsonLd: ['{"@type":"JobPosting"}'] }),
     ],
