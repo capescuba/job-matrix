@@ -306,7 +306,14 @@ export async function syncLeads(
   for await (const page of client.messagesIn(folderId)) {
     for (const meta of page) {
       const key = meta.internetMessageId ?? meta.id;
-      if (known.has(key)) continue;
+      if (known.has(key)) {
+        // Graph's id (and so the Outlook link) changes when an email moves: keep the link working.
+        db.update(mailLeads)
+          .set({ messageId: meta.id, webLink: meta.webLink })
+          .where(eq(mailLeads.internetMessageId, key))
+          .run();
+        continue;
+      }
       known.add(key);
       try {
         const r = await addLead(db, client, meta, deps);

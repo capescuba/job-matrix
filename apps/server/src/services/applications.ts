@@ -23,6 +23,7 @@ import {
   contacts,
   fitAssessments,
   jobs,
+  mailLeads,
   statusEvents,
 } from '../db/schema.ts';
 
@@ -151,6 +152,8 @@ export interface ApplicationRow {
   prescreenScore: number | null;
   prescreenReason: string | null;
   prescreenModel: string | null;
+  /** The recruiter email it came from (Outlook link), when it came from the job-leads folder. */
+  emailLink: string | null;
 }
 
 type RawRow = Omit<ApplicationRow, 'fitGateReasons' | 'outreachRecommended' | 'postedApprox'> & {
@@ -198,7 +201,9 @@ export function listApplications(db: Db): ApplicationRow[] {
            CASE WHEN ps.id IS NOT NULL THEN ps.verdict WHEN l.model IS NOT NULL THEN l.verdict END AS prescreenVerdict,
            CASE WHEN ps.id IS NOT NULL THEN ps.score WHEN l.model IS NOT NULL THEN l.score END AS prescreenScore,
            CASE WHEN ps.id IS NOT NULL THEN ps.reason WHEN l.model IS NOT NULL THEN l.reason END AS prescreenReason,
-           COALESCE(ps.model, l.model) AS prescreenModel
+           COALESCE(ps.model, l.model) AS prescreenModel,
+           (SELECT web_link FROM mail_leads ml WHERE ml.application_id = a.id
+            ORDER BY ml.id LIMIT 1) AS emailLink
     FROM applications a
     JOIN jobs j ON j.id = a.job_id
     JOIN companies c ON c.id = j.company_id
@@ -285,7 +290,20 @@ export function getApplicationDetail(db: Db, id: number) {
     activities: acts,
     contacts: companyContacts,
     fits,
+    emailLink: emailLinkOf(db, id),
   };
+}
+
+/** The recruiter email a job came from (the first, if several recruiters sent it). */
+function emailLinkOf(db: Db, applicationId: number): string | null {
+  return (
+    db
+      .select({ link: mailLeads.webLink })
+      .from(mailLeads)
+      .where(eq(mailLeads.applicationId, applicationId))
+      .orderBy(mailLeads.id)
+      .get()?.link ?? null
+  );
 }
 
 /** `eventAt` dates the status change (defaults to now), e.g. when it comes from a dated activity. */
