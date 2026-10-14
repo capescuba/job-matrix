@@ -416,6 +416,21 @@ export function createMailClient(opts: MailClientOptions = {}) {
     }
   }
 
+  /**
+   * The messages of one conversation (thread), newest first. Outlook on the web's reading pane
+   * shows a conversation's id in its address, not a message's.
+   */
+  async function messagesInConversation(conversationId: string): Promise<MailMeta[]> {
+    const params = new URLSearchParams({
+      $select: META_FIELDS,
+      $filter: `conversationId eq '${conversationId.replace(/'/g, "''")}'`,
+      $top: '50',
+    });
+    const page = await get<{ value: GraphMessage[] }>(`/me/messages?${params}`);
+    // Sorted here: Graph refuses $orderby together with this filter.
+    return page.value.map(toMeta).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+  }
+
   /** One message with its body as plain text. */
   async function message(id: string): Promise<MailMessage> {
     const m = await get<GraphMessage>(
@@ -432,6 +447,7 @@ export function createMailClient(opts: MailClientOptions = {}) {
     messagesSince,
     folderByName,
     messagesIn,
+    messagesInConversation,
     message,
     tokenPath,
   };

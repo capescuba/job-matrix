@@ -169,6 +169,13 @@
       "when": 1792000881422,
       "tag": "0023_mail_leads",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792002089178,
+      "tag": "0024_mail_leads_conversation",
+      "breakpoints": true
     }
   ]
 }

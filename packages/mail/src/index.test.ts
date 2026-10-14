@@ -208,6 +208,20 @@ describe('mail client reading', () => {
     expect(first.searchParams.get('$select')).toContain('internetMessageId');
   });
 
+  it("lists a conversation's messages, newest first", async () => {
+    const dir = await tmp();
+    await signedIn(dir);
+    const fetchFn = fakeFetch(() => ({
+      value: [
+        msg('old', 'INBOX', '2026-09-01T00:00:00Z'),
+        msg('new', 'SENT', '2026-09-02T00:00:00Z'),
+      ],
+    }));
+    const c = createMailClient({ dir, clientId: 'app', fetchFn });
+    expect((await c.messagesInConversation("AQQk'x")).map((m) => m.id)).toEqual(['new', 'old']);
+    expect(fetchFn.calls[0]!.url.searchParams.get('$filter')).toBe("conversationId eq 'AQQk''x'");
+  });
+
   it('a 401 from Graph means signing in again', async () => {
     const dir = await tmp();
     await signedIn(dir);

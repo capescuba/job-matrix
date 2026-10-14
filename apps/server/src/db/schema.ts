@@ -372,6 +372,8 @@ export const mailLeads = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     internetMessageId: text('internet_message_id').notNull(),
     messageId: text('message_id').notNull(),
+    /** Its thread: what Outlook on the web's address names when the email is open. */
+    conversationId: text('conversation_id'),
     receivedAt: text('received_at').notNull(),
     fromName: text('from_name'),
     fromAddr: text('from_addr'),
@@ -385,7 +387,10 @@ export const mailLeads = sqliteTable(
     error: text('error'),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('mail_leads_message').on(t.internetMessageId)],
+  (t) => [
+    uniqueIndex('mail_leads_message').on(t.internetMessageId),
+    index('mail_leads_conversation').on(t.conversationId),
+  ],
 );
 
 /**

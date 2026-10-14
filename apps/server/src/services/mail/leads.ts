@@ -6,7 +6,7 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { RateLimitError } from '@jm/ai';
-import { NeedsSignIn, type MailClient, type MailMeta } from '@jm/mail';
+import { NeedsSignIn, type MailClient, type MailMessage, type MailMeta } from '@jm/mail';
 import type { Db } from '../../db/client.ts';
 import { applications, contacts, jobs, mailLeads } from '../../db/schema.ts';
 import { addActivity, createApplication, findOrCreateCompany } from '../applications.ts';
@@ -188,10 +188,22 @@ function addRecruiter(db: Db, companyId: number, f: LeadFields) {
 }
 
 /** One email → a Screening job (or the job it links to, if already tracked). */
-export async function addLead(db: Db, client: MailClient, meta: MailMeta, deps: LeadDeps = {}) {
-  const msg = await client.message(meta.id);
+export async function addLead(
+  db: Db,
+  client: MailClient,
+  meta: MailMeta,
+  deps: LeadDeps = {},
+  /** The email already read, and the title/company you corrected (from the side panel). */
+  extra: { message?: MailMessage; overrides?: { title?: string; company?: string } } = {},
+) {
+  const msg = extra.message ?? (await client.message(meta.id));
   const body = leadBody(msg.bodyText);
-  const f = leadFields(meta, body);
+  const read = leadFields(meta, body);
+  const f = {
+    ...read,
+    title: extra.overrides?.title?.trim() || read.title,
+    company: extra.overrides?.company?.trim() || read.company,
+  };
   const from = [f.recruiter.name, f.recruiter.address && `<${f.recruiter.address}>`]
     .filter(Boolean)
     .join(' ');
@@ -215,9 +227,12 @@ export async function addLead(db: Db, client: MailClient, meta: MailMeta, deps: 
       // The posting couldn't be read: the email fills in what it names.
       db.update(jobs)
         .set({
-          ...(r.title === 'Unknown role' && f.title !== 'Unknown role' && { title: f.title }),
-          ...(r.company === 'Unknown' &&
-            f.company !== 'Unknown' && { companyId: findOrCreateCompany(db, f.company) }),
+          ...(((r.title === 'Unknown role' && f.title !== 'Unknown role') ||
+            extra.overrides?.title?.trim()) && { title: f.title }),
+          ...(((r.company === 'Unknown' && f.company !== 'Unknown') ||
+            extra.overrides?.company?.trim()) && {
+            companyId: findOrCreateCompany(db, f.company),
+          }),
           ...(r.descriptionSource === 'Page text (whole page)' && {
             descriptionSource: 'Recruiter email',
           }),
@@ -261,6 +276,7 @@ export async function addLead(db: Db, client: MailClient, meta: MailMeta, deps: 
     .values({
       internetMessageId: meta.internetMessageId ?? meta.id,
       messageId: meta.id,
+      conversationId: meta.conversationId,
       receivedAt: meta.receivedAt,
       fromName: meta.from.name,
       fromAddr: meta.from.address,
@@ -309,7 +325,7 @@ export async function syncLeads(
       if (known.has(key)) {
         // Graph's id (and so the Outlook link) changes when an email moves: keep the link working.
         db.update(mailLeads)
-          .set({ messageId: meta.id, webLink: meta.webLink })
+          .set({ messageId: meta.id, webLink: meta.webLink, conversationId: meta.conversationId })
           .where(eq(mailLeads.internetMessageId, key))
           .run();
         continue;

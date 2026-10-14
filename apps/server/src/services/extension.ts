@@ -1,5 +1,6 @@
 import { and, desc, eq, like } from 'drizzle-orm';
 import { z } from 'zod';
+import type { MailClient } from '@jm/mail';
 import { getProvider, prescreenConfig, type LLMProvider } from '@jm/ai';
 import {
   jobTrack,
@@ -34,6 +35,7 @@ import {
   parsePageTitle,
 } from './screening.ts';
 import { embeddedJobId, fetchJobPosting, type FetchedJob } from './jobfetch.ts';
+import { emailContext, outlookMessageId } from './mail/outlookPage.ts';
 import { currentEffort, getSettings } from './settings.ts';
 import { getStock, type StockQuote } from './stock.ts';
 import { getUsageSummary, recordUsage } from './usage.ts';
@@ -243,26 +245,40 @@ async function boardPosting(url: string, fetchFn?: typeof fetch) {
   return found;
 }
 
-export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: typeof fetch } = {}) {
+export async function pageContext(
+  db: Db,
+  raw: PageInput,
+  opts: { fetchFn?: typeof fetch; mail?: MailClient } = {},
+) {
   const input = pageInputSchema.parse(raw);
   const url = normalizeUrl(input.url);
   const rows = listApplications(db);
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const hit = findTrackedByUrl(db, url);
+  // An email open in Outlook on the web: the job it became, or the posting it links to.
+  const emailId = outlookMessageId(input.url);
+  const email = emailId ? await emailContext(db, opts.mail, emailId) : null;
+  const hit = email
+    ? email.applicationId
+      ? { applicationId: email.applicationId }
+      : email.detected.postingUrl
+        ? findTrackedByUrl(db, normalizeUrl(email.detected.postingUrl))
+        : null
+    : findTrackedByUrl(db, url);
   const tracked = hit ? byId.get(hit.applicationId) : undefined;
 
-  // What the page says it is (no network, no AI).
-  const ld = jobPostingFromJsonLd(input.jsonLd);
-  const fromTitle = parsePageTitle(input.pageTitle);
+  // What the page says it is (no network, no AI). Outlook's own page says nothing about the job.
+  const ld = email ? null : jobPostingFromJsonLd(input.jsonLd);
+  const fromTitle = email ? { title: null, company: null } : parsePageTitle(input.pageTitle);
   const ldOrg =
     typeof ld?.hiringOrganization === 'string'
       ? ld.hiringOrganization
       : ld?.hiringOrganization?.name;
   // A careers page embedding a job board (?ashby_jid=, ?gh_jid=): the page is only a shell, so
   // ask the board what the job is (cached briefly; no AI).
-  const board = tracked ? null : await boardPosting(url, opts.fetchFn);
+  const board = tracked || email ? null : await boardPosting(url, opts.fetchFn);
   const detected = {
     title:
+      email?.detected.title ||
       board?.title?.trim() ||
       input.fields?.title?.trim() ||
       ld?.title?.trim() ||
@@ -271,6 +287,7 @@ export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: type
     // A template pick that caught a heading ("About Us") rather than the name doesn't count; the
     // page title or the careers site's address (careers.oracle.com → Oracle) is used instead.
     company:
+      email?.detected.company ||
       (looksLikeCompanyName(input.fields?.company) ? input.fields!.company!.trim() : null) ||
       board?.company?.trim() ||
       ldOrg?.trim() ||
@@ -290,7 +307,8 @@ export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: type
     const aliasOf = aliases.find((a) => a.key === k)?.companyId;
     return all.find((c) => companyKey(c.name) === k) ?? all.find((c) => c.id === aliasOf);
   };
-  const host = hostOf(url);
+  // Outlook's address says nothing about the company.
+  const host = email ? null : hostOf(url);
   const learnedHosts = new Map<string, Set<number>>();
   for (const r of rows) {
     const h = hostOf(r.url);
@@ -305,12 +323,12 @@ export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: type
     (tracked && all.find((c) => c.id === tracked.companyId)) ??
     byKey(detected.company) ??
     hostCompany ??
-    byKey(companyFromBoardUrl(url)) ??
+    (email ? undefined : byKey(companyFromBoardUrl(url))) ??
     (host ? all.find((c) => hostOf(c.website) === host) : undefined) ??
     // The careers site's own address: careers.oracle.com → Oracle.
-    byKey(companyFromHost(url)) ??
+    (email ? undefined : byKey(companyFromHost(url))) ??
     byKey(fromTitle.company);
-  if (!detected.company)
+  if (!detected.company && !email)
     detected.company =
       company?.name ??
       fromTitle.company ??
@@ -340,6 +358,7 @@ export async function pageContext(db: Db, raw: PageInput, opts: { fetchFn?: type
   return {
     url,
     detected,
+    email,
     tracked: tracked ? { ...summary(db, tracked), fit: fitDetail(db, tracked.jobId) } : null,
     similar: similar.map((r) => summary(db, r)),
     company: company
