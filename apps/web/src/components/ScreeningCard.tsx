@@ -292,13 +292,24 @@ function metaLine(r: ApplicationRow): string[] {
   ].filter((x): x is string => !!x);
 }
 
-/** The posting on its own site, and the job's page in Job Matrix. */
+/** The posting on its own site, the recruiter's email, and the job's page in Job Matrix. */
 function JobLinks({ row: r }: { row: ApplicationRow }) {
   return (
     <>
       {r.url && (
         <a href={r.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
           posting ↗
+        </a>
+      )}
+      {r.emailLink && (
+        <a
+          href={r.emailLink}
+          target="_blank"
+          rel="noreferrer"
+          className="text-accent hover:underline"
+          title="The recruiter's email, in Outlook"
+        >
+          email ↗
         </a>
       )}
       <Link to={`/applications/${r.id}`} className="text-accent hover:underline">

@@ -204,13 +204,21 @@ describe('the job-leads folder', () => {
     ).toEqual(['Jane Doe', 'Jane Doe']);
 
     // Same emails again, now with new Graph ids (moved out and back): nothing new.
-    const moved = box.map((m) => ({ ...m, id: `${m.id}-moved` }));
+    const moved = box.map((m) => ({
+      ...m,
+      id: `${m.id}-moved`,
+      webLink: `https://outlook.live.com/owa/?ItemID=${m.id}-moved`,
+    }));
     const again = await syncLeads(db, fakeMailbox(moved), 'Job leads', {
       screener,
       sleep: noSleep,
     });
     expect(again).toEqual({ folderFound: true, added: 0, screened: 0 });
     expect(db.select().from(mailLeads).all()).toHaveLength(2);
+    // …and the Screening card / job page link to the email where it is now.
+    const row = listApplications(db).find((a) => a.id === tpm.id)!;
+    expect(row.emailLink).toBe('https://outlook.live.com/owa/?ItemID=m1-moved');
+    expect(getApplicationDetail(db, tpm.id).emailLink).toBe(row.emailLink);
   });
 
   it('a linked posting goes through capture, so the same job from two recruiters is one job', async () => {

@@ -101,6 +101,16 @@ function Detail({ data }: { data: ApplicationDetail }) {
               Open posting ↗
             </a>
           )}
+          {data.emailLink && (
+            <a
+              href={data.emailLink}
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent hover:underline"
+            >
+              Open recruiter email ↗
+            </a>
+          )}
           {posted && (
             <span
               className={cx(
