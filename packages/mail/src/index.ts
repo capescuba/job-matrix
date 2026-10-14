@@ -17,7 +17,7 @@ const EARLY_MS = 5 * 60_000;
 
 /** Metadata for listing and filtering; no bodies. */
 const META_FIELDS =
-  'id,subject,from,replyTo,receivedDateTime,bodyPreview,parentFolderId,webLink,conversationId';
+  'id,subject,from,replyTo,receivedDateTime,bodyPreview,parentFolderId,webLink,conversationId,internetMessageId';
 
 export class NeedsSignIn extends Error {
   constructor(message: string) {
@@ -52,6 +52,8 @@ export interface MailMeta {
   folderId: string | null;
   webLink: string | null;
   conversationId: string | null;
+  /** The RFC Message-ID header: unlike `id`, it stays the same when the email moves folders. */
+  internetMessageId?: string | null;
 }
 
 export interface MailMessage extends MailMeta {
@@ -94,6 +96,7 @@ type GraphMessage = {
   parentFolderId?: string;
   webLink?: string;
   conversationId?: string;
+  internetMessageId?: string;
   body?: { content?: string };
 };
 
@@ -142,6 +145,7 @@ function toMeta(m: GraphMessage): MailMeta {
     folderId: m.parentFolderId ?? null,
     webLink: m.webLink ?? null,
     conversationId: m.conversationId ?? null,
+    internetMessageId: m.internetMessageId ?? null,
   };
 }
 
@@ -167,6 +171,7 @@ export function createMailClient(opts: MailClientOptions = {}) {
   let lastError: string | null = null;
   let refreshing: Promise<SavedToken> | null = null;
   const skipFolders = new Map<string, string>(); // Sent Items / Drafts / Outbox ids
+  const namedFolders = new Map<string, string>(); // lower-case display name → id
 
   async function clientId(): Promise<string | null> {
     if (opts.clientId) return opts.clientId;
@@ -373,6 +378,44 @@ export function createMailClient(opts: MailClientOptions = {}) {
     }
   }
 
+  /**
+   * A folder's id by its display name (any case): a top-level folder, else one inside the
+   * Inbox. Null when there's no such folder.
+   */
+  async function folderByName(name: string): Promise<string | null> {
+    const key = name.trim().toLowerCase();
+    if (!key) return null;
+    const cached = namedFolders.get(key);
+    if (cached) return cached;
+    const filter = `displayName eq '${name.trim().replace(/'/g, "''")}'`;
+    for (const parent of ['/me/mailFolders', '/me/mailFolders/inbox/childFolders']) {
+      const params = new URLSearchParams({ $filter: filter, $select: 'id,displayName' });
+      const res = await get<{ value: { id: string }[] }>(`${parent}?${params}`);
+      const id = res.value[0]?.id;
+      if (id) {
+        namedFolders.set(key, id);
+        return id;
+      }
+    }
+    return null;
+  }
+
+  /** Every message in one folder, newest first, in pages. */
+  async function* messagesIn(folderId: string, pageSize = 50): AsyncGenerator<MailMeta[]> {
+    const params = new URLSearchParams({
+      $select: META_FIELDS,
+      $orderby: 'receivedDateTime desc',
+      $top: String(pageSize),
+    });
+    let url: string | undefined =
+      `/me/mailFolders/${encodeURIComponent(folderId)}/messages?${params}`;
+    while (url) {
+      const page: { value: GraphMessage[]; '@odata.nextLink'?: string } = await get(url);
+      yield page.value.map(toMeta);
+      url = page['@odata.nextLink'];
+    }
+  }
+
   /** One message with its body as plain text. */
   async function message(id: string): Promise<MailMessage> {
     const m = await get<GraphMessage>(
@@ -382,5 +425,14 @@ export function createMailClient(opts: MailClientOptions = {}) {
     return { ...toMeta(m), bodyText: (m.body?.content ?? '').trim() };
   }
 
-  return { accessToken, startSignIn, status, messagesSince, message, tokenPath };
+  return {
+    accessToken,
+    startSignIn,
+    status,
+    messagesSince,
+    folderByName,
+    messagesIn,
+    message,
+    tokenPath,
+  };
 }

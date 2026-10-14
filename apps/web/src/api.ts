@@ -76,10 +76,21 @@ export interface MailStatus extends MailConnection {
   lastSyncAt: string | null;
   scanned: number;
   found: number;
+  /** Outlook folder whose recruiter emails go to Screening; null = off. */
+  leadsFolder: string | null;
+  /** Whether the last check found that folder (null: not checked since it was set). */
+  leadsFolderFound: boolean | null;
+  leadsAdded: number;
   watermark: string | null;
   nextSyncAt: string | null;
   pending: number;
-  progress: { running: boolean; scanned: number; found: number; startedAt: string | null };
+  progress: {
+    running: boolean;
+    scanned: number;
+    found: number;
+    leadsAdded: number;
+    startedAt: string | null;
+  };
   askAiUsd: number | null;
 }
 export type Usage = ReturnType<typeof getUsageSummary>;
@@ -264,8 +275,11 @@ export const api = {
       'POST',
       '/api/mail/connect',
     ),
-  mailSettings: (patch: { enabled?: boolean; intervalMinutes?: number }) =>
-    request<MailStatus>('POST', '/api/mail/settings', patch),
+  mailSettings: (patch: {
+    enabled?: boolean;
+    intervalMinutes?: number;
+    leadsFolder?: string | null;
+  }) => request<MailStatus>('POST', '/api/mail/settings', patch),
   mailSync: () => request<MailStatus>('POST', '/api/mail/sync'),
   mailRescan: () => request<MailStatus>('POST', '/api/mail/rescan'),
   emailUpdates: (state: 'pending' | 'done') =>

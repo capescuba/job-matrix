@@ -43,6 +43,7 @@ const mail = (
   folderId: 'INBOX',
   webLink: `https://outlook.live.com/owa/?ItemID=${id}`,
   conversationId: null,
+  internetMessageId: null,
 });
 
 /** A fake mailbox: pages of 2, records which bodies were opened. */
@@ -73,6 +74,8 @@ function fakeMailbox(messages: Mail[]) {
       for (let i = 0; i < list.length; i += 2)
         yield list.slice(i, i + 2).map(({ body: _b, ...meta }) => meta);
     },
+    folderByName: async () => null,
+    async *messagesIn() {},
     async message(id: string) {
       opened.push(id);
       const m = messages.find((x) => x.id === id)!;
@@ -148,7 +151,7 @@ describe('checking the mailbox', () => {
     const { client, opened, sinceCalls } = fakeMailbox(inbox());
     const r = await syncMail(db, client);
     expect(sinceCalls).toEqual(['2026-09-01T12:00:00.000Z']);
-    expect(r).toEqual({ scanned: 6, found: 4 });
+    expect(r).toEqual({ scanned: 6, found: 4, leadsAdded: 0 });
     expect(opened.sort()).toEqual(['box-receipt', 'dd-receipt', 'dd-reject', 'unknown']);
 
     const pending = listUpdates(db, 'pending');

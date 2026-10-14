@@ -775,6 +775,9 @@ export function buildApp(
       lastError: s.lastError ?? conn.lastError,
       scanned: s.scanned,
       found: s.found,
+      leadsFolder: s.leadsFolder,
+      leadsFolderFound: s.leadsFolderFound,
+      leadsAdded: s.leadsAdded,
       watermark: s.watermark,
       nextSyncAt: nextSyncAt(),
       pending: pendingCount(db),
@@ -803,6 +806,7 @@ export function buildApp(
           .int()
           .refine((v) => (INTERVALS as readonly number[]).includes(v), 'Unknown interval')
           .optional(),
+        leadsFolder: z.string().trim().max(100).nullable().optional(),
       })
       .parse(req.body);
     updateMailSettings(db, body);
