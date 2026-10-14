@@ -326,10 +326,11 @@ function draw() {
     strip,
     state.notice ? `<section class="${state.notice.tone}">${esc(state.notice.text)}</section>` : '',
     linkedinProfileSection(),
-    postingSection(),
+    state.ctx.email && !state.ctx.tracked ? emailSection() : postingSection(),
     companySection(),
-    helperSection(),
-    teachSection(),
+    // Outlook's own page: no application form to help with, nothing to teach.
+    state.ctx.email ? '' : helperSection(),
+    state.ctx.email ? '' : teachSection(),
   ].join('');
 }
 
@@ -412,7 +413,7 @@ function postingSection() {
          </div>`
       : '';
     return `<section>
-      <h2>This posting</h2>
+      <h2>${ctx.email ? 'This email’s job' : 'This posting'}</h2>
       ${statusBanner(t)}
       <div class="row" style="align-items:flex-start">
         <div class="grow">
@@ -487,6 +488,44 @@ function postingSection() {
             : ''
         }
         <button data-action="add-score" ${state.busy ? 'disabled' : ''} title="Adds it to Screening and scores your fit here — company research stays separate">${state.busy === 'score' ? 'Adding…' : `Add &amp; score fit · ~${money(ctx.costs.fit)}`}</button>
+      </div>
+    </div>
+  </section>`;
+}
+
+/** An email open in Outlook on the web that isn't a job yet: add it, like the job-leads folder. */
+function emailSection() {
+  const { ctx } = state;
+  const e = ctx.email;
+  const from = [e.from, e.receivedAt && day(e.receivedAt)].filter(Boolean).join(' · ');
+  const head = `<h2>This email</h2>
+    ${e.subject ? `<div class="title">${esc(e.subject)}</div>` : ''}
+    ${from ? `<div class="muted small">${esc(from)}</div>` : ''}`;
+  if (e.error && !e.subject)
+    return `<section>${head}<p class="warn" style="margin:6px 0">${esc(e.error)}</p>
+      <button data-action="open" data-path="/email">Open the Email page</button></section>`;
+  let posting = '';
+  try {
+    if (e.detected.postingUrl)
+      posting = `It links to a posting on ${esc(new URL(e.detected.postingUrl).hostname.replace(/^www\./, ''))}: Job Matrix reads the job from there, and uses the email if it can’t.`;
+  } catch {
+    // not a URL
+  }
+  const busy = state.busy;
+  return `<section>
+    ${head}
+    <div class="stack" style="margin-top:8px">
+      <label class="field">Title<input data-edit="title" value="${esc(state.edits.title)}" placeholder="Job title" /></label>
+      <label class="field">Company<input data-edit="company" value="${esc(state.edits.company)}" placeholder="Company (or the recruiter’s agency)" /></label>
+      <div class="small faint">${posting || 'The email becomes the job description (without the quoted thread and footer).'} The recruiter is added as a contact.</div>
+      <div class="row">
+        <button class="${ctx.prescreen ? '' : 'primary'}" data-action="email-add" ${busy ? 'disabled' : ''}>${busy === 'add' ? 'Adding…' : 'Add to Screening'}</button>
+        ${
+          ctx.prescreen
+            ? `<button class="primary" data-action="email-add-prescreen" ${busy ? 'disabled' : ''} title="Adds it to Screening and asks the free pre-screen model (${esc(ctx.prescreen.model)}) for a quick yes / maybe / no">${busy === 'prescreen' ? 'Adding…' : 'Add &amp; pre-screen · free'}</button>`
+            : ''
+        }
+        <button data-action="email-add-score" ${busy ? 'disabled' : ''} title="Adds it to Screening and scores your fit here — company research stays separate">${busy === 'score' ? 'Adding…' : `Add &amp; score fit · ~${money(ctx.costs.fit)}`}</button>
       </div>
     </div>
   </section>`;
@@ -654,6 +693,35 @@ async function add(then) {
       };
       render();
     }
+  } catch (e) {
+    state.busy = null;
+    state.notice = { tone: 'error', text: e.message || String(e) };
+    render();
+  }
+}
+
+/** Adds the open Outlook email to Screening; then, with `then`, pre-screens or scores it. */
+async function addFromEmail(then) {
+  state.notice = null;
+  state.busy = then ?? 'add';
+  render();
+  try {
+    const r = await api('/api/ext/email-lead', {
+      method: 'POST',
+      body: {
+        messageId: state.ctx.email.messageId,
+        title: state.edits.title.trim() || undefined,
+        company: state.edits.company.trim() || undefined,
+      },
+      onStatus: status,
+    });
+    state.busy = null;
+    await refresh();
+    if (r.existing) {
+      state.notice = { tone: 'warn', text: 'Already in Job Matrix — showing that job.' };
+      render();
+    } else if (then === 'score') await scoreFit(r.applicationId);
+    else if (then === 'prescreen') await prescreen(r.applicationId);
   } catch (e) {
     state.busy = null;
     state.notice = { tone: 'error', text: e.message || String(e) };
@@ -842,6 +910,9 @@ document.addEventListener('click', async (e) => {
   } else if (a === 'add') add(false);
   else if (a === 'add-score') add('score');
   else if (a === 'add-prescreen') add('prescreen');
+  else if (a === 'email-add') addFromEmail(null);
+  else if (a === 'email-add-prescreen') addFromEmail('prescreen');
+  else if (a === 'email-add-score') addFromEmail('score');
   else if (a === 'prescreen') prescreen(Number(el.dataset.id));
   else if (a === 'run-dismiss') {
     state.runDismissed = state.run?.startedAt ?? null;

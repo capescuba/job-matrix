@@ -113,6 +113,7 @@ import {
   trackFromUpdate,
   trackSchema,
 } from './services/mail/updates.ts';
+import { addEmailLead } from './services/mail/outlookPage.ts';
 import {
   addLead,
   crawlProgress,
@@ -516,8 +517,20 @@ export function buildApp(
   const hostParam = z.object({ host: z.string().trim().min(1).max(253) });
   app.get('/api/ext/hello', { preHandler: requireToken }, () => ({ ok: true, app: 'job-matrix' }));
   app.post('/api/ext/context', { preHandler: requireToken }, (req) =>
-    pageContext(db, pageInputSchema.parse(req.body), { fetchFn: opts.fetchFn }),
+    pageContext(db, pageInputSchema.parse(req.body), { fetchFn: opts.fetchFn, mail }),
   );
+  // "Add to Screening" on an email open in Outlook on the web.
+  app.post('/api/ext/email-lead', { preHandler: requireToken }, async (req, reply) => {
+    const body = z
+      .object({
+        messageId: z.string().trim().min(1).max(1000),
+        title: z.string().trim().max(300).optional(),
+        company: z.string().trim().max(200).optional(),
+      })
+      .parse(req.body);
+    const r = await addEmailLead(db, mail, body, { fetchFn: opts.fetchFn });
+    return reply.status(r.existing ? 200 : 201).send(r);
+  });
   app.get('/api/ext/templates/:host', { preHandler: requireToken }, (req) =>
     getTemplate(db, hostParam.parse(req.params).host),
   );
