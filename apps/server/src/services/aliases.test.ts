@@ -33,6 +33,7 @@ function mailbox(messages: (MailMeta & { body: string })[]) {
     async *messagesSince() {
       yield messages.map(({ body: _b, ...m }) => m);
     },
+    folderByName: async () => null,
     message: async (id: string) => {
       const m = messages.find((x) => x.id === id)!;
       return { ...m, bodyText: m.body };

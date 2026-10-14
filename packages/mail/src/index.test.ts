@@ -167,6 +167,47 @@ describe('mail client reading', () => {
     );
   });
 
+  it('finds a folder by name at the top level, else inside the Inbox, and remembers it', async () => {
+    const dir = await tmp();
+    await signedIn(dir);
+    const fetchFn = fakeFetch((u) =>
+      u.pathname.endsWith('/inbox/childFolders') && u.searchParams.get('$filter')?.includes('Job')
+        ? { value: [{ id: 'LEADS' }] }
+        : { value: [] },
+    );
+    const c = createMailClient({ dir, clientId: 'app', fetchFn });
+    expect(await c.folderByName('Job leads')).toBe('LEADS');
+    expect(await c.folderByName('job LEADS')).toBe('LEADS');
+    expect(fetchFn.calls).toHaveLength(2);
+    expect(fetchFn.calls[0]!.url.searchParams.get('$filter')).toBe("displayName eq 'Job leads'");
+    expect(await c.folderByName("Bob's")).toBeNull();
+    expect(fetchFn.calls[2]!.url.searchParams.get('$filter')).toBe("displayName eq 'Bob''s'");
+  });
+
+  it("lists one folder's messages, newest first, paging, with the Message-ID header", async () => {
+    const dir = await tmp();
+    await signedIn(dir);
+    const pages = [
+      {
+        value: [{ ...msg('b', 'LEADS', '2026-09-02T00:00:00Z'), internetMessageId: '<b@x>' }],
+        '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/mailFolders/LEADS/messages?$skip=1',
+      },
+      { value: [msg('a', 'LEADS', '2026-09-01T00:00:00Z')] },
+    ];
+    const fetchFn = fakeFetch(() => pages.shift());
+    const c = createMailClient({ dir, clientId: 'app', fetchFn });
+    const got = [];
+    for await (const page of c.messagesIn('LEADS')) got.push(...page);
+    expect(got.map((m) => [m.id, m.internetMessageId])).toEqual([
+      ['b', '<b@x>'],
+      ['a', null],
+    ]);
+    const first = fetchFn.calls[0]!.url;
+    expect(first.pathname).toBe('/v1.0/me/mailFolders/LEADS/messages');
+    expect(first.searchParams.get('$orderby')).toBe('receivedDateTime desc');
+    expect(first.searchParams.get('$select')).toContain('internetMessageId');
+  });
+
   it('a 401 from Graph means signing in again', async () => {
     const dir = await tmp();
     await signedIn(dir);

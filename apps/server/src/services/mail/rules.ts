@@ -40,7 +40,8 @@ const LINKEDIN_RECEIPT = /your application was (sent|viewed)/i;
 const APPLICATION_WORDS =
   /\b(appl(y|ied|ying|ication)|candida(cy|te)|interview|position|role|recruit(er|ing)|hiring team|talent acquisition|your interest)\b/i;
 
-const FREE_MAIL = /(^|\.)(gmail|hotmail|outlook|live|yahoo|icloud|aol|proton(mail)?)\.[a-z.]+$/i;
+export const FREE_MAIL =
+  /(^|\.)(gmail|hotmail|outlook|live|yahoo|icloud|aol|proton(mail)?)\.[a-z.]+$/i;
 
 const domainOf = (addr: string | null) => addr?.split('@')[1]?.toLowerCase() ?? '';
 /** "talent.icims.com" → "icims.com"; "mail.box.com" → "box.com". */

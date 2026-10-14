@@ -299,11 +299,78 @@ function ConnectionCard({ status }: { status: MailStatus | undefined }) {
         Looks in every folder (Inbox, Junk, Deleted Items, your own folders), not Sent or Drafts.
         Only job-related emails are kept; checks run while Job Matrix is open.
       </p>
+      <LeadsFolder
+        status={status}
+        onSave={(leadsFolder) => settings.mutate({ leadsFolder })}
+        saving={settings.isPending}
+      />
       {status.lastError && !running && (
         <p className="mt-2 text-sm text-bad">Last check failed: {status.lastError}</p>
       )}
       <ErrorText error={sync.error ?? rescan.error ?? settings.error} />
     </Card>
+  );
+}
+
+/** The Outlook folder you move recruiters' job emails into; each check sends them to Screening. */
+function LeadsFolder({
+  status,
+  onSave,
+  saving,
+}: {
+  status: MailStatus;
+  onSave: (folder: string | null) => void;
+  saving: boolean;
+}) {
+  const [name, setName] = useState(status.leadsFolder ?? '');
+  useEffect(() => setName(status.leadsFolder ?? ''), [status.leadsFolder]);
+  const save = () => {
+    const v = name.trim() || null;
+    if (v !== (status.leadsFolder ?? null)) onSave(v);
+  };
+  const running = status.progress.running;
+  return (
+    <div className="mt-4 border-t border-border pt-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <label className="flex items-center gap-2 text-ink-2">
+          Recruiter job leads folder
+          <Input
+            className="w-44"
+            value={name}
+            placeholder="Off"
+            disabled={saving}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={save}
+            onKeyDown={(e) => e.key === 'Enter' && save()}
+          />
+        </label>
+        {status.leadsFolder &&
+          (running ? (
+            status.progress.leadsAdded > 0 && (
+              <span className="text-accent">{status.progress.leadsAdded} added to Screening</span>
+            )
+          ) : status.leadsFolderFound === false ? (
+            <span className="text-warn">
+              No “{status.leadsFolder}” folder found — create it in Outlook (top level or inside the
+              Inbox).
+            </span>
+          ) : (
+            status.leadsFolderFound && (
+              <span className="text-ink-3">
+                Last check: {status.leadsAdded} added to{' '}
+                <Link to="/screening" className="text-accent hover:underline">
+                  Screening
+                </Link>
+              </span>
+            )
+          ))}
+      </div>
+      <p className="mt-1 text-xs text-ink-3">
+        Move a recruiter's email with a job description into this folder (from any device). Each
+        check adds it to Screening — from the posting it links to, else from the email — and runs
+        the free pre-screen. Leave empty to turn off.
+      </p>
+    </div>
   );
 }
 

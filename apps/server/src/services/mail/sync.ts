@@ -8,6 +8,7 @@ import { NeedsSignIn, type MailClient, type MailMeta } from '@jm/mail';
 import type { Db } from '../../db/client.ts';
 import { emailUpdates, mailSync } from '../../db/schema.ts';
 import { logEvent } from '../log.ts';
+import { syncLeads, type LeadDeps } from './leads.ts';
 import { rematchPending } from './updates.ts';
 import {
   buildMatchContext,
@@ -29,9 +30,20 @@ export function mailState(db: Db) {
   return db.select().from(mailSync).where(eq(mailSync.id, 1)).get()!;
 }
 
-export function updateMailSettings(db: Db, patch: { enabled?: boolean; intervalMinutes?: number }) {
+export function updateMailSettings(
+  db: Db,
+  patch: { enabled?: boolean; intervalMinutes?: number; leadsFolder?: string | null },
+) {
   mailState(db);
-  db.update(mailSync).set(patch).where(eq(mailSync.id, 1)).run();
+  const set = {
+    ...patch,
+    // A new folder name: whether it exists is only known after the next check.
+    ...(patch.leadsFolder !== undefined && {
+      leadsFolder: patch.leadsFolder?.trim() || null,
+      leadsFolderFound: null,
+    }),
+  };
+  db.update(mailSync).set(set).where(eq(mailSync.id, 1)).run();
   return mailState(db);
 }
 
@@ -82,11 +94,21 @@ export interface SyncProgress {
   running: boolean;
   scanned: number;
   found: number;
+  /** Jobs added from the leads folder (recruiter emails). */
+  leadsAdded: number;
   startedAt: string | null;
 }
 
-const progress: SyncProgress = { running: false, scanned: 0, found: 0, startedAt: null };
-let current: Promise<{ scanned: number; found: number }> | null = null;
+type SyncResult = { scanned: number; found: number; leadsAdded: number };
+
+const progress: SyncProgress = {
+  running: false,
+  scanned: 0,
+  found: 0,
+  leadsAdded: 0,
+  startedAt: null,
+};
+let current: Promise<SyncResult> | null = null;
 
 export const syncProgress = (): SyncProgress => ({ ...progress });
 
@@ -97,8 +119,8 @@ export const syncProgress = (): SyncProgress => ({ ...progress });
 export function syncMail(
   db: Db,
   client: MailClient,
-  opts: { rescan?: boolean; trigger?: string } = {},
-): Promise<{ scanned: number; found: number }> {
+  opts: { rescan?: boolean; trigger?: string; leads?: LeadDeps } = {},
+): Promise<SyncResult> {
   current ??= run(db, client, opts).finally(() => {
     current = null;
     progress.running = false;
@@ -106,13 +128,18 @@ export function syncMail(
   return current;
 }
 
-async function run(db: Db, client: MailClient, opts: { rescan?: boolean; trigger?: string }) {
+async function run(
+  db: Db,
+  client: MailClient,
+  opts: { rescan?: boolean; trigger?: string; leads?: LeadDeps },
+) {
   const state = mailState(db);
   const since = opts.rescan || !state.watermark ? historyStart(db) : state.watermark;
   Object.assign(progress, {
     running: true,
     scanned: 0,
     found: 0,
+    leadsAdded: 0,
     startedAt: new Date().toISOString(),
   });
   logEvent('mail.sync.start', `Checking email since ${since.slice(0, 10)}`, {
@@ -153,6 +180,15 @@ async function run(db: Db, client: MailClient, opts: { rescan?: boolean; trigger
       // Keep what's done so an interrupted check picks up from here.
       save();
     }
+    // Recruiter emails you moved to the leads folder → Screening.
+    if (state.leadsFolder) {
+      const leads = await syncLeads(db, client, state.leadsFolder, opts.leads);
+      progress.leadsAdded = leads.added;
+      db.update(mailSync)
+        .set({ leadsFolderFound: leads.folderFound, leadsAdded: leads.added })
+        .where(eq(mailSync.id, 1))
+        .run();
+    }
     db.update(mailSync)
       .set({ lastSyncAt: new Date().toISOString(), lastError: null })
       .where(eq(mailSync.id, 1))
@@ -160,10 +196,11 @@ async function run(db: Db, client: MailClient, opts: { rescan?: boolean; trigger
     save();
     logEvent(
       'mail.sync.done',
-      `Checked ${progress.scanned} emails, found ${progress.found} job updates`,
-      { scanned: progress.scanned, found: progress.found },
+      `Checked ${progress.scanned} emails, found ${progress.found} job updates` +
+        (state.leadsFolder ? `, added ${progress.leadsAdded} recruiter leads` : ''),
+      { scanned: progress.scanned, found: progress.found, leadsAdded: progress.leadsAdded },
     );
-    return { scanned: progress.scanned, found: progress.found };
+    return { scanned: progress.scanned, found: progress.found, leadsAdded: progress.leadsAdded };
   } catch (e) {
     const msg =
       e instanceof NeedsSignIn ? `${e.message} Connect Outlook again.` : (e as Error).message;

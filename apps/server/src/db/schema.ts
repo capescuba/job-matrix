@@ -355,7 +355,38 @@ export const mailSync = sqliteTable('mail_sync', {
   /** Last check: messages looked at, job-related ones found. */
   scanned: integer('scanned').notNull().default(0),
   found: integer('found').notNull().default(0),
+  /** Outlook folder whose emails (recruiter job descriptions) go to Screening; null = off. */
+  leadsFolder: text('leads_folder').default('Job leads'),
+  /** Last check: whether that folder was found, and how many jobs it added. */
+  leadsFolderFound: integer('leads_folder_found', { mode: 'boolean' }),
+  leadsAdded: integer('leads_added').notNull().default(0),
 });
+
+/**
+ * Emails taken from the job-leads folder (recruiters' job descriptions), one per email, keyed
+ * by its Message-ID header: Graph's own id changes when the email moves folders.
+ */
+export const mailLeads = sqliteTable(
+  'mail_leads',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    internetMessageId: text('internet_message_id').notNull(),
+    messageId: text('message_id').notNull(),
+    receivedAt: text('received_at').notNull(),
+    fromName: text('from_name'),
+    fromAddr: text('from_addr'),
+    subject: text('subject').notNull(),
+    webLink: text('web_link'),
+    applicationId: integer('application_id').references(() => applications.id, {
+      onDelete: 'set null',
+    }),
+    /** The email's posting link was a job already tracked. */
+    existing: integer('existing', { mode: 'boolean' }).notNull().default(false),
+    error: text('error'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('mail_leads_message').on(t.internetMessageId)],
+);
 
 /**
  * Other names a company goes by ("SpaceXAI" for Cursor after an acquisition, a parent brand, an

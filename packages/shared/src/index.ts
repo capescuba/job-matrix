@@ -57,6 +57,7 @@ export const SOURCES = [
   'ZipRecruiter',
   'Dice',
   'Referral',
+  'Recruiter',
   'Company site',
   'Other',
 ] as const;
