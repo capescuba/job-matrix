@@ -138,7 +138,7 @@ export function registerInterviewRoutes(app: FastifyInstance, db: Db, opts: Inte
       live: existingSession(id)?.live ?? false,
       estimates: {
         prepUsd: estimate(db, 'prep', session.coachModel, 0.03),
-        debriefUsd: estimate(db, 'debrief', settings.model, 0.12),
+        debriefUsd: estimate(db, 'debrief', settings.model, 0.06),
         debriefModel: pricingFor(settings.model)?.label ?? settings.model,
       },
     };
@@ -254,7 +254,9 @@ export function registerInterviewRoutes(app: FastifyInstance, db: Db, opts: Inte
       Connection: 'keep-alive',
     });
     res.write(': connected\n\n');
-    const unsubscribe = s.subscribe((e: SessionEvent) => res.write(`data: ${JSON.stringify(e)}\n\n`));
+    const unsubscribe = s.subscribe((e: SessionEvent) =>
+      res.write(`data: ${JSON.stringify(e)}\n\n`),
+    );
     const keepAlive = setInterval(() => res.write(': keep-alive\n\n'), 25_000);
     req.raw.on('close', () => {
       clearInterval(keepAlive);
@@ -268,7 +270,8 @@ export function registerInterviewRoutes(app: FastifyInstance, db: Db, opts: Inte
     const { id } = idParam.parse(req.params);
     const row = getSessionRow(db, id);
     const name = row.audioFile;
-    if (!name || name !== path.basename(name)) return reply.status(404).send({ error: 'No recording' });
+    if (!name || name !== path.basename(name))
+      return reply.status(404).send({ error: 'No recording' });
     const file = path.join(sessionDir(id, root), name);
     if (!fs.existsSync(file)) return reply.status(404).send({ error: 'No recording' });
     const size = fs.statSync(file).size;

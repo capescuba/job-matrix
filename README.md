@@ -24,6 +24,7 @@ Set the Anthropic API key and model under **More → Profile → Settings** (sav
 ## Chrome extension
 
 The side panel shows what Job Matrix knows about the page you're on:
+
 - **This posting:** tracked or not; if tracked, its status, applied date and fit. It also flags the same role at another address, e.g. its LinkedIn copy.
 - **The company:** its brief.
 - **Adding:** adds a new posting to Screening, optionally scoring it straight away.
@@ -33,6 +34,7 @@ The side panel shows what Job Matrix knows about the page you're on:
 It also adds a right-click menu item, **Add selection to Job Matrix**.
 
 One-time setup:
+
 1. `powershell -File scripts\install-extension.ps1`. This registers the native helper (per user, HKCU), which lets the extension start Job Matrix and fetch its token from `data\extension-token`.
    - Run it from a normal PowerShell window. Apps packaged by Windows, such as the Claude desktop app, get a private copy of the registry, so a key written from inside them is invisible to Chrome. The result is "Specified native messaging host not found".
    - To check the registration, run `reg query HKCU\Software\Google\Chrome\NativeMessagingHosts\com.jobmatrix.host` from that same normal window.
@@ -71,9 +73,22 @@ The **Watchlist** page follows company job boards, so new jobs reach the Screeni
   - Every call is listed on the AI usage page under "Watchlist pre-screen".
 - **Cost.** None with the rules alone or a free model. Reading the boards is free.
 
+## Interview coach
+
+On an application, **Interview calls → Interview coach** records a screen or interview and coaches you live. It works with any meeting app (Zoom, Teams, Meet in a tab), because it listens at the system level: your microphone is "you" and whatever the PC plays is "them".
+
+- **One-time setup.** In PowerShell, run `scripts\install-audio-engine.ps1`. It needs Python 3.12 and makes a virtual environment in `apps/audio-engine/.venv` with faster-whisper (speech to text on the NVIDIA GPU) and the speech model (about 1.6 GB). Without a GPU it falls back to the CPU, which is slow.
+- **Before the call.** Pick the round and the devices (the mic, and the speakers or headphones you hear the call on), then **Get ready**. **Write a prep card** is optional: likely questions, stories to have ready, risks and questions to ask, from your profile, the fit notes and the company research.
+- **During the call.** After each thing the interviewer says, one card appears: the question, what they're really assessing, three points to make, the story to reach for, and a warning or a question to ask back when there is one. **Nudge** (or Space) asks for a card now. **Pop out** floats the card in an always-on-top window over the meeting. The bottom strip lists questions to ask; click one once you've asked it.
+- **After the call.** **Write the debrief** grades each answer, lists what they told you and what you promised, and drafts points for the thank-you email. It is added to the activity log as an Interview. The call plays back with the transcript following along (click a line to jump there) and the cards shown where they fired. **Both / Them / You** plays one side alone.
+- **Tips.** Use headphones: with speakers, your mic hears the interviewer too. Everything the PC plays is captured, so mute notifications. Some places need everyone's consent to record a call.
+- **Storage.** Recordings are kept in `data/interviews/<id>/call.ogg` (stereo Opus, you on the left, about 25 MB an hour), so back up that folder along with the database. **Keep the audio** can be turned off per call. Without ffmpeg on the PATH the two tracks stay as WAV files (about 230 MB an hour).
+- **Cost.** Transcription is free, on this PC. Live cards use Claude Sonnet 5.5 by default (change it under AI settings): the first card of a call costs about 4¢ because it caches your context, and each card after that about half a cent, so roughly 25–35¢ for an hour. The prep card is about 3¢ and the debrief about 10¢ on Opus 5.5. Nothing runs until you press a button, and every call is listed on the AI usage page.
+
 ## Log
 
 The **Log** page shows the app's log files from `data/`:
+
 - `server.log` for this run, and `server.1.log` to `.3.log` for the previous three (the launcher rotates them);
 - `server-error.log` for errors;
 - `build.log` for the web build.
@@ -89,15 +104,17 @@ npm run dev            # web http://127.0.0.1:5173 (hot reload), API http://127.
 
 ## Layout
 
-| Path | What |
-|---|---|
-| `apps/server` | Fastify API, Drizzle + better-sqlite3, fit service (`src/services/fit.ts`) |
-| `apps/web` | Vite + React + TanStack Query + Tailwind |
-| `packages/shared` | Status enum, zod input schemas, fit result schema |
-| `packages/ai` | `LLMProvider` interface + Anthropic implementation (`AI_PROVIDER`, `AI_MODEL`) |
-| `packages/mail` | Read-only Outlook.com client (Microsoft Graph, device-code sign-in shared with email-mcp) |
-| `apps/extension` | Chrome extension (Manifest V3, plain JS): side panel, page reader, site templates, application helper |
-| `scripts/native-host` | Native messaging helper: starts Job Matrix and hands the extension its token |
+| Path                    | What                                                                                                  |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `apps/server`           | Fastify API, Drizzle + better-sqlite3, fit service (`src/services/fit.ts`)                            |
+| `apps/web`              | Vite + React + TanStack Query + Tailwind                                                              |
+| `packages/shared`       | Status enum, zod input schemas, fit result schema                                                     |
+| `packages/ai`           | `LLMProvider` interface + Anthropic implementation (`AI_PROVIDER`, `AI_MODEL`)                        |
+| `packages/audio-engine` | Node client for the audio engine (spawns it, health, control WebSocket)                               |
+| `apps/audio-engine`     | Python: mic + speaker capture (WASAPI), Silero VAD, faster-whisper, WAV recording                     |
+| `packages/mail`         | Read-only Outlook.com client (Microsoft Graph, device-code sign-in shared with email-mcp)             |
+| `apps/extension`        | Chrome extension (Manifest V3, plain JS): side panel, page reader, site templates, application helper |
+| `scripts/native-host`   | Native messaging helper: starts Job Matrix and hands the extension its token                          |
 
 ## Scripts
 
