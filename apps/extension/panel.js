@@ -18,6 +18,7 @@ const state = {
   error: null,
   notice: null,
   edits: { title: '', company: '' },
+  editsUrl: null, // the address the edits were filled in from
   busy: null, // 'add' | 'score' | 'save-template'
   useApp: null, // application chosen for the helper when the page only looks similar
   drafts: {}, // question id → { text, basedOn, loading, error }
@@ -215,14 +216,21 @@ async function refresh() {
       onStatus: status,
     });
     if (mine !== seq) return;
+    // Keep what you typed if it's still the same page. "Same page" means one this panel has
+    // already read: opening the panel reads the tab several times at once, and the read that
+    // wins may see the address an abandoned one set before anything was filled in. A field
+    // left blank takes what the page says.
+    const kept = state.editsUrl === tab.url ? state.edits : {};
     Object.assign(state, {
       page,
       template,
       ctx,
-      // Keep what you typed if it's still the same page.
-      edits: samePage
-        ? state.edits
-        : { title: ctx.detected.title ?? '', company: ctx.detected.company ?? '' },
+      edits: {
+        ...kept,
+        title: kept.title || ctx.detected.title || '',
+        company: kept.company || ctx.detected.company || '',
+      },
+      editsUrl: tab.url,
     });
   } catch (e) {
     if (mine !== seq) return;
