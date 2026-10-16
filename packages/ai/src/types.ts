@@ -29,6 +29,35 @@ export interface StructuredRequest<S extends z.ZodType> {
   constrained?: boolean;
 }
 
+/** One piece of a prompt; `cache` puts a cache breakpoint after it (everything before is reused). */
+export interface Block {
+  text: string;
+  cache?: boolean;
+}
+
+/**
+ * A call whose prompt is built from ordered blocks, for a live loop that re-sends a growing,
+ * append-only prefix and wants it read from the cache. Streams, can be aborted, and reports the
+ * tokens it used even when it was.
+ */
+export interface BlocksRequest<S extends z.ZodType> {
+  model: string;
+  schema: S;
+  system: Block[];
+  /** One user turn, in order. */
+  content: Block[];
+  effort?: Effort;
+  maxTokens?: number;
+  signal?: AbortSignal;
+  onEvent?: (e: LLMEvent) => void;
+}
+
+/** The caller aborted the request. `usage` is what had already been spent. */
+export class AbortedError extends Error {
+  usage?: TokenUsage;
+  trace?: CallTrace;
+}
+
 export const EFFORTS = ['low', 'medium', 'high'] as const;
 export type Effort = (typeof EFFORTS)[number];
 
@@ -71,6 +100,10 @@ export interface LLMProvider {
   }): Promise<string>;
   completeStructured<S extends z.ZodType>(
     req: StructuredRequest<S>,
+  ): Promise<StructuredResponse<z.infer<S>>>;
+  /** Block-based, cacheable, abortable calls. Not every provider offers it. */
+  completeBlocks?<S extends z.ZodType>(
+    req: BlocksRequest<S>,
   ): Promise<StructuredResponse<z.infer<S>>>;
 }
 

@@ -1,7 +1,8 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { AnthropicProvider } from './anthropic.ts';
-import type { LLMEvent } from './types.ts';
+import { AbortedError, type LLMEvent } from './types.ts';
 
 /** A fake streamed response: raw events to iterate, then the final message. */
 function fakeStream(events: unknown[], final: Record<string, unknown>) {
@@ -215,5 +216,104 @@ describe('unconstrained JSON (schemas too large for the API grammar)', () => {
         schema: z.object({ ok: z.boolean() }),
       }),
     ).rejects.toThrow(/Anthropic API error 400: The compiled grammar is too large/);
+  });
+});
+
+describe('AnthropicProvider.completeBlocks', () => {
+  const schema = z.object({ ok: z.boolean() });
+  const start = (inp: number, cacheRead: number, cacheWrite: number) => ({
+    type: 'message_start',
+    message: {
+      usage: {
+        input_tokens: inp,
+        output_tokens: 1,
+        cache_read_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheWrite,
+      },
+    },
+  });
+
+  function providerWith(stream: (p: Record<string, unknown>, o?: { signal?: AbortSignal }) => unknown) {
+    const provider = new AnthropicProvider('claude-sonnet-5-5');
+    (provider as unknown as { client: unknown }).client = { messages: { stream } };
+    return provider;
+  }
+
+  it('puts cache_control on the flagged blocks only, forwards the signal, and streams output', async () => {
+    let sent: Record<string, unknown> | undefined;
+    let sentSignal: AbortSignal | undefined;
+    const provider = providerWith((p, o) => {
+      sent = p;
+      sentSignal = o?.signal;
+      return fakeStream(
+        [
+          start(300, 9000, 0),
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '{"ok":' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'true}' } },
+          { type: 'message_delta', usage: { output_tokens: 12 } },
+        ],
+        {
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: '{"ok":true}' }],
+          usage: {
+            input_tokens: 300,
+            output_tokens: 12,
+            cache_read_input_tokens: 9000,
+            cache_creation_input_tokens: 0,
+          },
+          model: 'claude-sonnet-5-5',
+        },
+      );
+    });
+    const out: string[] = [];
+    const controller = new AbortController();
+    const res = await provider.completeBlocks({
+      model: 'claude-sonnet-5-5',
+      schema,
+      system: [{ text: 'rules' }, { text: 'context', cache: true }],
+      content: [{ text: 'turn one', cache: true }, { text: 'tail' }],
+      effort: 'low',
+      signal: controller.signal,
+      onEvent: (e) => e.type === 'output' && out.push(e.text),
+    });
+
+    expect(res.data).toEqual({ ok: true });
+    expect(res.usage).toMatchObject({ inputTokens: 300, cacheReadTokens: 9000, outputTokens: 12 });
+    expect(out.join('')).toBe('{"ok":true}');
+    expect(sentSignal).toBe(controller.signal);
+    const system = sent!.system as { cache_control?: unknown }[];
+    const content = (sent!.messages as { content: { cache_control?: unknown }[] }[])[0].content;
+    expect(system.map((b) => Boolean(b.cache_control))).toEqual([false, true]);
+    expect(content.map((b) => Boolean(b.cache_control))).toEqual([true, false]);
+    expect(sent).toMatchObject({
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'low' },
+    });
+  });
+
+  it('turns an abort into AbortedError that still carries the tokens already spent', async () => {
+    const provider = providerWith(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield start(500, 8000, 200);
+        throw new Anthropic.APIUserAbortError();
+      },
+      finalMessage: async () => {
+        throw new Anthropic.APIUserAbortError();
+      },
+    }));
+    const err = await provider
+      .completeBlocks({
+        model: 'claude-sonnet-5-5',
+        schema,
+        system: [{ text: 'rules' }],
+        content: [{ text: 'x' }],
+      })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AbortedError);
+    expect((err as AbortedError).usage).toMatchObject({
+      inputTokens: 500,
+      cacheReadTokens: 8000,
+      cacheWriteTokens: 200,
+    });
   });
 });

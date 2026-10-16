@@ -176,6 +176,13 @@
       "when": 1792002089178,
       "tag": "0024_mail_leads_conversation",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792170753137,
+      "tag": "0025_interview_sessions",
+      "breakpoints": true
     }
   ]
 }

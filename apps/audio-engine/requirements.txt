@@ -1,0 +1,7 @@
+PyAudioWPatch
+faster-whisper>=1.1
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9
+soxr
+websockets>=14
+numpy

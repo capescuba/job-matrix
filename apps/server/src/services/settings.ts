@@ -1,6 +1,7 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { EFFORTS, PRESCREEN_PRESETS, prescreenConfig, resetProvider, type Effort } from '@jm/ai';
-import { ENV_FILE } from '../paths.ts';
+import { ENV_FILE, REPO_ROOT } from '../paths.ts';
 
 /** Keys the Settings UI may write to .env. */
 const EDITABLE = [
@@ -9,6 +10,10 @@ const EDITABLE = [
   'AI_RESEARCH_MODEL',
   'AI_EMAIL_MODEL',
   'AI_EFFORT',
+  'AI_COACH_MODEL',
+  'TRANSCRIBER_MODEL',
+  'AUDIO_MIC_DEVICE',
+  'AUDIO_OUTPUT_DEVICE',
   'PRESCREEN_PROVIDER',
   'PRESCREEN_BASE_URL',
   'PRESCREEN_API_KEY',
@@ -21,6 +26,18 @@ export const DEFAULT_MODEL = 'claude-opus-5-5';
 export const DEFAULT_EMAIL_MODEL = 'claude-haiku-4-5';
 /** Fit scoring doesn't need deep deliberation; low effort is ~3x faster than the model default. */
 export const DEFAULT_EFFORT: Effort = 'low';
+/** The live interview coach answers in seconds, so a fast model at low effort. */
+export const DEFAULT_COACH_MODEL = 'claude-sonnet-5-5';
+export const COACH_EFFORT: Effort = 'low';
+export const DEFAULT_TRANSCRIBER_MODEL = 'large-v3-turbo';
+
+/** Python inside the audio engine's venv (or AUDIO_ENGINE_PYTHON), and whether it exists yet. */
+export function audioEngineInstall() {
+  const python =
+    process.env.AUDIO_ENGINE_PYTHON ||
+    path.join(REPO_ROOT, 'apps', 'audio-engine', '.venv', 'Scripts', 'python.exe');
+  return { python, installed: fs.existsSync(python) };
+}
 
 export function currentEffort(): Effort {
   const e = process.env.AI_EFFORT as Effort | undefined;
@@ -47,6 +64,13 @@ export function getSettings() {
     /** Ask AI on an unclear email (Email page). */
     emailModel: process.env.AI_EMAIL_MODEL || DEFAULT_EMAIL_MODEL,
     effort: currentEffort(),
+    /** Live interview coach (hints during a call). */
+    coachModel: process.env.AI_COACH_MODEL || DEFAULT_COACH_MODEL,
+    transcriberModel: process.env.TRANSCRIBER_MODEL || DEFAULT_TRANSCRIBER_MODEL,
+    /** Last-used audio devices, by name; empty = the system defaults. */
+    micDevice: process.env.AUDIO_MIC_DEVICE || null,
+    outputDevice: process.env.AUDIO_OUTPUT_DEVICE || null,
+    audioEngine: audioEngineInstall(),
     /** The model that pre-screens watchlist jobs (a free one, by default off). */
     prescreen: prescreenSettings(),
   };

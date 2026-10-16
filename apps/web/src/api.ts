@@ -37,7 +37,21 @@ import type { MailStatus as MailConnection } from '@jm/mail';
 import type { CrawlProgress, SearchProgress } from '../../server/src/services/crawl/run.ts';
 import type { LeadRow, SearchRow, SourceRow } from '../../server/src/services/crawl/watchlist.ts';
 
+import type { getSession, listSessions } from '../../server/src/services/interview/store.ts';
+import type { SessionEvent, Snapshot } from '../../server/src/services/interview/session.ts';
+import type { AudioDevice, EngineStatus } from '@jm/audio-engine';
+import type { Debrief, InterviewRound, PrepCard } from '@jm/shared';
+
 export type { LeadRow, SearchRow, SourceRow };
+export type { SessionEvent, Snapshot, AudioDevice, EngineStatus };
+export type InterviewSummary = ReturnType<typeof listSessions>[number];
+export type InterviewDetail = ReturnType<typeof getSession> & {
+  company: string;
+  title: string;
+  questionsToAsk: string[];
+  live: boolean;
+  estimates: { prepUsd: number; debriefUsd: number; debriefModel: string };
+};
 /** The watchlist: what to look for, and how the last check went. */
 export interface CrawlStatus {
   enabled: boolean;
@@ -262,6 +276,10 @@ export const api = {
     aiResearchModel?: string | null;
     aiEmailModel?: string | null;
     aiEffort?: Settings['effort'] | null;
+    aiCoachModel?: string | null;
+    transcriberModel?: string | null;
+    micDevice?: string | null;
+    outputDevice?: string | null;
     prescreenProvider?: Settings['prescreen']['provider'] | null;
     prescreenBaseUrl?: string | null;
     prescreenApiKey?: string | null;
@@ -369,4 +387,31 @@ export const api = {
       'GET',
       `/api/logs/${encodeURIComponent(name)}?lines=${lines}`,
     ),
+
+  // ----- interview coach -----
+  listInterviews: (applicationId: number) =>
+    request<InterviewSummary[]>('GET', `/api/applications/${applicationId}/interviews`),
+  createInterview: (
+    applicationId: number,
+    body: {
+      round: InterviewRound;
+      recordAudio: boolean;
+      micDevice?: string | null;
+      outputDevice?: string | null;
+    },
+  ) => request<{ id: number }>('POST', `/api/applications/${applicationId}/interviews`, body),
+  getInterview: (id: number) => request<InterviewDetail>('GET', `/api/interviews/${id}`),
+  deleteInterview: (id: number) => request<void>('DELETE', `/api/interviews/${id}`),
+  interviewPrep: (id: number) => request<PrepCard>('POST', `/api/interviews/${id}/prep`),
+  interviewDebrief: (id: number) => request<Debrief>('POST', `/api/interviews/${id}/debrief`),
+  startInterview: (id: number) => request<Snapshot>('POST', `/api/interviews/${id}/start`),
+  stopInterview: (id: number) =>
+    request<{ durationMs: number }>('POST', `/api/interviews/${id}/stop`),
+  nudgeInterview: (id: number) => request<{ ok: true }>('POST', `/api/interviews/${id}/nudge`),
+  setAsked: (id: number, questions: string[]) =>
+    request<{ ok: true }>('PUT', `/api/interviews/${id}/asked`, { questions }),
+  audioDevices: () =>
+    request<{ inputs: AudioDevice[]; outputs: AudioDevice[] }>('GET', '/api/interview/devices'),
+  audioEngine: () =>
+    request<{ installed: boolean; status: EngineStatus }>('GET', '/api/interview/engine'),
 };

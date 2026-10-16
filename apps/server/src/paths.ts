@@ -9,3 +9,4 @@ export const RESUME_DIR = path.join(DATA_DIR, 'resumes');
 export const MIGRATIONS_DIR = path.resolve(here, '../drizzle');
 export const WEB_DIST = path.join(REPO_ROOT, 'apps', 'web', 'dist');
 export const ENV_FILE = path.join(REPO_ROOT, '.env');
+export const INTERVIEWS_DIR = path.join(DATA_DIR, 'interviews');

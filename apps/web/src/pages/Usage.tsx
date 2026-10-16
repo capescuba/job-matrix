@@ -22,6 +22,9 @@ const FEATURE_LABELS: Record<string, string> = {
   email: 'Email updates',
   profile: 'Career profile',
   prescreen: 'Watchlist pre-screen',
+  coach: 'Interview coach',
+  prep: 'Interview prep',
+  debrief: 'Interview debrief',
 };
 
 export default function UsagePage() {

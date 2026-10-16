@@ -450,7 +450,9 @@ export const MODEL_PRICING: Record<string, { label: string; input: number; outpu
   'claude-fable-5-1': { label: 'Claude Fable 5.1', input: 10, output: 50 },
   'claude-opus-5-5': { label: 'Claude Opus 5.5', input: 4, output: 20 },
   'claude-opus-5': { label: 'Claude Opus 5', input: 5, output: 25 },
+  'claude-sonnet-5-5': { label: 'Claude Sonnet 5.5', input: 2, output: 10 },
   'claude-sonnet-5': { label: 'Claude Sonnet 5', input: 2, output: 10 },
+  'claude-haiku-5-5': { label: 'Claude Haiku 5.5', input: 0.1, output: 0.5 },
   'claude-haiku-4-5': { label: 'Claude Haiku 4.5', input: 1, output: 5 },
 };
 export const PRICING_AS_OF = 'Sep 2026';
@@ -590,3 +592,107 @@ export type CompanyResearch = z.infer<typeof companyResearchSchema>;
 
 /** Research older than this is refreshed the next time a job there is scored. */
 export const RESEARCH_MAX_AGE_DAYS = 14;
+
+
+// ---------- interview coach ----------
+
+export const INTERVIEW_ROUNDS = [
+  'Recruiter screen',
+  'Hiring manager',
+  'Technical',
+  'Panel / loop',
+  'Other',
+] as const;
+export type InterviewRound = (typeof INTERVIEW_ROUNDS)[number];
+
+export type Speaker = 'me' | 'them';
+
+/** One glanceable card shown while the interviewer is talking. */
+export const coachHintSchema = z.object({
+  question: z
+    .string()
+    .nullable()
+    .describe('The question actually being asked, reworded clearly; null if the last turn is not a question'),
+  probing: z.string().describe("What they are really assessing, 12 words or fewer"),
+  points: z
+    .array(z.string())
+    .max(3)
+    .describe('Up to 3 points to make, 12 words or fewer each, only facts from the applicant inputs'),
+  story: z
+    .string()
+    .nullable()
+    .describe('The one experience to reach for, named by company and program; null if none fits'),
+  watch: z.string().nullable().describe('A trap or red flag, only when real; otherwise null'),
+  askBack: z.string().nullable().describe('A question to ask them, only when natural; otherwise null'),
+});
+export type CoachHint = z.infer<typeof coachHintSchema>;
+
+export const prepCardSchema = z.object({
+  headline: z.string().describe('One line: what this round is really about'),
+  leadWith: z.array(z.string()).max(3).describe('Up to 3 things to lead with'),
+  likelyQuestions: z
+    .array(z.object({ question: z.string(), approach: z.string() }))
+    .max(7),
+  stories: z
+    .array(z.object({ name: z.string(), use: z.string() }))
+    .max(5)
+    .describe('Experiences from the career profile to have ready, with what each is good for'),
+  risks: z.array(z.string()).describe('Gaps, level mismatch or red flags, each with how to handle it'),
+  askThem: z.array(z.string()).describe('Questions to ask, suited to this round'),
+  logistics: z.array(z.string()).describe('Process, rounds, comp or timeline facts from the brief'),
+});
+export type PrepCard = z.infer<typeof prepCardSchema>;
+
+export const debriefSchema = z.object({
+  summary: z.string().describe('3-5 sentences, second person'),
+  questions: z.array(
+    z.object({
+      question: z.string(),
+      yourAnswer: z.string().describe('One sentence on what the applicant said'),
+      landed: z.enum(['strong', 'ok', 'weak', 'unclear']),
+      better: z.string().nullable().describe('What would have been stronger, or null'),
+    }),
+  ),
+  theyShared: z.array(z.string()).describe('Process, timeline, comp or team facts they shared'),
+  followUps: z.array(z.string()).describe('Things the applicant promised to send or do'),
+  thankYouPoints: z.array(z.string()).describe('3-4 points for the thank-you email'),
+  nextRound: z.string().nullable(),
+});
+export type Debrief = z.infer<typeof debriefSchema>;
+
+/**
+ * Closes a half-streamed JSON object (open strings, arrays, objects) and parses it, so a card can
+ * show the question before the bullets have finished arriving. Null when it still can't parse.
+ */
+export function closePartialJson(text: string): unknown | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  let out = '';
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const ch of text.slice(start)) {
+    out += ch;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if (ch === '}' || ch === ']') stack.pop();
+  }
+  if (escaped) out = out.slice(0, -1);
+  if (inString) out += '"';
+  const attempts = [out, out.replace(/,\s*$/, ''), out.replace(/,?\s*"[^"]*"\s*:\s*$/, ''), out.replace(/,?\s*"[^"]*"\s*$/, '')];
+  for (const base of attempts) {
+    try {
+      return JSON.parse(base + [...stack].reverse().join(''));
+    } catch {
+      // try the next repair
+    }
+  }
+  return null;
+}

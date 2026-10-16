@@ -5,9 +5,11 @@ import { Button, Card, ErrorText, Field, Input, Select } from './ui.tsx';
 
 const MODELS = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 — best quality' },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 — fast, about half the cost' },
   { id: 'claude-opus-5', label: 'Claude Opus 5 — previous, costs more' },
-  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5 — about half the cost' },
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 — cheapest, weakest' },
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5 — previous Sonnet' },
+  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 — cheapest, fast' },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 — older, weakest' },
 ];
 
 const cents = (usd: number) => (usd < 1 ? `${Math.round(usd * 100)}¢` : `$${usd.toFixed(2)}`);
@@ -135,6 +137,37 @@ export function AiSettings() {
         Only used when you press Ask AI on the Email page. Reading one email is a small job, so the
         cheapest model is plenty.
       </p>
+      <Field label="Interview coach model (live hints during a call)" className="mt-3 max-w-sm">
+        <Select
+          value={data?.coachModel ?? ''}
+          onChange={(e) => save.mutate({ aiCoachModel: e.target.value })}
+        >
+          {MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+          {data && !MODELS.some((m) => m.id === data.coachModel) && (
+            <option value={data.coachModel}>{data.coachModel}</option>
+          )}
+        </Select>
+      </Field>
+      <p className="mt-1 max-w-sm text-xs text-ink-3">
+        Runs after each thing the interviewer says, so it needs to be quick. Sonnet 5.5 costs about
+        15–25¢ for an hour-long call.
+      </p>
+      {data && (
+        <p className="mt-1 max-w-sm text-xs text-ink-3">
+          Audio engine (records and transcribes calls on this PC):{' '}
+          {data.audioEngine.installed ? (
+            'installed.'
+          ) : (
+            <>
+              not installed. Run <code>scripts\install-audio-engine.ps1</code> once.
+            </>
+          )}
+        </p>
+      )}
       <Field label="Speed vs. depth" className="mt-3 max-w-sm">
         <Select
           value={data?.effort ?? 'low'}

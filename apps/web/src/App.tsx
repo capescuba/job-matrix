@@ -10,6 +10,7 @@ import ApplicationDetailPage from './pages/ApplicationDetail.tsx';
 import ApplicationsPage from './pages/Applications.tsx';
 import DashboardPage from './pages/Dashboard.tsx';
 import EmailUpdatesPage from './pages/EmailUpdates.tsx';
+import InterviewCoachPage from './pages/InterviewCoach.tsx';
 import LogsPage from './pages/Logs.tsx';
 import ProfilePage from './pages/Profile.tsx';
 import ScreeningPage from './pages/Screening.tsx';
@@ -38,6 +39,17 @@ const navLink = ({ isActive }: { isActive: boolean }) =>
   );
 
 export default function App() {
+  useSearchSchedule();
+  return (
+    <Routes>
+      {/* The live coach is full-window, without the app's header. */}
+      <Route path="/interview/:applicationId/:sessionId?" element={<InterviewCoachPage />} />
+      <Route path="*" element={<MainShell />} />
+    </Routes>
+  );
+}
+
+function MainShell() {
   const { data: apps = [] } = useQuery({
     queryKey: ['applications'],
     queryFn: api.listApplications,
@@ -50,7 +62,6 @@ export default function App() {
       q.state.data?.progress.running || q.state.data?.signingIn ? 2000 : 60_000,
   });
   const emailPending = mail?.pending ?? 0;
-  useSearchSchedule();
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-border bg-surface/90 backdrop-blur">

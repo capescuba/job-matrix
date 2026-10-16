@@ -545,3 +545,75 @@ export const prescreens = sqliteTable(
   },
   (t) => [index('prescreens_app').on(t.applicationId)],
 );
+
+// ---------- interview coach ----------
+
+/** One call recorded and coached live: a recruiter screen, a loop round. */
+export const interviewSessions = sqliteTable(
+  'interview_sessions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    applicationId: integer('application_id')
+      .notNull()
+      .references(() => applications.id, { onDelete: 'cascade' }),
+    round: text('round').notNull(),
+    /** Pinned when the session is created, so the prompt cache stays valid for the whole call. */
+    coachModel: text('coach_model').notNull(),
+    transcriber: text('transcriber'),
+    startedAt: text('started_at'),
+    endedAt: text('ended_at'),
+    recordAudio: integer('record_audio', { mode: 'boolean' }).notNull().default(true),
+    /** Relative to data/interviews/<id>/ — call.ogg, or me.wav when ffmpeg was missing. */
+    audioFile: text('audio_file'),
+    audioMs: integer('audio_ms'),
+    micDevice: text('mic_device'),
+    outputDevice: text('output_device'),
+    prep: text('prep', { mode: 'json' }),
+    prepUsageId: integer('prep_usage_id'),
+    summary: text('summary', { mode: 'json' }),
+    debriefUsageId: integer('debrief_usage_id'),
+    activityId: integer('activity_id'),
+    askedQuestions: text('asked_questions', { mode: 'json' }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('interview_sessions_app').on(t.applicationId)],
+);
+
+/** What was said, one row per finished utterance. Times are ms on the session clock. */
+export const interviewSegments = sqliteTable(
+  'interview_segments',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sessionId: integer('session_id')
+      .notNull()
+      .references(() => interviewSessions.id, { onDelete: 'cascade' }),
+    /** me | them */
+    speaker: text('speaker').notNull(),
+    text: text('text').notNull(),
+    startMs: integer('start_ms').notNull(),
+    endMs: integer('end_ms').notNull(),
+  },
+  (t) => [index('interview_segments_session').on(t.sessionId)],
+);
+
+/** Each coach card shown during the call, for the replay. */
+export const interviewHints = sqliteTable(
+  'interview_hints',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sessionId: integer('session_id')
+      .notNull()
+      .references(() => interviewSessions.id, { onDelete: 'cascade' }),
+    segmentId: integer('segment_id').references(() => interviewSegments.id, {
+      onDelete: 'set null',
+    }),
+    /** utterance | nudge */
+    trigger: text('trigger').notNull(),
+    hint: text('hint', { mode: 'json' }).notNull(),
+    usageId: integer('usage_id'),
+    /** Session-clock ms when it fired. */
+    atMs: integer('at_ms').notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index('interview_hints_session').on(t.sessionId)],
+);

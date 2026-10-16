@@ -148,6 +148,10 @@ import {
 
 import { searchResultsSchema } from './services/crawl/searches.ts';
 import { prescreenApplication } from './services/crawl/prescreen.ts';
+import {
+  registerInterviewRoutes,
+  type InterviewRouteOptions,
+} from './services/interview/routes.ts';
 
 const idParam = z.object({ id: z.coerce.number().int() });
 
@@ -161,6 +165,8 @@ export function buildApp(
     mail?: MailClient;
     /** Watchlist checks: tests pass a fake pre-screen model and no pauses. */
     crawl?: CrawlDeps;
+    /** Interview coach: tests pass a fake audio engine, model and folder. */
+    interview?: InterviewRouteOptions;
   } = {},
 ) {
   const mail = opts.mail ?? createMailClient({ clientId: process.env.OUTLOOK_CLIENT_ID || null });
@@ -179,7 +185,8 @@ export function buildApp(
   });
 
   /** Polled or streamed routes that would drown the log. */
-  const QUIET = /^\/api\/(health|ai\/events|logs|mail\/status|crawl\/status)(\/|\?|$)/;
+  const QUIET =
+    /^\/api\/(health|ai\/events|logs|mail\/status|crawl\/status|interviews\/\d+\/(events|audio|nudge)|interview\/engine)(\/|\?|$)/;
   app.addHook('onResponse', async (req, reply) => {
     if (!req.url.startsWith('/api/') || QUIET.test(req.url)) return;
     const status = reply.statusCode;
@@ -756,6 +763,10 @@ export function buildApp(
         aiResearchModel: z.string().max(100).nullable().optional(),
         aiEmailModel: z.string().max(100).nullable().optional(),
         aiEffort: z.enum(EFFORTS).nullable().optional(),
+        aiCoachModel: z.string().max(100).nullable().optional(),
+        transcriberModel: z.string().max(100).nullable().optional(),
+        micDevice: z.string().max(300).nullable().optional(),
+        outputDevice: z.string().max(300).nullable().optional(),
         prescreenProvider: z.enum(PRESCREEN_PROVIDERS).nullable().optional(),
         prescreenBaseUrl: z.string().max(500).nullable().optional(),
         prescreenApiKey: z.string().max(500).nullable().optional(),
@@ -768,6 +779,10 @@ export function buildApp(
       ...(body.aiResearchModel !== undefined && { AI_RESEARCH_MODEL: body.aiResearchModel }),
       ...(body.aiEmailModel !== undefined && { AI_EMAIL_MODEL: body.aiEmailModel }),
       ...(body.aiEffort !== undefined && { AI_EFFORT: body.aiEffort }),
+      ...(body.aiCoachModel !== undefined && { AI_COACH_MODEL: body.aiCoachModel }),
+      ...(body.transcriberModel !== undefined && { TRANSCRIBER_MODEL: body.transcriberModel }),
+      ...(body.micDevice !== undefined && { AUDIO_MIC_DEVICE: body.micDevice }),
+      ...(body.outputDevice !== undefined && { AUDIO_OUTPUT_DEVICE: body.outputDevice }),
       ...(body.prescreenProvider !== undefined && { PRESCREEN_PROVIDER: body.prescreenProvider }),
       ...(body.prescreenBaseUrl !== undefined && { PRESCREEN_BASE_URL: body.prescreenBaseUrl }),
       ...(body.prescreenApiKey !== undefined && { PRESCREEN_API_KEY: body.prescreenApiKey }),
@@ -897,6 +912,9 @@ export function buildApp(
 
   // ----- dashboard -----
   app.get('/api/stats', () => getStats(db));
+
+  // ----- interview coach -----
+  registerInterviewRoutes(app, db, opts.interview ?? {});
 
   return app;
 }

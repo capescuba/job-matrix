@@ -13,6 +13,7 @@ import {
 import { api, type ApplicationDetail, type FitAssessment } from '../api.ts';
 import { StatusBadge, postedOf } from '../components/badges.tsx';
 import { ActivityLog } from '../components/ActivityLog.tsx';
+import { InterviewSessions } from '../components/InterviewSessions.tsx';
 import { ApplicationAnswers } from '../components/ApplicationAnswers.tsx';
 import { CompanyAliases } from '../components/CompanyAliases.tsx';
 import { CompanyInsights } from '../components/CompanyInsights.tsx';
@@ -174,6 +175,7 @@ function Detail({ data }: { data: ApplicationDetail }) {
             saving={patchApp.isPending}
             error={patchApp.error}
           />
+          <InterviewSessions applicationId={app.id} />
           <ActivityLog data={data} onChanged={invalidate} />
           <ContactsCard data={data} onChanged={invalidate} />
           <div className="text-right">
