@@ -6,6 +6,7 @@ import { INTERVIEW_ROUNDS, type Debrief, type InterviewRound, type PrepCard } fr
 import { api, type InterviewDetail } from '../api.ts';
 import { Button, ErrorText, Field, Select, cx } from '../components/ui.tsx';
 import { CoachCard } from '../interview/CoachCard.tsx';
+import { TranscriptLines } from '../interview/TranscriptLines.tsx';
 import { Playback } from '../interview/Playback.tsx';
 import {
   clock,
@@ -435,8 +436,6 @@ function LiveView({ d, live }: { d: InterviewDetail; live: LiveState }) {
     setAsked(next);
     void api.setAsked(d.id, next);
   };
-  const recent = live.turns.slice(-8);
-
   return (
     <div className="flex min-h-screen flex-col bg-bg text-ink">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface px-4 py-2 text-sm">
@@ -498,25 +497,8 @@ function LiveView({ d, live }: { d: InterviewDetail; live: LiveState }) {
             </div>
           )}
         </section>
-        <aside className="space-y-1 text-sm">
-          {recent.map((t) => (
-            <p key={t.id} className={t.speaker === 'me' ? 'text-accent' : 'text-ink-2'}>
-              <span className="mr-1 text-xs text-ink-3">{t.speaker === 'me' ? 'You' : 'Them'}</span>
-              {t.text}
-            </p>
-          ))}
-          {(['them', 'me'] as const).map(
-            (s) =>
-              live.pending[s] && (
-                <p key={s} className="italic text-ink-3">
-                  <span className="mr-1 text-xs">{s === 'me' ? 'You' : 'Them'}</span>
-                  {live.pending[s]}
-                </p>
-              ),
-          )}
-          {!recent.length && !live.pending.me && !live.pending.them && (
-            <p className="text-ink-3">Transcript appears here.</p>
-          )}
+        <aside>
+          <TranscriptLines live={live} limit={8} />
         </aside>
       </main>
 
@@ -556,6 +538,9 @@ function LiveView({ d, live }: { d: InterviewDetail; live: LiveState }) {
               </button>
             </div>
             <CoachCard card={card} writing={writing} compact />
+            <div className="border-t border-border pt-2">
+              <TranscriptLines live={live} limit={3} compact />
+            </div>
           </div>,
           pip.win.document.body,
         )}
