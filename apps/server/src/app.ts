@@ -148,6 +148,10 @@ import {
 
 import { searchResultsSchema } from './services/crawl/searches.ts';
 import { prescreenApplication } from './services/crawl/prescreen.ts';
+import {
+  registerInterviewRoutes,
+  type InterviewRouteOptions,
+} from './services/interview/routes.ts';
 
 const idParam = z.object({ id: z.coerce.number().int() });
 
@@ -161,6 +165,8 @@ export function buildApp(
     mail?: MailClient;
     /** Watchlist checks: tests pass a fake pre-screen model and no pauses. */
     crawl?: CrawlDeps;
+    /** Interview coach: tests pass a fake audio engine, model and folder. */
+    interview?: InterviewRouteOptions;
   } = {},
 ) {
   const mail = opts.mail ?? createMailClient({ clientId: process.env.OUTLOOK_CLIENT_ID || null });
@@ -179,7 +185,8 @@ export function buildApp(
   });
 
   /** Polled or streamed routes that would drown the log. */
-  const QUIET = /^\/api\/(health|ai\/events|logs|mail\/status|crawl\/status)(\/|\?|$)/;
+  const QUIET =
+    /^\/api\/(health|ai\/events|logs|mail\/status|crawl\/status|interviews\/\d+\/(events|audio|nudge)|interview\/engine)(\/|\?|$)/;
   app.addHook('onResponse', async (req, reply) => {
     if (!req.url.startsWith('/api/') || QUIET.test(req.url)) return;
     const status = reply.statusCode;
@@ -905,6 +912,9 @@ export function buildApp(
 
   // ----- dashboard -----
   app.get('/api/stats', () => getStats(db));
+
+  // ----- interview coach -----
+  registerInterviewRoutes(app, db, opts.interview ?? {});
 
   return app;
 }

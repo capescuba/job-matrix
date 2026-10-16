@@ -3,3 +3,6 @@ dist/
 data/
 .env
 *.log
+
+apps/audio-engine/.venv/
+apps/audio-engine/__pycache__/

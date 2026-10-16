@@ -8,6 +8,7 @@ import { scheduleCrawl } from './services/crawl/run.ts';
 import { logEvent, setLogSink } from './services/log.ts';
 import { scheduleMail } from './services/mail/sync.ts';
 import { rematchPending } from './services/mail/updates.ts';
+import { activeSessionCount, repairUnfinished } from './services/interview/session.ts';
 
 const port = Number(process.env.API_PORT ?? 5174);
 const db = openDb();
@@ -34,6 +35,8 @@ if (idleMinutes > 0) {
     last = Date.now();
   });
   setInterval(() => {
+    // A call being recorded keeps the server up, whatever the browser does.
+    if (activeSessionCount() > 0) last = Date.now();
     if (Date.now() - last > idleMinutes * 60_000) {
       logEvent('app.idle-exit', `No activity for ${idleMinutes} min, shutting down`);
       app.close().finally(() => process.exit(0));
@@ -49,6 +52,10 @@ app
     // Email checks: manual by default; otherwise as set on the Email page.
     // Emails waiting for review may match better now (new aliases, jobs added since).
     rematchPending(db);
+    // A call the server died during: end it and keep whatever audio reached the disk.
+    void repairUnfinished(db).catch((e) =>
+      logEvent('interview.repair-failed', String((e as Error).message), {}, 'warn'),
+    );
     scheduleMail(db, mail, { startup: true });
     // Watchlist: checks the followed job boards when the app opens, unless set to manual.
     scheduleCrawl(db, {}, { startup: true });
