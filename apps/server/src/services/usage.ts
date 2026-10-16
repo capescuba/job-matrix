@@ -8,7 +8,16 @@ import { getDefaultResume, getProfile } from './resume.ts';
 import { logEvent } from './log.ts';
 import { getSettings } from './settings.ts';
 
-export type Feature = 'fit' | 'research' | 'answer' | 'email' | 'profile' | 'prescreen';
+export type Feature =
+  | 'fit'
+  | 'research'
+  | 'answer'
+  | 'email'
+  | 'profile'
+  | 'prescreen'
+  | 'coach'
+  | 'prep'
+  | 'debrief';
 
 /** Output tokens (incl. thinking) a fit assessment typically uses, for forecasts before any history exists. */
 const FIT_OUTPUT_TOKENS_GUESS = 4_000;

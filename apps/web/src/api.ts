@@ -262,6 +262,10 @@ export const api = {
     aiResearchModel?: string | null;
     aiEmailModel?: string | null;
     aiEffort?: Settings['effort'] | null;
+    aiCoachModel?: string | null;
+    transcriberModel?: string | null;
+    micDevice?: string | null;
+    outputDevice?: string | null;
     prescreenProvider?: Settings['prescreen']['provider'] | null;
     prescreenBaseUrl?: string | null;
     prescreenApiKey?: string | null;

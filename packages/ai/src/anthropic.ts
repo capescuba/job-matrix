@@ -3,7 +3,9 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 import { parseLooseJson } from './json.ts';
 import {
+  AbortedError,
   LLMError,
+  type BlocksRequest,
   type LLMProvider,
   type StructuredRequest,
   type StructuredResponse,
@@ -216,6 +218,102 @@ export class AnthropicProvider implements LLMProvider {
       usage,
       trace,
     };
+  }
+
+  /**
+   * A single streamed turn built from cacheable blocks, for the live interview coach. No tools, no
+   * resume loop and no repair: constrained decoding guarantees the final JSON. Aborting stops the
+   * stream; what it had cost so far still comes back on the AbortedError.
+   */
+  async completeBlocks<S extends z.ZodType>(
+    req: BlocksRequest<S>,
+  ): Promise<StructuredResponse<z.infer<S>>> {
+    const model = req.model;
+    const basic = /haiku-4/.test(model);
+    const effort = basic ? undefined : req.effort;
+    const toBlock = (b: { text: string; cache?: boolean }) => ({
+      type: 'text' as const,
+      text: b.text,
+      ...(b.cache && { cache_control: { type: 'ephemeral' as const } }),
+    });
+    const params = {
+      model,
+      max_tokens: req.maxTokens ?? 2500,
+      ...(!basic && { thinking: { type: 'adaptive' as const, display: 'summarized' as const } }),
+      system: req.system.map(toBlock),
+      messages: [{ role: 'user' as const, content: req.content.map(toBlock) }],
+      output_config: { format: zodOutputFormat(req.schema), ...(effort && { effort }) },
+    };
+    const started = Date.now();
+    req.onEvent?.({ type: 'request', model, effort: effort ?? null });
+    const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    let streamed = '';
+    let msg: Anthropic.Message;
+    const trace = () => ({
+      request: JSON.parse(JSON.stringify(params)),
+      responseText: streamed,
+      thinking: '',
+      stopReason: null as string | null,
+      durationMs: Date.now() - started,
+    });
+    try {
+      const stream = this.getClient().messages.stream(params, { signal: req.signal });
+      for await (const ev of stream) {
+        if (ev.type === 'message_start') {
+          const u = ev.message.usage;
+          usage.inputTokens = u.input_tokens;
+          usage.cacheReadTokens = u.cache_read_input_tokens ?? 0;
+          usage.cacheWriteTokens = u.cache_creation_input_tokens ?? 0;
+          usage.outputTokens = u.output_tokens;
+        } else if (ev.type === 'message_delta') {
+          usage.outputTokens = ev.usage.output_tokens;
+        } else if (ev.type === 'content_block_delta') {
+          if (ev.delta.type === 'text_delta') {
+            streamed += ev.delta.text;
+            req.onEvent?.({ type: 'output', text: ev.delta.text });
+          } else if (ev.delta.type === 'thinking_delta')
+            req.onEvent?.({ type: 'thinking', text: ev.delta.thinking });
+        }
+      }
+      msg = await stream.finalMessage();
+    } catch (e) {
+      if (e instanceof Anthropic.APIUserAbortError || req.signal?.aborted) {
+        throw Object.assign(new AbortedError('Aborted'), { usage, trace: trace() });
+      }
+      throw apiError(e);
+    }
+    usage.inputTokens = msg.usage.input_tokens;
+    usage.outputTokens = msg.usage.output_tokens;
+    usage.cacheReadTokens = msg.usage.cache_read_input_tokens ?? 0;
+    usage.cacheWriteTokens = msg.usage.cache_creation_input_tokens ?? 0;
+    const responseText = msg.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+    req.onEvent?.({ type: 'usage', usage });
+    const done = {
+      ...trace(),
+      responseText,
+      thinking: msg.content
+        .filter((b) => b.type === 'thinking')
+        .map((b) => b.thinking)
+        .join('\n\n'),
+      stopReason: msg.stop_reason,
+    };
+    const fail = (message: string) => Object.assign(new LLMError(message), { trace: done });
+    if (msg.stop_reason === 'refusal') throw fail('The model declined this request.');
+    if (msg.stop_reason === 'max_tokens') throw fail('Response was cut off (max_tokens).');
+    try {
+      return {
+        data: req.schema.parse(JSON.parse(responseText)),
+        provider: this.name,
+        model: msg.model,
+        usage,
+        trace: done,
+      };
+    } catch {
+      throw fail('Model output did not match the expected schema.');
+    }
   }
 }
 

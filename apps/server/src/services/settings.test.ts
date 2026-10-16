@@ -55,3 +55,26 @@ describe('updateSettings', () => {
     });
   });
 });
+
+describe('interview coach settings', () => {
+  it('defaults to Sonnet 5.5, keeps device names, and reports the audio engine', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jm-')), '.env');
+    delete process.env.AI_COACH_MODEL;
+    delete process.env.AUDIO_MIC_DEVICE;
+    expect(getSettings()).toMatchObject({
+      coachModel: 'claude-sonnet-5-5',
+      transcriberModel: 'large-v3-turbo',
+      micDevice: null,
+      outputDevice: null,
+    });
+    updateSettings(
+      { AI_COACH_MODEL: 'claude-haiku-5-5', AUDIO_MIC_DEVICE: 'Headset Mic (USB)' },
+      file,
+    );
+    expect(getSettings()).toMatchObject({
+      coachModel: 'claude-haiku-5-5',
+      micDevice: 'Headset Mic (USB)',
+    });
+    expect(typeof getSettings().audioEngine.installed).toBe('boolean');
+  });
+});
