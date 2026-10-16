@@ -26,7 +26,7 @@ export function usePictureInPicture(onKey?: (e: KeyboardEvent) => void) {
     setError(null);
     let w: Window;
     try {
-      w = await api.requestWindow({ width: 520, height: 380 });
+      w = await api.requestWindow({ width: 520, height: 500 });
     } catch (e) {
       setError(`Could not pop out the card: ${(e as Error).message}`);
       return;
