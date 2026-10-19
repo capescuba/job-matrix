@@ -211,6 +211,45 @@ describe('fetchJobPosting', () => {
     expect(job.descriptionText).toContain('Preferred qualifications\n- Experience with consumer');
   });
 
+  it('reads Oracle Recruiting postings through its API, pay from the custom field', async () => {
+    const { f, calls } = fakeFetch({
+      'https://jpmc.fa.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails':
+        {
+          body: JSON.stringify({
+            items: [
+              {
+                Title: 'Lead Technical Program Manager',
+                ExternalDescriptionStr: `<p>${LONG}</p>`,
+                ExternalResponsibilitiesStr: '',
+                ExternalQualificationsStr: '<ul><li>10+ years of program delivery</li></ul>',
+                PrimaryLocation: 'Palo Alto, CA, United States',
+                secondaryLocations: [],
+                WorkplaceType: '',
+                ExternalPostedStartDate: '2026-10-15T16:11:30+00:00',
+                requisitionFlexFields: [
+                  { Prompt: 'Base Pay/Salary', Value: 'Palo Alto,CA $147,250.00-$200,000.00' },
+                ],
+              },
+            ],
+          }),
+        },
+    });
+    const job = await fetchJobPosting(
+      'https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs/preview/210795797/?keyword=Technical+Program',
+      f,
+    );
+    expect(calls[0]).toContain('finder=ById;Id=%22210795797%22,siteNumber=CX_1001');
+    expect(job).toMatchObject({
+      title: 'Lead Technical Program Manager',
+      location: 'Palo Alto, CA, United States',
+      posted: { date: '2026-10-15', approx: false },
+      salaryMin: 147_250,
+      salaryMax: 200_000,
+      via: 'Oracle Recruiting API',
+    });
+    expect(job.descriptionText).toContain('- 10+ years of program delivery');
+  });
+
   it('passes the page title along when it falls back to page text', async () => {
     const { f } = fakeFetch({
       'https://careers.example.com/': {

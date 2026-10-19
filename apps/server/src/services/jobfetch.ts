@@ -387,6 +387,60 @@ async function workday(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   });
 }
 
+/**
+ * Oracle Recruiting Cloud careers sites (jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/
+ * sites/CX_1001/job/210795797, or …/jobs/preview/… when opened over the search results). The
+ * page's structured data has no pay; employers put it in a custom field ("Base Pay/Salary").
+ */
+async function oracle(f: FetchFn, u: URL): Promise<FetchedJob | null> {
+  const m = u.pathname.match(
+    /\/hcmUI\/CandidateExperience\/[^/]+\/sites\/([^/]+)\/(?:job|jobs\/preview)\/(\d+)/,
+  );
+  if (!m) return null;
+  const [, site, id] = m;
+  const j = await getJson<{
+    items?: {
+      Title?: string;
+      ExternalDescriptionStr?: string;
+      ExternalResponsibilitiesStr?: string;
+      ExternalQualificationsStr?: string;
+      PrimaryLocation?: string;
+      secondaryLocations?: { Name?: string }[];
+      WorkplaceType?: string;
+      ExternalPostedStartDate?: string;
+      requisitionFlexFields?: { Prompt?: string; Value?: string }[];
+    }[];
+  }>(
+    f,
+    `https://${u.hostname}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all&onlyData=true&finder=ById;Id=%22${id}%22,siteNumber=${site}`,
+  );
+  const r = j.items?.[0];
+  if (!r?.ExternalDescriptionStr) return null;
+  const pay = parseSalaryRange(
+    (r.requisitionFlexFields ?? [])
+      .filter((x) => /pay|salary|compensation/i.test(x.Prompt ?? ''))
+      .map((x) => x.Value ?? '')
+      .join('\n'),
+  );
+  return finish({
+    title: r.Title ?? null,
+    location: joinPlaces([r.PrimaryLocation, ...(r.secondaryLocations ?? []).map((l) => l.Name)]),
+    remoteType: remoteFrom(r.WorkplaceType),
+    salaryMin: pay?.min ?? null,
+    salaryMax: pay?.max ?? null,
+    descriptionText: [
+      r.ExternalDescriptionStr,
+      r.ExternalResponsibilitiesStr,
+      r.ExternalQualificationsStr,
+    ]
+      .filter((s) => s?.trim())
+      .map((s) => htmlToText(s!))
+      .join('\n\n'),
+    posted: exact(r.ExternalPostedStartDate, 'Oracle Recruiting ExternalPostedStartDate'),
+    via: 'Oracle Recruiting API',
+  });
+}
+
 /** careers.walmart.com (Next.js): the whole requisition sits in the page's __NEXT_DATA__. */
 async function walmart(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   if (!/\/jobs\/R-\d+/i.test(u.pathname)) return null;
@@ -783,7 +837,9 @@ export async function fetchJobPosting(url: string, f: FetchFn = fetch): Promise<
               ? walmart
               : h === 'www.amazon.jobs' || h === 'amazon.jobs'
                 ? amazonJobs
-                : null;
+                : h.endsWith('.oraclecloud.com')
+                  ? oracle
+                  : null;
   if (!specific) {
     // A careers page embedding Ashby/Greenhouse: read the posting from the board, not the shell.
     if (embeddedJobId(u)) {
