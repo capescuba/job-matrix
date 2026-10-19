@@ -1005,8 +1005,10 @@ const soon = () => {
   timer = setTimeout(refresh, 250);
 };
 chrome.tabs.onActivated.addListener(soon);
+// A new title counts too: sites that open a job over their search results (Oracle's careers
+// sites) change the address first and draw the posting, and its title, half a second later.
 chrome.tabs.onUpdated.addListener((id, info) => {
-  if (id === state.tab?.id && (info.status === 'complete' || info.url)) soon();
+  if (id === state.tab?.id && (info.status === 'complete' || info.url || info.title)) soon();
 });
 chrome.windows.onFocusChanged.addListener(soon);
 // Coming back to the panel (e.g. after passing on the job in Job Matrix) reads it again.
