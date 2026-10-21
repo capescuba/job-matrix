@@ -391,14 +391,22 @@ async function workday(f: FetchFn, u: URL): Promise<FetchedJob | null> {
  * Oracle Recruiting Cloud careers sites (jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/
  * sites/CX_1001/job/210795797, or …/jobs/preview/… when opened over the search results). The
  * page's structured data has no pay; employers put it in a custom field ("Base Pay/Salary").
+ * The requisition doesn't name the employer either (LegalEmployer is empty); the page's
+ * og:site_name does ("Williams-Sonoma" on ehac.fa.us6.oraclecloud.com).
  */
-async function oracle(f: FetchFn, u: URL): Promise<FetchedJob | null> {
+export function oracleJobId(u: URL): { site: string; id: string } | null {
+  if (!u.hostname.toLowerCase().endsWith('.oraclecloud.com')) return null;
   const m = u.pathname.match(
     /\/hcmUI\/CandidateExperience\/[^/]+\/sites\/([^/]+)\/(?:job|jobs\/preview)\/(\d+)/,
   );
-  if (!m) return null;
-  const [, site, id] = m;
-  const j = await getJson<{
+  return m ? { site: m[1]!, id: m[2]! } : null;
+}
+
+async function oracle(f: FetchFn, u: URL): Promise<FetchedJob | null> {
+  const req = oracleJobId(u);
+  if (!req) return null;
+  const { site, id } = req;
+  const api = getJson<{
     items?: {
       Title?: string;
       ExternalDescriptionStr?: string;
@@ -414,6 +422,11 @@ async function oracle(f: FetchFn, u: URL): Promise<FetchedJob | null> {
     f,
     `https://${u.hostname}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all&onlyData=true&finder=ById;Id=%22${id}%22,siteNumber=${site}`,
   );
+  const page = getText(f, u.toString()).catch(() => '');
+  const [j, html] = await Promise.all([api, page]);
+  const siteName = html.match(
+    /<meta[^>]+property=["']?og:site_name["']?[^>]+content=["']([^"']*)["']/i,
+  )?.[1];
   const r = j.items?.[0];
   if (!r?.ExternalDescriptionStr) return null;
   const pay = parseSalaryRange(
@@ -424,6 +437,7 @@ async function oracle(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   );
   return finish({
     title: r.Title ?? null,
+    company: siteName ? decodeEntities(siteName) : null,
     location: joinPlaces([r.PrimaryLocation, ...(r.secondaryLocations ?? []).map((l) => l.Name)]),
     remoteType: remoteFrom(r.WorkplaceType),
     salaryMin: pay?.min ?? null,

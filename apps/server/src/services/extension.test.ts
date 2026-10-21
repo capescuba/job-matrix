@@ -231,6 +231,37 @@ describe('pageContext', () => {
     expect(c.company?.name).toBe('Anthropic');
   });
 
+  it('names the employer on an Oracle Recruiting page, never "Oraclecloud"', async () => {
+    const page =
+      'https://ehac.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/20706?utm_medium=jobshare';
+    const web = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/hcmRestApi/'))
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                Title: 'Director, Technology - PMO',
+                ExternalDescriptionStr: `<p>${'Lead programs. '.repeat(20)}</p>`,
+              },
+            ],
+          }),
+        );
+      if (url.includes('/hcmUI/'))
+        return new Response('<meta property="og:site_name" content="Williams-Sonoma"/>');
+      return new Response('', { status: 404 });
+    }) as typeof fetch;
+    const c = await pageContext(db, { url: page, pageTitle: 'Williams-Sonoma' }, { fetchFn: web });
+    expect(c.detected).toEqual({ title: 'Director, Technology - PMO', company: 'Williams-Sonoma' });
+    // Offline (another job, so the cached answer doesn't count): nothing, rather than the host.
+    const off = await pageContext(
+      db,
+      { url: page.replace('20706', '20707') },
+      { fetchFn: offline },
+    );
+    expect(off.detected.company).toBeNull();
+  });
+
   it('an unknown company: no brief, and scoring would include research', async () => {
     const c = await pageContext(db, {
       url: 'https://jobs.example.org/42',

@@ -248,6 +248,39 @@ describe('fetchJobPosting', () => {
       via: 'Oracle Recruiting API',
     });
     expect(job.descriptionText).toContain('- 10+ years of program delivery');
+    // The careers page didn't load: no employer, rather than one guessed from the address.
+    expect(job.company).toBeNull();
+  });
+
+  it('takes the Oracle Recruiting employer from the careers page, not the oraclecloud host', async () => {
+    const { f, calls } = fakeFetch({
+      'https://ehac.fa.us6.oraclecloud.com/hcmRestApi/': {
+        body: JSON.stringify({
+          items: [
+            {
+              Title: 'Director, Technology - PMO',
+              ExternalDescriptionStr: `<p>${LONG}</p>`,
+              PrimaryLocation: 'San Francisco, CA, United States',
+              LegalEmployer: null,
+              Organization: null,
+            },
+          ],
+        }),
+      },
+      'https://ehac.fa.us6.oraclecloud.com/hcmUI/': {
+        body: '<html><head><title>Williams-Sonoma</title><meta property="og:title" content="Director, Technology - PMO"/><meta property="og:site_name" content="Williams-Sonoma"/></head><body></body></html>',
+      },
+    });
+    const job = await fetchJobPosting(
+      'https://ehac.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/20706?utm_medium=jobshare',
+      f,
+    );
+    expect(calls[0]).toContain('finder=ById;Id=%2220706%22,siteNumber=CX_1');
+    expect(job).toMatchObject({
+      title: 'Director, Technology - PMO',
+      company: 'Williams-Sonoma',
+      via: 'Oracle Recruiting API',
+    });
   });
 
   it('passes the page title along when it falls back to page text', async () => {

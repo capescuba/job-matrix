@@ -79,6 +79,12 @@ describe('long template fields', () => {
     expect(companyFromHost('https://www.linkedin.com/jobs/view/1')).toBeNull();
     expect(companyFromHost('https://job-boards.greenhouse.io/boxinc/jobs/1')).toBeNull();
     expect(companyFromHost('https://adobe.wd5.myworkdayjobs.com/x')).toBeNull();
+    // Oracle Recruiting Cloud hosts a customer under a code: not "Oraclecloud", not "Ehac".
+    expect(
+      companyFromHost(
+        'https://ehac.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/20706?utm_medium=jobshare',
+      ),
+    ).toBeNull();
     // With no template pick at all — or a wrong one — the side panel still knows it's Oracle.
     const db = openDb(':memory:');
     createApplication(db, {

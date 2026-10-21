@@ -159,9 +159,13 @@ export function parsePageTitle(pageTitle: string | null | undefined): {
   return { title: t, company: null };
 }
 
-/** Hosts that serve many companies' jobs — a hostname there says nothing about the company. */
+/**
+ * Hosts that serve many companies' jobs — a hostname there says nothing about the company.
+ * Oracle Recruiting Cloud names its customers by a code (ehac.fa.us6.oraclecloud.com is
+ * Williams-Sonoma), so neither "oraclecloud" nor the subdomain is the employer.
+ */
 export const SHARED_HOSTS =
-  /(^|\.)(linkedin\.com|indeed\.com|glassdoor\.com|greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|workable\.com|wellfound\.com|builtin\.com|ziprecruiter\.com|google\.com|dice\.com|monster\.com|simplyhired\.com|otta\.com|welcometothejungle\.com|myworkdayjobs\.com)$/i;
+  /(^|\.)(linkedin\.com|indeed\.com|glassdoor\.com|greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|workable\.com|wellfound\.com|builtin\.com|ziprecruiter\.com|google\.com|dice\.com|monster\.com|simplyhired\.com|otta\.com|welcometothejungle\.com|myworkdayjobs\.com|oraclecloud\.com)$/i;
 
 /** Job platforms where each company gets its own subdomain: githubinc.icims.com, x.eightfold.ai. */
 const TENANT_HOSTS =
