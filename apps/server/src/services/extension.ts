@@ -34,7 +34,7 @@ import {
   normalizeUrl,
   parsePageTitle,
 } from './screening.ts';
-import { embeddedJobId, fetchJobPosting, type FetchedJob } from './jobfetch.ts';
+import { embeddedJobId, fetchJobPosting, oracleJobId, type FetchedJob } from './jobfetch.ts';
 import { emailContext, outlookMessageId } from './mail/outlookPage.ts';
 import { currentEffort, getSettings } from './settings.ts';
 import { getStock, type StockQuote } from './stock.ts';
@@ -228,7 +228,10 @@ function briefSummary(r: NonNullable<ReturnType<typeof latestResearch>>) {
  * like it), which company is it, what do we know about that company, and what would scoring cost.
  */
 const boardCache = new Map<string, { at: number; job: FetchedJob | null }>();
-/** The posting behind an embedded job board on a careers page, or null (not one, or it failed). */
+/**
+ * The posting behind an embedded job board on a careers page, or behind an Oracle Recruiting
+ * page (whose address and tab title don't name the employer); null if neither, or it failed.
+ */
 async function boardPosting(url: string, fetchFn?: typeof fetch) {
   let u: URL;
   try {
@@ -236,7 +239,7 @@ async function boardPosting(url: string, fetchFn?: typeof fetch) {
   } catch {
     return null;
   }
-  if (!embeddedJobId(u)) return null;
+  if (!embeddedJobId(u) && !oracleJobId(u)) return null;
   const hit = boardCache.get(url);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.job;
   const job = await fetchJobPosting(url, fetchFn).catch(() => null);
