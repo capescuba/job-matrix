@@ -22,6 +22,7 @@ const state = {
   busy: null, // 'add' | 'score' | 'save-template'
   useApp: null, // application chosen for the helper when the page only looks similar
   drafts: {}, // question id → { text, basedOn, loading, error }
+  draftingAll: false, // "Draft all" is out
   teach: null, // { selectors: {}, samples: {} } while teaching this site
   run: null, // the watchlist's saved-search run, as search.js reports it
   runDismissed: null, // startedAt of a finished run you closed
@@ -597,6 +598,19 @@ function helperSection() {
   else
     head =
       '<div class="small warn">Add this posting to Job Matrix first (above), so answers can use its description and your fit.</div>';
+  // Drafting together shares your stories out across the questions, instead of the first
+  // answer using up the best of them.
+  if (qs.length > 1) {
+    const busy = Object.values(state.drafts).some((d) => d.loading);
+    const again = qs.some((q) => state.drafts[q.id]?.text != null);
+    const allCost = money(
+      state.ctx.costs.answer + (qs.length - 1) * (state.ctx.costs.answerEachExtra ?? 0),
+    );
+    head += `<div class="row" style="margin-top:6px">
+        <button class="primary" data-action="suggest-all" ${!app || busy ? 'disabled' : ''}>${state.draftingAll ? 'Drafting all…' : `${again ? 'Redraft' : 'Draft'} all ${qs.length} together · ~${allCost}`}</button>
+      </div>
+      <div class="faint small">Gives each answer its own evidence so they don’t repeat. Suggest on one question redoes just that one, around the others.</div>`;
+  }
 
   const rows = qs
     .map((q) => {
@@ -880,6 +894,41 @@ async function suggest(qid) {
   render();
 }
 
+/** Drafts every question in one request, replacing the drafts here (nothing is inserted). */
+async function suggestAll() {
+  const qs = state.page?.questions ?? [];
+  const app = helperApp();
+  if (!qs.length || !app) return;
+  state.draftingAll = true;
+  for (const q of qs)
+    state.drafts[q.id] = { ...(state.drafts[q.id] ?? {}), loading: true, error: null };
+  render();
+  try {
+    const r = await api('/api/ext/answers', {
+      method: 'POST',
+      body: {
+        applicationId: app.applicationId,
+        questions: qs.map((q) => ({ question: q.label, maxLength: q.maxLength })),
+      },
+    });
+    qs.forEach((q, n) => {
+      const a = r.answers[n];
+      state.drafts[q.id] = a
+        ? { text: a.answer, basedOn: a.basedOn, loading: false }
+        : {
+            ...state.drafts[q.id],
+            loading: false,
+            error: 'Left out of this draft — press Suggest for it.',
+          };
+    });
+  } catch (e) {
+    for (const q of qs) state.drafts[q.id] = { ...state.drafts[q.id], loading: false };
+    state.notice = { tone: 'error', text: `Drafting failed: ${e.message || e}` };
+  }
+  state.draftingAll = false;
+  render();
+}
+
 async function insert(qid) {
   const text = state.drafts[qid]?.text ?? '';
   const [{ result }] = await chrome.scripting.executeScript({
@@ -960,6 +1009,7 @@ document.addEventListener('click', async (e) => {
     state.useApp = Number(el.dataset.id);
     render();
   } else if (a === 'suggest') suggest(el.dataset.q);
+  else if (a === 'suggest-all') suggestAll();
   else if (a === 'insert') insert(el.dataset.q);
   else if (a === 'copy')
     await navigator.clipboard.writeText(state.drafts[el.dataset.q]?.text ?? '');

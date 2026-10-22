@@ -7,7 +7,14 @@ import { openDb, type Db } from '../db/client.ts';
 import { companyResearch, profile, resumeVersions } from '../db/schema.ts';
 import { createApplication } from './applications.ts';
 import { assessFit } from './fit.ts';
-import { companyKey, listAnswers, pageContext, similarTitles, suggestAnswer } from './extension.ts';
+import {
+  companyKey,
+  listAnswers,
+  pageContext,
+  similarTitles,
+  suggestAllAnswers,
+  suggestAnswer,
+} from './extension.ts';
 import { captureJob } from './screening.ts';
 import { EXTENSION_ORIGIN } from './token.ts';
 import type { AddressInfo } from 'node:net';
@@ -411,6 +418,7 @@ describe('extension routes', () => {
       ['POST', '/api/ext/context'],
       ['GET', '/api/ext/templates/example.com'],
       ['POST', '/api/ext/answer'],
+      ['POST', '/api/ext/answers'],
     ] as const)
       expect((await app.inject({ method, url })).statusCode).toBe(401);
     const ok = await app.inject({ url: '/api/ext/hello', headers: { 'x-jm-token': TOKEN } });
@@ -463,7 +471,13 @@ describe('extension routes', () => {
 });
 
 describe('application answers', () => {
-  function fakeProvider() {
+  function fakeProvider(
+    data: unknown = {
+      answer:
+        'I led an agentic AI platform at Workday, and your IAM agents launch is the same bet.',
+      basedOn: 'Workday agentic AI + their AI agents launch',
+    },
+  ) {
     const prompts: string[] = [];
     const provider: LLMProvider = {
       name: 'anthropic',
@@ -472,11 +486,7 @@ describe('application answers', () => {
       async completeStructured<S extends z.ZodType>(req: StructuredRequest<S>) {
         prompts.push(`${req.system}\n${req.prompt}`);
         return {
-          data: req.schema.parse({
-            answer:
-              'I led an agentic AI platform at Workday, and your IAM agents launch is the same bet.',
-            basedOn: 'Workday agentic AI + their AI agents launch',
-          }) as z.infer<S>,
+          data: req.schema.parse(data) as z.infer<S>,
           provider: 'anthropic',
           model: 'claude-opus-5-5',
           usage: { inputTokens: 10_000, outputTokens: 400 },
@@ -530,5 +540,45 @@ describe('application answers', () => {
       'Q: Why Docusign?\nA: Your IAM agents launch matches my Workday work.',
     );
     expect(prompts[0]).toContain('Q: Anything else?\nA: (not answered yet)');
+  });
+
+  it('drafts the whole form in one call, sharing the evidence out', async () => {
+    const id = add('Docusign', 'Sr. TPM', 'https://careers.docusign.com/jobs/1');
+    const { provider, prompts } = fakeProvider({
+      plan: '1: their IAM agents launch. 2: the Workday platform.',
+      answers: [
+        { number: 2, answer: 'I led the Workday agentic AI platform.', basedOn: 'Workday' },
+        { number: 1, answer: 'Your IAM agents launch is where I want to be.', basedOn: 'Brief' },
+      ],
+    });
+    const r = await suggestAllAnswers(
+      db,
+      {
+        applicationId: id,
+        questions: [
+          { question: 'Why Docusign?', maxLength: 20 },
+          { question: 'Tell us about a program you led.' },
+          { question: 'Anything else?' },
+        ],
+      },
+      { provider },
+    );
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('Plan before writing');
+    expect(prompts[0]).toContain(
+      '<question number="1" character_limit="20">Why Docusign?</question>',
+    );
+    expect(prompts[0]).toContain(
+      '<question number="3" character_limit="none">Anything else?</question>',
+    );
+    expect(prompts[0]).toContain('Led Workday agentic AI platform.');
+    // Back in the form's order, cut to the field's limit; the one it skipped is null.
+    expect(r.answers.map((a) => a?.answer)).toEqual([
+      'Your IAM agents laun',
+      'I led the Workday agentic AI platform.',
+      undefined,
+    ]);
+    expect(r.answers[0]!.basedOn).toBe('Brief');
+    expect(listAnswers(db, id)).toHaveLength(2);
   });
 });

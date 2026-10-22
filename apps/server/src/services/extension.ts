@@ -336,6 +336,8 @@ export async function pageContext(
       /** Scoring researches the company only when it has no brief yet. */
       researchNeeded: !research,
       answer: ANSWER_ESTIMATE_USD,
+      /** Each question after the first, when drafting the whole form at once. */
+      answerEachExtra: ANSWER_EACH_EXTRA_USD,
     },
     /** The free pre-screen model, when one is set up (null = not yet). */
     prescreen: prescreenConfig().ready ? { model: prescreenConfig().model } : null,
@@ -389,12 +391,16 @@ export function deleteTemplate(db: Db, host: string) {
 
 /** Before any history: ~12k tokens in, ~600 out on Opus 5.5. */
 const ANSWER_ESTIMATE_USD = 0.06;
+/** Drafting the whole form in one go: the context once, then each further answer's output. */
+const ANSWER_EACH_EXTRA_USD = 0.02;
+
+const maxLengthSchema = z.number().int().positive().max(20_000).nullable().optional();
 
 export const answerRequestSchema = z.object({
   applicationId: z.number().int(),
   question: z.string().trim().min(3).max(2000),
   /** The form field's maxlength, if it has one. */
-  maxLength: z.number().int().positive().max(20_000).nullable().optional(),
+  maxLength: maxLengthSchema,
   /** The form's other questions, with what's drafted or typed for them so far. */
   otherQuestions: z
     .array(
@@ -407,6 +413,15 @@ export const answerRequestSchema = z.object({
     .optional(),
 });
 
+/** Every written question on the form, drafted together. */
+export const answersRequestSchema = z.object({
+  applicationId: z.number().int(),
+  questions: z
+    .array(z.object({ question: z.string().trim().min(3).max(2000), maxLength: maxLengthSchema }))
+    .min(1)
+    .max(15),
+});
+
 export const answerSchema = z.object({
   answer: z.string().describe('The answer, plain text, ready to paste'),
   basedOn: z
@@ -416,23 +431,42 @@ export const answerSchema = z.object({
     ),
 });
 
-export const ANSWER_SYSTEM_PROMPT = `You draft answers to job application questions for a job seeker, written as them.
+export const allAnswersSchema = z.object({
+  plan: z
+    .string()
+    .describe(
+      'Written first, before any answer: one line per question naming what it is really asking and the evidence it gets. Each story, project and number goes to the one question it answers best.',
+    ),
+  answers: z.array(
+    answerSchema.extend({ number: z.number().int().describe('The question number, from 1') }),
+  ),
+});
 
-Rules:
-- First person, as the applicant ("I led…"). Warm, direct and specific; no clichés ("I'm passionate about", "I'm excited to", "fast-paced environment"), no flattery, no filler.
+const ANSWER_RULES = `- First person, as the applicant ("I led…"). Warm, direct and specific; no clichés ("I'm passionate about", "I'm excited to", "fast-paced environment"), no flattery, no filler.
 - Use only facts from the resume, career profile, LinkedIn profile, goals and fit notes for claims about the applicant — never invent employers, numbers or projects. Use the company brief and job description for why this company and role; name concrete things (a product, a program, a stated priority) rather than generic praise.
 - Tie the applicant's strongest relevant evidence to what this role needs.
-- The form's other questions are answered separately, and a reader sees them all together. Answer only what this question asks: leave a topic another question asks for directly (why this company, a specific project, logistics) to that question. Don't reuse the stories, projects, numbers or phrasing already in the other answers; pick different evidence. Mention something again only when this question can't be answered without it, and then briefly.
 - Fit the length: stay under the character limit when one is given (aim for ~85% of it); otherwise 80–150 words for "why" questions, 1–3 sentences for short factual ones.
 - If the question asks for something the inputs don't cover (salary expectations, visa status, start date, references), give a short, sensible answer with a [fill in] placeholder instead of guessing.
 - Plain text only: no markdown, no headings, no bullet symbols unless the question asks for a list.`;
 
+export const ANSWER_SYSTEM_PROMPT = `You draft answers to job application questions for a job seeker, written as them.
+
+Rules:
+${ANSWER_RULES}
+- The form's other questions are answered separately, and a reader sees them all together. Answer only what this question asks: leave a topic another question asks for directly (why this company, a specific project, logistics) to that question. Don't reuse the stories, projects, numbers or phrasing already in the other answers; pick different evidence. Mention something again only when this question can't be answered without it, and then briefly.`;
+
+export const ALL_ANSWERS_SYSTEM_PROMPT = `You draft every written answer on a job application form at once, for a job seeker, written as them. A reader sees the answers side by side, so together they should read as one application that covers the most ground, not one pitch repeated.
+
+Plan before writing. Work out what each question is really asking, then share out the applicant's evidence: every story, project and number goes to the one question it answers best and appears only there. A topic a question asks for directly (why this company, a specific project, logistics) belongs to that question alone. Don't spend the strongest material on the first question by default — give it to the question it fits. Then write each answer from its share.
+
+Rules:
+${ANSWER_RULES}`;
+
 const clip = (s: string | null | undefined, n: number) =>
   !s ? '' : s.length > n ? `${s.slice(0, n)}…` : s;
 
-export function buildAnswerPrompt(i: {
-  question: string;
-  maxLength?: number | null;
+/** What every answer draws on: the role, the applicant and the company. */
+type AnswerContext = {
   company: string;
   title: string;
   description: string | null;
@@ -444,16 +478,9 @@ export function buildAnswerPrompt(i: {
   goals: string | null;
   fit: FitResult | null;
   brief: CompanyResearch | null;
-  otherQuestions?: { question: string; answer?: string | null }[];
-}): string {
-  const others = i.otherQuestions?.length
-    ? i.otherQuestions
-        .map(
-          (o) =>
-            `<other_question>\nQ: ${o.question}\nA: ${clip(o.answer?.trim(), 3_000) || '(not answered yet)'}\n</other_question>`,
-        )
-        .join('\n')
-    : 'none';
+};
+
+function answerContext(i: AnswerContext): string {
   const brief = i.brief
     ? [
         `What they do: ${i.brief.snapshot.whatTheyDo}`,
@@ -469,10 +496,7 @@ export function buildAnswerPrompt(i: {
         ...i.fit.talkingPoints.map((t) => `Talking point: ${t}`),
       ].join('\n')
     : 'none';
-  return `<question>${i.question}</question>
-<character_limit>${i.maxLength ?? 'none'}</character_limit>
-
-<role>${i.title} at ${i.company}</role>
+  return `<role>${i.title} at ${i.company}</role>
 
 <job_description>
 ${clip(i.description, 12_000)}
@@ -500,7 +524,28 @@ ${fit}
 
 <company_brief>
 ${brief}
-</company_brief>
+</company_brief>`;
+}
+
+export function buildAnswerPrompt(
+  i: AnswerContext & {
+    question: string;
+    maxLength?: number | null;
+    otherQuestions?: { question: string; answer?: string | null }[];
+  },
+): string {
+  const others = i.otherQuestions?.length
+    ? i.otherQuestions
+        .map(
+          (o) =>
+            `<other_question>\nQ: ${o.question}\nA: ${clip(o.answer?.trim(), 3_000) || '(not answered yet)'}\n</other_question>`,
+        )
+        .join('\n')
+    : 'none';
+  return `<question>${i.question}</question>
+<character_limit>${i.maxLength ?? 'none'}</character_limit>
+
+${answerContext(i)}
 
 <rest_of_this_form>
 ${others}
@@ -509,20 +554,34 @@ ${others}
 Draft the applicant's answer to the question.`;
 }
 
-/** Drafts an answer for a question on this application's form, saves it, and records the cost. */
-export async function suggestAnswer(
-  db: Db,
-  req: z.infer<typeof answerRequestSchema>,
-  opts: { provider?: LLMProvider } = {},
-) {
+export function buildAllAnswersPrompt(
+  i: AnswerContext & { questions: { question: string; maxLength?: number | null }[] },
+): string {
+  const questions = i.questions
+    .map(
+      (q, n) =>
+        `<question number="${n + 1}" character_limit="${q.maxLength ?? 'none'}">${q.question}</question>`,
+    )
+    .join('\n');
+  return `<questions>
+${questions}
+</questions>
+
+${answerContext(i)}
+
+Plan how the evidence is shared out, then draft the applicant's answer to every question.`;
+}
+
+/** The application's role, company, fit and brief, and your resume and profile. */
+function loadAnswerContext(db: Db, applicationId: number) {
   const row = db
     .select({ job: jobs, company: companies })
     .from(applications)
     .innerJoin(jobs, eq(jobs.id, applications.jobId))
     .innerJoin(companies, eq(companies.id, jobs.companyId))
-    .where(eq(applications.id, req.applicationId))
+    .where(eq(applications.id, applicationId))
     .get();
-  if (!row) throw new NotFoundError(`Application ${req.applicationId} not found`);
+  if (!row) throw new NotFoundError(`Application ${applicationId} not found`);
   const fit = db
     .select({ result: fitAssessments.result })
     .from(fitAssessments)
@@ -530,27 +589,53 @@ export async function suggestAnswer(
     .orderBy(desc(fitAssessments.createdAt), desc(fitAssessments.id))
     .get();
   const research = latestResearch(db, row.company.id);
+  const profile = getProfile(db);
+  const context: AnswerContext = {
+    company: row.company.name,
+    title: row.job.title,
+    description: row.job.descriptionText,
+    resume: resumeForTrack(db, jobTrack(row.job))?.rawText ?? null,
+    careerProfile: profile.careerProfile,
+    linkedin: profile.linkedinText,
+    goals: profile.goals,
+    fit: (fit?.result as FitResult | undefined)?.parts ? (fit!.result as FitResult) : null,
+    brief: (research?.result as CompanyResearch | undefined) ?? null,
+  };
+  return { companyId: row.company.id, context };
+}
 
+function saveAnswer(
+  db: Db,
+  a: { applicationId: number; question: string; maxLength?: number | null; answer: string },
+  usageId: number,
+) {
+  let answer = a.answer.trim();
+  if (a.maxLength && answer.length > a.maxLength) answer = answer.slice(0, a.maxLength).trimEnd();
+  return db
+    .insert(applicationAnswers)
+    .values({ applicationId: a.applicationId, question: a.question, answer, usageId })
+    .returning()
+    .get();
+}
+
+/** Drafts an answer for a question on this application's form, saves it, and records the cost. */
+export async function suggestAnswer(
+  db: Db,
+  req: z.infer<typeof answerRequestSchema>,
+  opts: { provider?: LLMProvider } = {},
+) {
+  const { companyId, context } = loadAnswerContext(db, req.applicationId);
   const provider = opts.provider ?? getProvider();
-  const model = getSettings().model;
   const res = await provider.completeStructured({
     system: ANSWER_SYSTEM_PROMPT,
     prompt: buildAnswerPrompt({
+      ...context,
       question: req.question,
       maxLength: req.maxLength,
-      company: row.company.name,
-      title: row.job.title,
-      description: row.job.descriptionText,
-      resume: resumeForTrack(db, jobTrack(row.job))?.rawText ?? null,
-      careerProfile: getProfile(db).careerProfile,
-      linkedin: getProfile(db).linkedinText,
-      goals: getProfile(db).goals,
-      fit: (fit?.result as FitResult | undefined)?.parts ? (fit!.result as FitResult) : null,
-      brief: (research?.result as CompanyResearch | undefined) ?? null,
       otherQuestions: req.otherQuestions,
     }),
     schema: answerSchema,
-    model,
+    model: getSettings().model,
     effort: currentEffort(),
     maxTokens: 4000,
   });
@@ -560,18 +645,55 @@ export async function suggestAnswer(
     model: res.model,
     usage: res.usage,
     applicationId: req.applicationId,
-    companyId: row.company.id,
+    companyId,
     trace: res.trace,
   });
-  let answer = res.data.answer.trim();
-  if (req.maxLength && answer.length > req.maxLength)
-    answer = answer.slice(0, req.maxLength).trimEnd();
-  const saved = db
-    .insert(applicationAnswers)
-    .values({ applicationId: req.applicationId, question: req.question, answer, usageId })
-    .returning()
-    .get();
+  const saved = saveAnswer(db, { ...req, answer: res.data.answer }, usageId);
   return { ...saved, basedOn: res.data.basedOn };
+}
+
+/**
+ * Drafts every question on the form in one call, so the evidence is shared out across them
+ * rather than the first answer taking the best of it. Saves each; a question the model skipped
+ * comes back null.
+ */
+export async function suggestAllAnswers(
+  db: Db,
+  req: z.infer<typeof answersRequestSchema>,
+  opts: { provider?: LLMProvider } = {},
+) {
+  const { companyId, context } = loadAnswerContext(db, req.applicationId);
+  const provider = opts.provider ?? getProvider();
+  const res = await provider.completeStructured({
+    system: ALL_ANSWERS_SYSTEM_PROMPT,
+    prompt: buildAllAnswersPrompt({ ...context, questions: req.questions }),
+    schema: allAnswersSchema,
+    model: getSettings().model,
+    effort: currentEffort(),
+    maxTokens: Math.min(4000 + 1500 * req.questions.length, 32_000),
+  });
+  const usageId = recordUsage(db, {
+    feature: 'answer',
+    provider: res.provider,
+    model: res.model,
+    usage: res.usage,
+    applicationId: req.applicationId,
+    companyId,
+    trace: res.trace,
+  });
+  return {
+    plan: res.data.plan,
+    answers: req.questions.map((q, n) => {
+      const a = res.data.answers.find((x) => x.number === n + 1);
+      if (!a?.answer.trim()) return null;
+      const saved = saveAnswer(
+        db,
+        { applicationId: req.applicationId, ...q, answer: a.answer },
+        usageId,
+      );
+      return { ...saved, basedOn: a.basedOn };
+    }),
+  };
 }
 
 export function listAnswers(db: Db, applicationId: number) {

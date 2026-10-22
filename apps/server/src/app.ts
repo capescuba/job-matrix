@@ -72,6 +72,7 @@ import { getStock } from './services/stock.ts';
 import { getStats } from './services/stats.ts';
 import {
   answerRequestSchema,
+  answersRequestSchema,
   deleteAnswer,
   deleteTemplate,
   getTemplate,
@@ -79,6 +80,7 @@ import {
   pageContext,
   pageInputSchema,
   saveTemplate,
+  suggestAllAnswers,
   suggestAnswer,
   templateSchema,
 } from './services/extension.ts';
@@ -550,6 +552,9 @@ export function buildApp(
   });
   app.post('/api/ext/answer', { preHandler: requireToken }, (req) =>
     suggestAnswer(db, answerRequestSchema.parse(req.body)),
+  );
+  app.post('/api/ext/answers', { preHandler: requireToken }, (req) =>
+    suggestAllAnswers(db, answersRequestSchema.parse(req.body)),
   );
   // Saved answers on the job page.
   app.get('/api/applications/:id/answers', (req) => listAnswers(db, idParam.parse(req.params).id));
