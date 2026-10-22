@@ -263,6 +263,17 @@ export function fillField(id, value) {
   return true;
 }
 
+/** What's in each question field right now (typed by hand or inserted earlier), by id. */
+export function readFields(ids) {
+  const out = {};
+  for (const id of ids) {
+    const el = document.querySelector(`[data-jm-q="${id}"]`);
+    const v = el && (el.isContentEditable ? el.textContent : el.value);
+    if (v && v.trim()) out[id] = v.trim();
+  }
+  return out;
+}
+
 /**
  * "Teach this site": highlight elements under the pointer; a click picks one and reports a CSS
  * selector for it (plus a sample of its text) back to the side panel. Esc cancels.
