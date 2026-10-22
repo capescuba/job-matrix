@@ -5,13 +5,12 @@ import {
   type CaptureInput,
   type PostedInfo,
   type Status,
-  looksLikeCompanyName,
 } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import { applications, companies, contacts, jobs } from '../db/schema.ts';
 import { addActivity, createApplication, findOrCreateCompany, sha256 } from './applications.ts';
+import { companyFinder, resolveIdentity } from './jobIdentity.ts';
 import {
-  decodeEntities,
   fetchJobPosting,
   htmlToText,
   ldPlaces,
@@ -129,90 +128,12 @@ export function findTrackedByUrl(db: Db, url: string) {
 
 // ---------- title / company without AI ----------
 
-const SITE_SUFFIX =
-  /\s*[|–—-]\s*(LinkedIn|Indeed(\.com)?|Glassdoor|Greenhouse|Lever|Workday|Careers?)\s*$/i;
-
-/** Best-effort title/company from a browser tab title. */
-export function parsePageTitle(pageTitle: string | null | undefined): {
-  title: string | null;
-  company: string | null;
-} {
-  let t = decodeEntities(pageTitle ?? '')
-    .replace(/^\(\d+\)\s*/, '') // "(3) " notification count
-    .replace(/\s*[-–—(|]?\s*(?:Job|Req(?:uisition)?)\s*(?:ID|#)\s*:?\s*[\w-]+\)?/i, '') // "- Job ID: 10562876"
-    .replace(/\b([A-Z][\w&-]*)\.(?:jobs|careers)\b/, '$1') // "Amazon.jobs" → "Amazon"
-    .trim();
-  if (!t) return { title: null, company: null };
-  let m = t.match(/^(.+?) hiring (.+?)(?: in .+?)?(?:\s*\|\s*LinkedIn)?$/i); // "Acme hiring TPM in SF | LinkedIn"
-  if (m) return { company: m[1].trim(), title: m[2].trim() };
-  m = t.match(/^Job Application for (.+?) at (.+)$/i); // Greenhouse
-  if (m) return { title: m[1].trim(), company: m[2].trim() };
-  m = t.match(/^(.+?)\s+[|–—-]\s+(.+?)\s+(?:Careers?|Jobs)$/i); // "TPM - Walmart Careers"
-  if (m) return { title: m[1].trim(), company: m[2].trim() };
-  // LinkedIn sometimes says it twice: "TPM | LinkedIn | LinkedIn".
-  while (SITE_SUFFIX.test(t)) t = t.replace(SITE_SUFFIX, '').trim();
-  m = t.match(/^(.+?) at (.+)$/); // "TPM at Acme"
-  if (m) return { title: m[1].trim(), company: m[2].trim() };
-  // "TPM | Acme", but not a "|" inside the title: "TPM, Core AI (Mountain View, CA | New York, NY)".
-  const parts = t.split(/\s+[|]\s+(?![^(]*\))/);
-  if (parts.length >= 2) return { title: parts[0].trim(), company: parts[1].trim() };
-  return { title: t, company: null };
-}
-
-/**
- * Hosts that serve many companies' jobs — a hostname there says nothing about the company.
- * Oracle Recruiting Cloud names its customers by a code (ehac.fa.us6.oraclecloud.com is
- * Williams-Sonoma), so neither "oraclecloud" nor the subdomain is the employer.
- */
-export const SHARED_HOSTS =
-  /(^|\.)(linkedin\.com|indeed\.com|glassdoor\.com|greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|workable\.com|wellfound\.com|builtin\.com|ziprecruiter\.com|google\.com|dice\.com|monster\.com|simplyhired\.com|otta\.com|welcometothejungle\.com|myworkdayjobs\.com|oraclecloud\.com)$/i;
-
-/** Job platforms where each company gets its own subdomain: githubinc.icims.com, x.eightfold.ai. */
-const TENANT_HOSTS =
-  /(^|\.)(icims\.com|eightfold\.ai|avature\.net|taleo\.net|jobvite\.com|bamboohr\.com|recruitee\.com|breezy\.hr|applytojob\.com|teamtailor\.com|pinpointhq\.com|rippling\.com|successfactors\.(com|eu))$/i;
-
-/** Words careers sites put around the company's name in their address. */
-const HOST_WORDS =
-  /^(careers?|jobs?|apply|hiring|recruiting|talent|work|join|www\d*|en|us|global|external)$/i;
-
-/**
- * Company from a careers site's own address: careers.oracle.com → "Oracle",
- * jobs.netflix.com → "Netflix", metacareers.com → "Meta", careers-githubinc.icims.com →
- * "Githubinc". Null on shared job boards (LinkedIn, Greenhouse, …).
- */
-export function companyFromHost(url: string): string | null {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-  if (SHARED_HOSTS.test(host)) return null;
-  const labels = host.split('.');
-  const twoLevelTld = /^(co|com|org|net|ac|gov)\.[a-z]{2}$/.test(labels.slice(-2).join('.'));
-  let name = TENANT_HOSTS.test(host)
-    ? labels.length > 2
-      ? labels[0]!
-      : ''
-    : (labels.at(twoLevelTld ? -3 : -2) ?? '');
-  name = name.replace(/^(careers?|jobs?)[-_]/i, '').replace(/[-_]?(careers?|jobs?)$/i, '');
-  if (!name || name.length < 2 || HOST_WORDS.test(name)) return null;
-  return name.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/** Company from an ATS board slug, e.g. jobs.ashbyhq.com/haydenai → "Haydenai". */
-export function companyFromBoardUrl(url: string): string | null {
-  const u = new URL(url);
-  const h = u.hostname;
-  const slug =
-    h.endsWith('greenhouse.io') || h === 'jobs.lever.co' || h === 'jobs.ashbyhq.com'
-      ? u.pathname.split('/')[1]
-      : h.endsWith('myworkdayjobs.com')
-        ? h.split('.')[0]
-        : null;
-  if (!slug) return null;
-  return slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
+export {
+  SHARED_HOSTS,
+  companyFromBoardUrl,
+  companyFromHost,
+  parsePageTitle,
+} from './jobIdentity.ts';
 
 // ---------- JSON-LD ----------
 
@@ -351,32 +272,17 @@ export async function captureJob(
     // Blocked/closed/JS-only pages are expected — the page capture covers them.
   }
   const ld = jobPostingFromJsonLd(input.jsonLd);
-  // The browser's tab title, else the one the server read from the page.
-  const fromTitle = parsePageTitle(input.pageTitle ?? fetched?.pageTitle);
   const f: Partial<NonNullable<typeof input.fields>> = input.fields ?? {};
 
   const desc = descriptionFrom(input, fetched);
 
-  const orgName =
-    typeof ld?.hiringOrganization === 'string'
-      ? ld.hiringOrganization
-      : ld?.hiringOrganization?.name;
-  // A template pick that caught a heading ("About Us") rather than the name doesn't count; the
-  // careers site's own address (careers.oracle.com → Oracle) is a fallback.
-  const company =
-    (looksLikeCompanyName(f.company) ? clean(f.company) : null) ??
-    clean(orgName) ??
-    clean(fetched?.company) ??
-    fromTitle.company ??
-    companyFromBoardUrl(url) ??
-    companyFromHost(url) ??
-    'Unknown';
-  const title =
-    clean(f.title) ??
-    clean(fetched?.title) ??
-    clean(ld?.title && decodeEntities(ld.title)) ??
-    fromTitle.title ??
-    'Unknown role';
+  // Every source's title and company, checked, in one order (the side panel decides the same way).
+  const who = resolveIdentity(
+    { url, template: f, fetched, ld, pageTitle: input.pageTitle },
+    companyFinder(db),
+  );
+  const company = who.company ?? 'Unknown';
+  const title = who.title ?? 'Unknown role';
 
   const location = clean(f.location) ?? clean(fetched?.location) ?? ldPlaces(ld?.jobLocation);
 

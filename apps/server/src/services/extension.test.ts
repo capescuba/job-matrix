@@ -271,6 +271,31 @@ describe('pageContext', () => {
     expect(c.detected).toEqual({ title: 'Principal TPM', company: 'Initech' });
     expect(c.costs.researchNeeded).toBe(true);
   });
+
+  it('shows the NVIDIA you track, not Workday\'s "2100 NVIDIA USA"', async () => {
+    add('NVIDIA', 'TPM', 'https://www.linkedin.com/jobs/view/1/');
+    const jsonLd = [
+      JSON.stringify({
+        '@type': 'JobPosting',
+        title: 'Senior Technical Program Manager, Forward Deployed Engineering',
+        hiringOrganization: { name: '2100 NVIDIA USA' },
+      }),
+    ];
+    const c = await pageContext(
+      db,
+      {
+        url: 'https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/x_JR2028220',
+        pageTitle: 'Senior Technical Program Manager, Forward Deployed Engineering',
+        jsonLd,
+      },
+      { fetchFn: offline },
+    );
+    expect(c.detected).toEqual({
+      title: 'Senior Technical Program Manager, Forward Deployed Engineering',
+      company: 'NVIDIA',
+    });
+    expect(c.company?.name).toBe('NVIDIA');
+  });
 });
 
 describe('fit score in the panel', () => {

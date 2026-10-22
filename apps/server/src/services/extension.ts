@@ -2,14 +2,7 @@ import { and, desc, eq, like } from 'drizzle-orm';
 import { z } from 'zod';
 import type { MailClient } from '@jm/mail';
 import { getProvider, prescreenConfig, type LLMProvider } from '@jm/ai';
-import {
-  jobTrack,
-  looksLikeCompanyName,
-  shortText,
-  type CompanyResearch,
-  type FitResult,
-  type Status,
-} from '@jm/shared';
+import { jobTrack, shortText, type CompanyResearch, type FitResult, type Status } from '@jm/shared';
 import type { Db } from '../db/client.ts';
 import {
   activities,
@@ -21,19 +14,11 @@ import {
   siteTemplates,
   statusEvents,
 } from '../db/schema.ts';
-import { allAliases } from './aliases.ts';
 import { NotFoundError, listApplications, type ApplicationRow } from './applications.ts';
 import { latestResearch, isStale } from './research.ts';
 import { getProfile, resumeForTrack } from './resume.ts';
-import {
-  SHARED_HOSTS,
-  companyFromBoardUrl,
-  companyFromHost,
-  findTrackedByUrl,
-  jobPostingFromJsonLd,
-  normalizeUrl,
-  parsePageTitle,
-} from './screening.ts';
+import { SHARED_HOSTS, findTrackedByUrl, jobPostingFromJsonLd, normalizeUrl } from './screening.ts';
+import { companyFinder, companyKey, resolveIdentity, type KnownCompany } from './jobIdentity.ts';
 import { embeddedJobId, fetchJobPosting, oracleJobId, type FetchedJob } from './jobfetch.ts';
 import { emailContext, outlookMessageId } from './mail/outlookPage.ts';
 import { currentEffort, getSettings } from './settings.ts';
@@ -44,19 +29,7 @@ import { getUsageSummary, recordUsage } from './usage.ts';
 
 export { SHARED_HOSTS };
 
-/** "DocuSign, Inc." and "Docusign" → "docusign". */
-export function companyKey(name: string | null | undefined): string {
-  return (name ?? '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9 ]+/g, ' ')
-    .replace(
-      /\b(inc|incorporated|llc|ltd|limited|corp|corporation|co|company|plc|gmbh|ag|sa)\b/g,
-      ' ',
-    )
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+export { companyKey };
 
 const TITLE_STOP = new Set([
   'the',
@@ -271,30 +244,20 @@ export async function pageContext(
 
   // What the page says it is (no network, no AI). Outlook's own page says nothing about the job.
   const ld = email ? null : jobPostingFromJsonLd(input.jsonLd);
-  const fromTitle = email ? { title: null, company: null } : parsePageTitle(input.pageTitle);
-  const ldOrg =
-    typeof ld?.hiringOrganization === 'string'
-      ? ld.hiringOrganization
-      : ld?.hiringOrganization?.name;
   // A careers page embedding a job board (?ashby_jid=, ?gh_jid=): the page is only a shell, so
   // ask the board what the job is (cached briefly; no AI).
   const board = tracked || email ? null : await boardPosting(url, opts.fetchFn);
+  const find = companyFinder(db);
+  // Checked the same way as a capture, so the panel shows what Save would store.
+  const who = email
+    ? null
+    : resolveIdentity(
+        { url, template: input.fields, fetched: board, ld, pageTitle: input.pageTitle },
+        find,
+      );
   const detected = {
-    title:
-      email?.detected.title ||
-      board?.title?.trim() ||
-      input.fields?.title?.trim() ||
-      ld?.title?.trim() ||
-      fromTitle.title ||
-      null,
-    // A template pick that caught a heading ("About Us") rather than the name doesn't count; the
-    // page title or the careers site's address (careers.oracle.com → Oracle) is used instead.
-    company:
-      email?.detected.company ||
-      (looksLikeCompanyName(input.fields?.company) ? input.fields!.company!.trim() : null) ||
-      board?.company?.trim() ||
-      ldOrg?.trim() ||
-      null,
+    title: email?.detected.title || who?.title || null,
+    company: email?.detected.company || (who?.stated ? who.company : null) || null,
   };
 
   // Which company: the tracked job's, then names the page states, then what the address says.
@@ -302,14 +265,8 @@ export async function pageContext(
     .select({ id: companies.id, name: companies.name, website: companies.website })
     .from(companies)
     .all();
-  const aliases = allAliases(db);
-  const byKey = (name: string | null | undefined) => {
-    const k = companyKey(name);
-    if (!k) return undefined;
-    // Its own name, else another name it goes by ("SpaceXAI" → Cursor).
-    const aliasOf = aliases.find((a) => a.key === k)?.companyId;
-    return all.find((c) => companyKey(c.name) === k) ?? all.find((c) => c.id === aliasOf);
-  };
+  const asRow = (k: KnownCompany | null | undefined) =>
+    k ? all.find((c) => c.id === k.id) : undefined;
   // Outlook's address says nothing about the company.
   const host = email ? null : hostOf(url);
   const learnedHosts = new Map<string, Set<number>>();
@@ -324,20 +281,12 @@ export async function pageContext(
   })();
   const company =
     (tracked && all.find((c) => c.id === tracked.companyId)) ??
-    byKey(detected.company) ??
+    asRow(email ? find(email.detected.company) : who?.stated ? who.known : undefined) ??
     hostCompany ??
-    (email ? undefined : byKey(companyFromBoardUrl(url))) ??
-    (host ? all.find((c) => hostOf(c.website) === host) : undefined) ??
-    // The careers site's own address: careers.oracle.com → Oracle.
-    (email ? undefined : byKey(companyFromHost(url))) ??
-    byKey(fromTitle.company);
-  if (!detected.company && !email)
-    detected.company =
-      company?.name ??
-      fromTitle.company ??
-      companyFromBoardUrl(url) ??
-      companyFromHost(url) ??
-      null;
+    // What the address or tab title suggests: careers.oracle.com → Oracle.
+    asRow(who && !who.stated ? who.known : undefined) ??
+    (host ? all.find((c) => hostOf(c.website) === host) : undefined);
+  if (!detected.company && !email) detected.company = company?.name ?? who?.company ?? null;
 
   // The same role under another address (e.g. the LinkedIn copy of a company-site posting).
   const similar =
