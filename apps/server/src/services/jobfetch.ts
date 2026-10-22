@@ -372,11 +372,14 @@ async function workday(f: FetchFn, u: URL): Promise<FetchedJob | null> {
       startDate?: string;
       postedOn?: string;
     };
+    /** The legal entity ("2100 NVIDIA USA"); the identity check tidies it to the company. */
+    hiringOrganization?: { name?: string };
   }>(f, `https://${u.hostname}/wday/cxs/${tenant}/${path.join('/')}`);
   const info = j.jobPostingInfo;
   if (!info?.jobDescription) return null;
   return finish({
     title: info.title ?? null,
+    company: j.hiringOrganization?.name ?? null,
     location: joinPlaces([info.location, ...(info.additionalLocations ?? [])]),
     remoteType: remoteFrom(info.remoteType),
     descriptionText: htmlToText(info.jobDescription),

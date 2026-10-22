@@ -538,3 +538,47 @@ describe('Screen a URL uses the company the page names', () => {
     expect(r).toMatchObject({ company: 'Docusign', title: 'Sr. Technical Program Manager' });
   });
 });
+
+describe('Workday names a legal entity, not the company', () => {
+  const page =
+    'https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-Technical-Program-Manager--Forward-Deployed-Engineering_JR2028220';
+  const workday = fakeFetch({
+    'https://nvidia.wd5.myworkdayjobs.com/wday/cxs/': {
+      body: JSON.stringify({
+        jobPostingInfo: {
+          title: 'Senior Technical Program Manager, Forward Deployed Engineering',
+          jobDescription: `<p>${LONG}</p>`,
+          location: 'US, CA, Santa Clara',
+          startDate: '2026-10-20',
+        },
+        hiringOrganization: { name: '2100 NVIDIA USA' },
+      }),
+    },
+  });
+  const ld = JSON.stringify({
+    '@type': 'JobPosting',
+    title: 'Senior Technical Program Manager, Forward Deployed Engineering',
+    hiringOrganization: { name: '2100 NVIDIA USA' },
+    description: `<p>${LONG}</p>`,
+  });
+
+  it('files the job under the NVIDIA you already track', async () => {
+    createApplication(db, { company: 'NVIDIA', title: 'TPM', status: 'Applied' });
+    const r = await captureJob(
+      db,
+      { url: `${page}?source=jobboardlinkedin`, jsonLd: [ld] },
+      { fetchFn: workday },
+    );
+    expect(r).toMatchObject({
+      company: 'NVIDIA',
+      title: 'Senior Technical Program Manager, Forward Deployed Engineering',
+    });
+    const names = db.$client.prepare('SELECT name FROM companies').pluck().all();
+    expect(names).toEqual(['NVIDIA']);
+  });
+
+  it('and names it NVIDIA before you track it', async () => {
+    const r = await captureJob(db, { url: page }, { fetchFn: workday });
+    expect(r.company).toBe('NVIDIA');
+  });
+});
