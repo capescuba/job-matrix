@@ -2,7 +2,7 @@
 import { api, openInApp } from './api.js';
 import { captureBody, contextBody, readTab } from './capture.js';
 import { looksLikeJob } from './jobpage.js';
-import { fillField, startPicker } from './reader.js';
+import { fillField, readFields, startPicker } from './reader.js';
 import { connectLive, isRunning, renderLive, toggleStream } from './live.js';
 import { RUN_KEY } from './search.js';
 
@@ -845,9 +845,29 @@ async function suggest(qid) {
   state.drafts[qid] = { ...(state.drafts[qid] ?? {}), loading: true, error: null };
   render();
   try {
+    // The rest of the form, so this answer doesn't repeat the others: a draft here wins over
+    // what's in the field, since it's what you're about to insert.
+    const others = state.page.questions.filter((x) => x.id !== qid);
+    let typed = {};
+    try {
+      [{ result: typed }] = await chrome.scripting.executeScript({
+        target: { tabId: state.tab.id },
+        func: readFields,
+        args: [others.map((x) => x.id)],
+      });
+    } catch {} // the page navigated away; drafts alone still help
+    const otherQuestions = others.map((x) => ({
+      question: x.label,
+      answer: state.drafts[x.id]?.text?.trim() || typed?.[x.id] || null,
+    }));
     const r = await api('/api/ext/answer', {
       method: 'POST',
-      body: { applicationId: app.applicationId, question: q.label, maxLength: q.maxLength },
+      body: {
+        applicationId: app.applicationId,
+        question: q.label,
+        maxLength: q.maxLength,
+        otherQuestions,
+      },
     });
     state.drafts[qid] = { text: r.answer, basedOn: r.basedOn, loading: false };
   } catch (e) {

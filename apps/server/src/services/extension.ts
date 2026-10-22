@@ -395,6 +395,16 @@ export const answerRequestSchema = z.object({
   question: z.string().trim().min(3).max(2000),
   /** The form field's maxlength, if it has one. */
   maxLength: z.number().int().positive().max(20_000).nullable().optional(),
+  /** The form's other questions, with what's drafted or typed for them so far. */
+  otherQuestions: z
+    .array(
+      z.object({
+        question: z.string().trim().min(1).max(2000),
+        answer: z.string().max(20_000).nullable().optional(),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 
 export const answerSchema = z.object({
@@ -412,6 +422,7 @@ Rules:
 - First person, as the applicant ("I led…"). Warm, direct and specific; no clichés ("I'm passionate about", "I'm excited to", "fast-paced environment"), no flattery, no filler.
 - Use only facts from the resume, career profile, LinkedIn profile, goals and fit notes for claims about the applicant — never invent employers, numbers or projects. Use the company brief and job description for why this company and role; name concrete things (a product, a program, a stated priority) rather than generic praise.
 - Tie the applicant's strongest relevant evidence to what this role needs.
+- The form's other questions are answered separately, and a reader sees them all together. Answer only what this question asks: leave a topic another question asks for directly (why this company, a specific project, logistics) to that question. Don't reuse the stories, projects, numbers or phrasing already in the other answers; pick different evidence. Mention something again only when this question can't be answered without it, and then briefly.
 - Fit the length: stay under the character limit when one is given (aim for ~85% of it); otherwise 80–150 words for "why" questions, 1–3 sentences for short factual ones.
 - If the question asks for something the inputs don't cover (salary expectations, visa status, start date, references), give a short, sensible answer with a [fill in] placeholder instead of guessing.
 - Plain text only: no markdown, no headings, no bullet symbols unless the question asks for a list.`;
@@ -433,7 +444,16 @@ export function buildAnswerPrompt(i: {
   goals: string | null;
   fit: FitResult | null;
   brief: CompanyResearch | null;
+  otherQuestions?: { question: string; answer?: string | null }[];
 }): string {
+  const others = i.otherQuestions?.length
+    ? i.otherQuestions
+        .map(
+          (o) =>
+            `<other_question>\nQ: ${o.question}\nA: ${clip(o.answer?.trim(), 3_000) || '(not answered yet)'}\n</other_question>`,
+        )
+        .join('\n')
+    : 'none';
   const brief = i.brief
     ? [
         `What they do: ${i.brief.snapshot.whatTheyDo}`,
@@ -482,6 +502,10 @@ ${fit}
 ${brief}
 </company_brief>
 
+<rest_of_this_form>
+${others}
+</rest_of_this_form>
+
 Draft the applicant's answer to the question.`;
 }
 
@@ -523,6 +547,7 @@ export async function suggestAnswer(
       goals: getProfile(db).goals,
       fit: (fit?.result as FitResult | undefined)?.parts ? (fit!.result as FitResult) : null,
       brief: (research?.result as CompanyResearch | undefined) ?? null,
+      otherQuestions: req.otherQuestions,
     }),
     schema: answerSchema,
     model,

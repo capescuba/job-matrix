@@ -509,4 +509,26 @@ describe('application answers', () => {
     expect(usage.company_id).toBe(companyIdOf(id));
     expect(usage.cost_usd).toBeCloseTo((10_000 * 4 + 400 * 20) / 1e6);
   });
+
+  it('shows the rest of the form so answers don’t repeat each other', async () => {
+    const id = add('Docusign', 'Sr. TPM', 'https://careers.docusign.com/jobs/1');
+    const { provider, prompts } = fakeProvider();
+    await suggestAnswer(
+      db,
+      {
+        applicationId: id,
+        question: 'Tell us about a program you led.',
+        otherQuestions: [
+          { question: 'Why Docusign?', answer: 'Your IAM agents launch matches my Workday work.' },
+          { question: 'Anything else?', answer: null },
+        ],
+      },
+      { provider },
+    );
+    expect(prompts[0]).toContain("Don't reuse the stories");
+    expect(prompts[0]).toContain(
+      'Q: Why Docusign?\nA: Your IAM agents launch matches my Workday work.',
+    );
+    expect(prompts[0]).toContain('Q: Anything else?\nA: (not answered yet)');
+  });
 });
