@@ -15,13 +15,23 @@ export async function readTab(tabId, url, onStatus) {
   return { page: result, template };
 }
 
-/** Title/company/… from the template first, then the LinkedIn reader; blanks dropped. */
+/** Title/company/… from the template first, then the built-in site readers; blanks dropped. */
 function fieldsOf(page) {
   const out = {};
-  for (const src of [page.liFields, page.fields])
+  const { site, url, ...glassdoor } = page.siteFields ?? {};
+  for (const src of [page.liFields, glassdoor, page.fields])
     for (const [k, v] of Object.entries(src ?? {})) if (v) out[k] = v;
   return out;
 }
+
+/** Which reader the fields came from, for "Description from …". */
+const readerName = (page, template) =>
+  template?.name ??
+  (page.liFields
+    ? 'LinkedIn (signed in)'
+    : page.siteFields
+      ? `Built-in ${page.siteFields.site}`
+      : null);
 
 /** Body for POST /api/ext/context. */
 export function contextBody(page) {
@@ -58,7 +68,7 @@ export function captureBody(page, template, overrides = {}) {
         }
       : null,
     heading: page.heading ?? null,
-    templateName: template?.name ?? (page.liFields ? 'LinkedIn (signed in)' : null),
+    templateName: readerName(page, template),
     linkedin: page.linkedin,
   };
 }

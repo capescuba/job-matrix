@@ -33,6 +33,7 @@ const TRACKING_PARAM =
  *   "my profile" preview after applying, search parameters → …/sites/<site>/job/<id>
  * - Greenhouse: boards / job-boards / the embedded form → job-boards.greenhouse.io/<co>/jobs/<id>;
  *   a company site's ?gh_jid=<id> keeps just that parameter
+ * - Glassdoor ?jl=<id> or a list page's ?jobListingId=<id> → job-listing/index.htm?jl=<id>
  * - Lever /apply, Ashby /application and Workday /apply pages → the job itself
  */
 export function normalizeUrl(raw: string): string {
@@ -79,7 +80,12 @@ export function normalizeUrl(raw: string): string {
     u.pathname = '/viewjob';
     keep('jk');
   }
-  if (/(^|\.)glassdoor\.[a-z.]+$/.test(host) && u.searchParams.get('jl')) keep('jl');
+  // Glassdoor: one job is ?jl=<id> on its own page, or ?jobListingId=<id> on a list page ("Jobs
+  // for you", search) — both are the job's own page, job-listing/index.htm?jl=<id>.
+  const jl = /(^|\.)glassdoor\.[a-z.]+$/.test(host)
+    ? (u.searchParams.get('jl') ?? u.searchParams.get('jobListingId'))
+    : null;
+  if (jl && /^\d+$/.test(jl)) return `https://${host}/job-listing/index.htm?jl=${jl}`;
   // ZipRecruiter shows a job inside its search page (lk = the job).
   if (/(^|\.)ziprecruiter\.com$/.test(host) && u.searchParams.get('lk'))
     keep('search', 'location', 'lk');

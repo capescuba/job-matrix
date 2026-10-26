@@ -126,6 +126,32 @@ export function readPage(selectors) {
     }
   }
 
+  // Glassdoor's list-and-pane pages ("Jobs for you", search): the job pane's own fields. The page
+  // text is mostly other jobs and the tab title names none ("Recommended Jobs For You"), and the
+  // pane's title id carries the listing id, so the job's own address is known too.
+  let siteFields = null;
+  const gdTitle = /(^|\.)glassdoor\./.test(location.hostname)
+    ? document.querySelector('h1[id^="jd-job-title-"]')
+    : null;
+  if (gdTitle && text(gdTitle)) {
+    const header = gdTitle.closest('[data-test="job-details-header"]') ?? document;
+    const firstLine = (el) =>
+      text(el)
+        .split('\n')
+        .map((l) => l.trim())
+        .find(Boolean) || null;
+    const jl = gdTitle.id.replace('jd-job-title-', '');
+    siteFields = {
+      site: 'Glassdoor',
+      url: /^\d+$/.test(jl) ? `${location.origin}/job-listing/index.htm?jl=${jl}` : null,
+      title: text(gdTitle).replace(/\s+/g, ' '),
+      company: firstLine(header.querySelector('a[href*="/Overview/"]')),
+      location: text(header.querySelector('[data-test="location"]')) || null,
+      salaryText: text(header.querySelector('[data-test="detailSalary"]')) || null,
+      descriptionText: text(document.querySelector('[class*="JobDetails_jobDescription"]')) || null,
+    };
+  }
+
   // Application-form questions: text areas, and long text inputs that ask something.
   const SKIP =
     /\b(name|e-?mail|phone|mobile|address|city|state|zip|postal|country|linkedin|github|website|portfolio|url|salary|compensation|pronoun|gender|race|ethnic|veteran|disability|date|school|degree|gpa|hispanic|latino|ethnicity|sponsorship|authori[sz]ed)\b/i;
@@ -270,7 +296,7 @@ export function readPage(selectors) {
     ).size,
   };
   return {
-    url: location.href,
+    url: siteFields?.url ?? location.href,
     pageTitle: document.title,
     jsonLd: ld,
     selectionText: docs.map((d) => String(d.getSelection() || '').trim()).find(Boolean) ?? '',
@@ -278,6 +304,7 @@ export function readPage(selectors) {
     heading: headingFields,
     fields,
     liFields,
+    siteFields,
     linkedin,
     questions,
     signals,

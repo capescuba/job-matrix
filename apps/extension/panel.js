@@ -470,7 +470,9 @@ function postingSection() {
       ? `the “${esc(state.template?.name)}” template`
       : page.liFields?.descriptionText
         ? 'LinkedIn’s job panel'
-        : 'the page (Job Matrix reads the posting from its address first)';
+        : page.siteFields?.descriptionText
+          ? `${page.siteFields.site}’s job pane`
+          : 'the page (Job Matrix reads the posting from its address first)';
   // Matches a job you already track (or passed on): no add buttons unless you say it's different.
   if (ctx.similar.length && !state.showAdd)
     return `<section>

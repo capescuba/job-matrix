@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Job Matrix",
   "description": "See what Job Matrix knows about the job or company on the page, add new postings to Screening, and draft application answers.",
-  "version": "0.7.14",
+  "version": "0.7.15",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAl//j/nFrtBU3+nSV506UuOH29s2dfUO1tA3+od9b5xKMTuj4uAAUg7iht1XZJeZZmcoDaD3D+0brht+h4b0n/CujN4b2O0XM8SWqR5C5+0/dZ76yLL/nQdOVKfXTOjjN2fG4VlH5lsgu8mElxF6psq2TpY23r3nJEZehNPzo905b5lQjWf3piotV8lQYIG057/7vDK8YjFxKt2c6jqwqhoDTBY+nVvM8NxwNpcO4CIAGU6/0m9+7cFS4TN+KraohbuyXPWiUCdXQzd7vI9YVMsv0v2mcxng7uXnv0QnhDgQmmR6qF8yVuDzqffZXeD/mop4hQ/NA6pBIrnFvYFPt/wIDAQAB",
   "icons": { "16": "icon.png", "32": "icon.png", "48": "icon.png", "128": "icon.png" },
   "action": { "default_title": "Job Matrix" },

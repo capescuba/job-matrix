@@ -57,6 +57,14 @@ describe('is this page one job posting?', () => {
       'a page with schema.org job data',
       page('https://jobs.example.com/x', { jsonLd: ['{"@type":"JobPosting"}'] }),
     ],
+    [
+      // A list page ("Jobs for you") whose job pane the Glassdoor reader read.
+      'Glassdoor, read from the job pane',
+      page('https://www.glassdoor.com/job-listing/index.htm?jl=1010212172303', {
+        siteFields: { site: 'Glassdoor', descriptionText: 'At gFiber, we believe…' },
+        signals: { apply: true, jobLinks: 30 },
+      }),
+    ],
   ])('yes: %s', (_, p) => expect(looksLikeJob(p)).toBe(true));
 
   it.each([

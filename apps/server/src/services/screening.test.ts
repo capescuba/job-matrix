@@ -604,3 +604,32 @@ describe('ZipRecruiter names itself in the tab title', () => {
     expect(r).toMatchObject({ company: 'PG&E Corporation', title: 'Product Owner, Expert' });
   });
 });
+
+describe('Glassdoor "Jobs for you" list page', () => {
+  it('saves the job in the pane under its own address', async () => {
+    const r = await captureJob(
+      db,
+      {
+        url: 'https://www.glassdoor.com/job-listing/index.htm?jl=1010212172303',
+        pageTitle: 'Recommended Jobs For You | Glassdoor Job Search',
+        templateName: 'Built-in Glassdoor',
+        fields: {
+          title: 'Senior Technical Program Manager, ERP',
+          company: 'GFiber',
+          location: 'Sunnyvale, CA',
+          salaryText: '$192K - $233K (Employer provided)',
+          descriptionText: LONG,
+        },
+        pageText: `Jobs based on your activity. ${LONG}`,
+      },
+      { fetchFn: offline },
+    );
+    expect(r).toMatchObject({ company: 'GFiber', title: 'Senior Technical Program Manager, ERP' });
+    expect(row(r.applicationId)).toMatchObject({
+      src: 'Built-in Glassdoor template',
+      smin: 192000,
+      smax: 233000,
+      url: 'https://www.glassdoor.com/job-listing/index.htm?jl=1010212172303',
+    });
+  });
+});
