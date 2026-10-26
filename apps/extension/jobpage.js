@@ -17,7 +17,8 @@ const INDEX_PATH =
   /^\/([a-z]{2}(-[a-z]{2})?\/)?(careers?|jobs?|openings|positions|search|job-search)?\/?$/i;
 
 /**
- * `page` is what readPage() returned: url, jsonLd, pageText, fields, liFields, selectionText and
+ * `page` is what readPage() returned: url, jsonLd, pageText, fields, liFields, siteFields,
+ * selectionText and
  * signals ({ apply: an "Apply" button or link, jobLinks: distinct links to job postings }).
  */
 export function looksLikeJob(page) {
@@ -29,6 +30,7 @@ export function looksLikeJob(page) {
     (page.jsonLd ?? []).some((b) => /JobPosting/.test(b)) ||
     page.fields?.descriptionText ||
     page.liFields?.descriptionText ||
+    page.siteFields?.descriptionText ||
     page.selectionText
   )
     return true;

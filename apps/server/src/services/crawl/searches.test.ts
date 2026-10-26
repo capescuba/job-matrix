@@ -93,7 +93,12 @@ describe('one posting, one address', () => {
     ['https://www.indeed.com/viewjob?jk=abc123&tk=xyz', 'https://www.indeed.com/viewjob?jk=abc123'],
     [
       'https://www.glassdoor.com/job-listing/tpm-openai-JV_IC1147401_KO0,3.htm?jl=1010258777897&src=GD&ao=1',
-      'https://www.glassdoor.com/job-listing/tpm-openai-JV_IC1147401_KO0,3.htm?jl=1010258777897',
+      'https://www.glassdoor.com/job-listing/index.htm?jl=1010258777897',
+    ],
+    [
+      // "Jobs for you" (from Glassdoor's email): a list page showing one job in its pane.
+      'https://www.glassdoor.com/Job/index.htm?utm_source=jobsForYou&src=GD_JOB_AD&ao=1136043&jrtk=5-yul1&s=373&t=REC_JOBS&pos=101&guid=000001a1&jobListingId=1010212172303&ea=1&rdforyou=true&vt=e&cb=1793001220163&gdir=1',
+      'https://www.glassdoor.com/job-listing/index.htm?jl=1010212172303',
     ],
     [
       `${ZIP_SEARCH}&page=2&lk=trPNRZulzs1iw4H6l07HGA`,
