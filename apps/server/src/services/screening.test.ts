@@ -140,6 +140,11 @@ describe('title/company without AI', () => {
       null,
     ],
     ['Careers page', 'Careers page', null],
+    [
+      'Product Owner, Expert job in Oakland, California, United States at ZipRecruiter | Ziprecruiter',
+      'Product Owner, Expert',
+      'ZipRecruiter',
+    ],
   ])('%s', (title, t, c) => expect(parsePageTitle(title)).toEqual({ title: t, company: c }));
 
   it('reads the company from ATS board slugs', () => {
@@ -580,5 +585,22 @@ describe('Workday names a legal entity, not the company', () => {
   it('and names it NVIDIA before you track it', async () => {
     const r = await captureJob(db, { url: page }, { fetchFn: workday });
     expect(r.company).toBe('NVIDIA');
+  });
+});
+
+describe('ZipRecruiter names itself in the tab title', () => {
+  it('saves the employer from the posting’s header, not "ZipRecruiter"', async () => {
+    const r = await captureJob(
+      db,
+      {
+        url: 'https://www.ziprecruiter.com/jobs/v2/eyJsaXN0aW5nX2tleSI6Ik42bTlzcmxIRVY0S1I3UDF4SVJVOVEifQ==?tsid=111000275',
+        pageTitle:
+          'Product Owner, Expert job in Oakland, California, United States at ZipRecruiter | Ziprecruiter',
+        heading: { title: 'Product Owner, Expert', company: 'PG&E Corporation' },
+        pageText: `Job description\n${LONG}`,
+      },
+      { fetchFn: offline },
+    );
+    expect(r).toMatchObject({ company: 'PG&E Corporation', title: 'Product Owner, Expert' });
   });
 });

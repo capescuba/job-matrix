@@ -35,7 +35,7 @@ export function sameCompany(a: string | null | undefined, b: string | null | und
 // ---------- from the tab title and the address ----------
 
 const SITE_SUFFIX =
-  /\s*[|–—-]\s*(LinkedIn|Indeed(\.com)?|Glassdoor|Greenhouse|Lever|Workday|Careers?)\s*$/i;
+  /\s*[|–—-]\s*(LinkedIn|Indeed(\.com)?|Glassdoor|Greenhouse|Lever|Workday|ZipRecruiter|Dice|Monster|SimplyHired|Built ?In|Wellfound|Careers?)\s*$/i;
 
 /** Best-effort title/company from a browser tab title. */
 export function parsePageTitle(pageTitle: string | null | undefined): {
@@ -56,6 +56,8 @@ export function parsePageTitle(pageTitle: string | null | undefined): {
   if (m) return { title: m[1].trim(), company: m[2].trim() };
   // LinkedIn sometimes says it twice: "TPM | LinkedIn | LinkedIn".
   while (SITE_SUFFIX.test(t)) t = t.replace(SITE_SUFFIX, '').trim();
+  m = t.match(/^(.+?) jobs? in .+? at (.+)$/i); // ZipRecruiter: "TPM job in Oakland, California at Acme"
+  if (m) return { title: m[1].trim(), company: m[2].trim() };
   m = t.match(/^(.+?) at (.+)$/); // "TPM at Acme"
   if (m) return { title: m[1].trim(), company: m[2].trim() };
   // "TPM | Acme", but not a "|" inside the title: "TPM, Core AI (Mountain View, CA | New York, NY)".
@@ -198,6 +200,25 @@ export function companyFinder(db: Db): FindCompany {
   };
 }
 
+/**
+ * The job board's name on its own site, as its tab titles put it: ZipRecruiter's say "… at
+ * ZipRecruiter", which is the site, not the employer. (A page or search card that names the board
+ * is another matter: LinkedIn posts its own jobs on LinkedIn.)
+ */
+function boardName(url: string): string | null {
+  try {
+    return (
+      new URL(url).hostname
+        .match(
+          /^(?:www\.)?(ziprecruiter|indeed|glassdoor|dice|monster|simplyhired|builtin|wellfound)\.com$/i,
+        )?.[1]
+        ?.toLowerCase() ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
 export interface IdentitySources {
   url: string;
   /** A site template's picks (what you're looking at). */
@@ -206,6 +227,11 @@ export interface IdentitySources {
   fetched?: Pick<FetchedJob, 'title' | 'company' | 'pageTitle'> | null;
   /** schema.org JobPosting from the page. */
   ld?: { title?: string; hiringOrganization?: string | { name?: string } } | null;
+  /**
+   * The posting's own header, read without a template: the heading the tab title repeats and the
+   * company-page link after it ("See more jobs at PG&E Corporation").
+   */
+  heading?: { title?: string | null; company?: string | null } | null;
   /** The browser's tab title. */
   pageTitle?: string | null;
 }
@@ -221,7 +247,7 @@ export interface Identity {
 
 /**
  * Title and company from every source, in one order: template, the server's read, structured
- * data, then what the tab title and address suggest. A company named by a source wins over one
+ * data, the posting's header, then what the tab title and address suggest. A company named by a source wins over one
  * only suggested; among those, one you already track wins, and so does a tracked company the
  * address agrees with ("Cisco Systems" on cisco.wd5.myworkdayjobs.com → your "Cisco").
  */
@@ -230,10 +256,14 @@ export function resolveIdentity(
   find: FindCompany = () => undefined,
 ): Identity {
   const org = src.ld?.hiringOrganization;
+  const board = boardName(src.url);
+  const notTheBoard = (c: string | null): c is string =>
+    !!c && (!board || companyKey(c).replace(/ /g, '') !== board);
   const stated = [
     src.template?.company,
     src.fetched?.company,
     typeof org === 'string' ? org : org?.name,
+    src.heading?.company,
   ]
     .map(cleanCompany)
     .filter((c): c is string => !!c);
@@ -244,7 +274,7 @@ export function resolveIdentity(
     companyFromHost(src.url),
   ]
     .map(cleanCompany)
-    .filter((c): c is string => !!c);
+    .filter(notTheBoard);
 
   const pick = (): Omit<Identity, 'title'> => {
     for (const c of stated) {
@@ -267,7 +297,13 @@ export function resolveIdentity(
   const who = pick();
 
   const title =
-    [src.template?.title, src.fetched?.title, src.ld?.title, ...fromTitles.map((t) => t.title)]
+    [
+      src.template?.title,
+      src.fetched?.title,
+      src.ld?.title,
+      src.heading?.title,
+      ...fromTitles.map((t) => t.title),
+    ]
       .map((t) => cleanTitle(t, who.company))
       .find(Boolean) ?? null;
   return { ...who, title };

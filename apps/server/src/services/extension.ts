@@ -95,6 +95,8 @@ export const pageInputSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** The posting's own header, read without a template (heading and company link). */
+  heading: z.object({ title: shortText(), company: shortText() }).nullable().optional(),
 });
 export type PageInput = z.input<typeof pageInputSchema>;
 
@@ -252,7 +254,14 @@ export async function pageContext(
   const who = email
     ? null
     : resolveIdentity(
-        { url, template: input.fields, fetched: board, ld, pageTitle: input.pageTitle },
+        {
+          url,
+          template: input.fields,
+          fetched: board,
+          ld,
+          heading: input.heading,
+          pageTitle: input.pageTitle,
+        },
         find,
       );
   const detected = {

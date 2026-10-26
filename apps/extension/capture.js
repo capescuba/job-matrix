@@ -31,6 +31,7 @@ export function contextBody(page) {
     pageTitle: page.pageTitle,
     jsonLd: page.jsonLd,
     fields: f.title || f.company ? { title: f.title ?? null, company: f.company ?? null } : null,
+    heading: page.heading ?? null,
   };
 }
 
@@ -56,6 +57,7 @@ export function captureBody(page, template, overrides = {}) {
           descriptionText: f.descriptionText ?? null,
         }
       : null,
+    heading: page.heading ?? null,
     templateName: template?.name ?? (page.liFields ? 'LinkedIn (signed in)' : null),
     linkedin: page.linkedin,
   };

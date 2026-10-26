@@ -379,6 +379,8 @@ export const captureSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** The posting's own header, read without a template (heading and company link). */
+  heading: z.object({ title: shortText(), company: shortText() }).nullable().optional(),
   /** Name of the site template used, e.g. "LinkedIn (signed in)". */
   templateName: optText,
   /** Signed-in LinkedIn details. */
