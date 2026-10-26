@@ -278,7 +278,7 @@ export async function captureJob(
 
   // Every source's title and company, checked, in one order (the side panel decides the same way).
   const who = resolveIdentity(
-    { url, template: f, fetched, ld, pageTitle: input.pageTitle },
+    { url, template: f, fetched, ld, heading: input.heading, pageTitle: input.pageTitle },
     companyFinder(db),
   );
   const company = who.company ?? 'Unknown';

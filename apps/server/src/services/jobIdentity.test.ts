@@ -201,6 +201,40 @@ describe('jobs saved with the wrong title or company', () => {
   });
 });
 
+describe('a job board that names itself, not the employer (ZipRecruiter)', () => {
+  const zip = {
+    url: 'https://www.ziprecruiter.com/jobs/v2/eyJsaXN0aW5nX2tleSI6Ik42bTlzcmxIRVY0S1I3UDF4SVJVOVEifQ==',
+    pageTitle:
+      'Product Owner, Expert job in Oakland, California, United States at ZipRecruiter | Ziprecruiter',
+  };
+
+  it('reads the role from the tab title, and never calls ZipRecruiter the employer', () => {
+    expect(pick(zip)).toEqual({ title: 'Product Owner, Expert', company: null });
+  });
+
+  it('takes the employer from the posting’s header', () => {
+    const heading = { title: 'Product Owner, Expert', company: 'PG&E Corporation' };
+    expect(pick({ ...zip, heading }, () => undefined)).toEqual({
+      title: 'Product Owner, Expert',
+      company: 'PG&E Corporation',
+    });
+    // …and files it under the PG&E you already track.
+    expect(pick({ ...zip, heading }, tracking('PG&E')).company).toBe('PG&E');
+  });
+
+  it('but a page or search card naming the board means it: LinkedIn hires on LinkedIn', () => {
+    expect(
+      pick({
+        url: 'https://www.linkedin.com/jobs/view/1/',
+        template: { title: 'Staff TPM', company: 'LinkedIn' },
+      }),
+    ).toEqual({ title: 'Staff TPM', company: 'LinkedIn' });
+    expect(
+      pick({ ...zip, heading: { title: 'Product Owner', company: 'ZipRecruiter' } }).company,
+    ).toBe('ZipRecruiter');
+  });
+});
+
 describe('what the checks leave alone', () => {
   it('keeps company names that start with a number or end in a country', () => {
     expect(cleanCompany('3M')).toBe('3M');

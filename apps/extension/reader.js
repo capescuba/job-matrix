@@ -209,6 +209,44 @@ export function readPage(selectors) {
         !e.closest('[id*="chat" i], [class*="chat" i], [role="dialog"], [aria-modal="true"]'),
     ) || d.body;
   const main = docs.map(mainOf).reduce((a, b) => (text(b).length > text(a).length ? b : a));
+  // The posting's own header on a site with no template or job data (ZipRecruiter): the heading
+  // the tab title repeats is the role, and the first link to a company page after it is the
+  // employer ("See more jobs at PG&E Corporation" → /co/PG&E-Corporation).
+  const squash = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const tabTitle = squash(document.title);
+  const heading = [...main.querySelectorAll('h1, h2')].find((h) => {
+    const t = squash(text(h));
+    return t.length >= 3 && tabTitle.includes(t);
+  });
+  const follows = (a, b) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const companyLink =
+    heading &&
+    [...main.querySelectorAll('a[href]')].find(
+      (a) =>
+        follows(heading, a) && /\/(co|cmp|company|companies|employers?)\/[^/?#]+/i.test(a.pathname),
+    );
+  const headingFields = heading
+    ? {
+        title: text(heading).replace(/\s+/g, ' '),
+        company:
+          text(companyLink)
+            .replace(/\s+/g, ' ')
+            .replace(/^(see|view)( more| all)? jobs (at|from)\s+|^jobs at\s+/i, '') || null,
+      }
+    : null;
+  // The block under a "Job description" heading, so the text isn't the posting plus the site's
+  // similar-jobs cards (with their pay) and footer. Only a heading for the whole posting, and only
+  // when the block is most of the page: Apple's "Description" is one section of several.
+  const DESC = /^(full )?job description$|^about the job$/i;
+  const descHeading = [...main.querySelectorAll('h1, h2, h3, h4, strong, b, span, div')].find(
+    (e) => e.children.length === 0 && DESC.test(text(e).replace(/:$/, '')),
+  );
+  let descBox = descHeading;
+  while (descBox && descBox !== main && text(descBox).length < text(descHeading).length + 300)
+    descBox = descBox.parentElement;
+  const block = descBox && descBox !== main ? text(descBox) : '';
+  const described = block.length >= 400 && block.length >= text(main).length / 2 ? block : '';
   // For telling one posting from a list of them: an "Apply" button or link (Apple's says "Submit
   // Resume"), and how many links in the main content go to job postings (a careers index has
   // many and nothing to apply to). Menus and footers don't count: Apple's link to a dozen
@@ -236,7 +274,8 @@ export function readPage(selectors) {
     pageTitle: document.title,
     jsonLd: ld,
     selectionText: docs.map((d) => String(d.getSelection() || '').trim()).find(Boolean) ?? '',
-    pageText: text(main).slice(0, 150_000),
+    pageText: (described || text(main)).slice(0, 150_000),
+    heading: headingFields,
     fields,
     liFields,
     linkedin,
