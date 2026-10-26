@@ -595,6 +595,7 @@ export type CompanyResearch = z.infer<typeof companyResearchSchema>;
 /** Research older than this is refreshed the next time a job there is scored. */
 export const RESEARCH_MAX_AGE_DAYS = 14;
 
+
 // ---------- interview coach ----------
 
 export const INTERVIEW_ROUNDS = [
@@ -613,39 +614,32 @@ export const coachHintSchema = z.object({
   question: z
     .string()
     .nullable()
-    .describe(
-      'The question actually being asked, reworded clearly; null if the last turn is not a question',
-    ),
-  probing: z.string().describe('What they are really assessing, 12 words or fewer'),
+    .describe('The question actually being asked, reworded clearly; null if the last turn is not a question'),
+  probing: z.string().describe("What they are really assessing, 12 words or fewer"),
   points: z
     .array(z.string())
     .max(3)
-    .describe(
-      'Up to 3 points to make, 12 words or fewer each, only facts from the applicant inputs',
-    ),
+    .describe('Up to 3 points to make, 12 words or fewer each, only facts from the applicant inputs'),
   story: z
     .string()
     .nullable()
     .describe('The one experience to reach for, named by company and program; null if none fits'),
   watch: z.string().nullable().describe('A trap or red flag, only when real; otherwise null'),
-  askBack: z
-    .string()
-    .nullable()
-    .describe('A question to ask them, only when natural; otherwise null'),
+  askBack: z.string().nullable().describe('A question to ask them, only when natural; otherwise null'),
 });
 export type CoachHint = z.infer<typeof coachHintSchema>;
 
 export const prepCardSchema = z.object({
   headline: z.string().describe('One line: what this round is really about'),
   leadWith: z.array(z.string()).max(3).describe('Up to 3 things to lead with'),
-  likelyQuestions: z.array(z.object({ question: z.string(), approach: z.string() })).max(7),
+  likelyQuestions: z
+    .array(z.object({ question: z.string(), approach: z.string() }))
+    .max(7),
   stories: z
     .array(z.object({ name: z.string(), use: z.string() }))
     .max(5)
     .describe('Experiences from the career profile to have ready, with what each is good for'),
-  risks: z
-    .array(z.string())
-    .describe('Gaps, level mismatch or red flags, each with how to handle it'),
+  risks: z.array(z.string()).describe('Gaps, level mismatch or red flags, each with how to handle it'),
   askThem: z.array(z.string()).describe('Questions to ask, suited to this round'),
   logistics: z.array(z.string()).describe('Process, rounds, comp or timeline facts from the brief'),
 });
@@ -694,12 +688,7 @@ export function closePartialJson(text: string): unknown | null {
   }
   if (escaped) out = out.slice(0, -1);
   if (inString) out += '"';
-  const attempts = [
-    out,
-    out.replace(/,\s*$/, ''),
-    out.replace(/,?\s*"[^"]*"\s*:\s*$/, ''),
-    out.replace(/,?\s*"[^"]*"\s*$/, ''),
-  ];
+  const attempts = [out, out.replace(/,\s*$/, ''), out.replace(/,?\s*"[^"]*"\s*:\s*$/, ''), out.replace(/,?\s*"[^"]*"\s*$/, '')];
   for (const base of attempts) {
     try {
       return JSON.parse(base + [...stack].reverse().join(''));
