@@ -95,6 +95,19 @@ describe('normalizeUrl', () => {
       'https://adobe.wd5.myworkdayjobs.com/external_experienced/job/San-Jose/Principal-TPM_R170800/apply/applyManually',
       'https://adobe.wd5.myworkdayjobs.com/external_experienced/job/San-Jose/Principal-TPM_R170800',
     ],
+    // Tesla: the job page and its apply page are the same job.
+    [
+      'https://www.tesla.com/careers/search/job/sr-technical-program-manager-charging-software-firmware-284122',
+      'https://www.tesla.com/careers/search/job/284122',
+    ],
+    [
+      'https://www.tesla.com/careers/search/job/apply/284122',
+      'https://www.tesla.com/careers/search/job/284122',
+    ],
+    [
+      'https://www.tesla.com/en_GB/careers/search/job/284122?source=x',
+      'https://www.tesla.com/careers/search/job/284122',
+    ],
   ])('%s', (input, expected) => expect(normalizeUrl(input)).toBe(expected));
 });
 
