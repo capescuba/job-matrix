@@ -43,3 +43,33 @@ describe('what the panel sends for a Glassdoor list page', () => {
     expect(body.templateName).toBe('My Glassdoor');
   });
 });
+
+describe('what the panel sends for a Tesla job opened from search', () => {
+  // The tab title is still the page you came from.
+  const page = {
+    url: 'https://www.tesla.com/careers/search/job/sr-technical-program-manager-charging-software-firmware-284122',
+    pageTitle: 'Technical Program Manager, Optimus Academy',
+    jsonLd: [],
+    pageText: 'Tesla homepage\nCareers\nSkip to main content…',
+    siteFields: {
+      site: 'Tesla',
+      url: null,
+      title: 'Sr. Technical Program Manager, Charging Software & Firmware',
+      company: 'Tesla',
+      location: 'Palo Alto, California',
+      salaryText: '$144,800 - $217,200/annual salary + cash and stock awards + benefits',
+      descriptionText: 'What to Expect\nTesla’s Energy Engineering Program Management team…',
+    },
+  };
+
+  it('names the job from its header, keeps the tab’s address, and says which reader', () => {
+    const body = captureBody(page, null);
+    expect(body.url).toBe(page.url);
+    expect(body.fields).toMatchObject({
+      title: 'Sr. Technical Program Manager, Charging Software & Firmware',
+      company: 'Tesla',
+      location: 'Palo Alto, California',
+    });
+    expect(body.templateName).toBe('Built-in Tesla');
+  });
+});

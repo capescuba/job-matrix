@@ -152,6 +152,37 @@ export function readPage(selectors) {
     };
   }
 
+  // Tesla: moving between jobs inside the site leaves the previous tab title up for a moment
+  // ("Build your Career at Tesla", the last job you looked at), and the page text starts with the
+  // site's menus. The job's own header, details table and description are in #job-details-container.
+  const teslaTitle = /(^|\.)tesla\.com$/.test(location.hostname)
+    ? document.querySelector('#job-details-container h1')
+    : null;
+  if (!siteFields && teslaTitle && text(teslaTitle)) {
+    const box = teslaTitle.parentElement;
+    const row = (label) =>
+      text(
+        [...box.querySelectorAll('tr')]
+          .find((tr) => text(tr.querySelector('th')) === label)
+          ?.querySelector('td'),
+      ) || null;
+    const pay = box.querySelector('[class*="compensationAndBenefits"]');
+    const desc = [box.querySelector('[class*="style_description"]'), pay].map(text).filter(Boolean);
+    siteFields = {
+      site: 'Tesla',
+      url: null,
+      title: text(teslaTitle).replace(/\s+/g, ' '),
+      company: 'Tesla',
+      location: row('Location'),
+      salaryText:
+        text(pay)
+          .split('\n')
+          .find((l) => /\$\s?\d[\d,.]{2,}k?\s*[-–]\s*\$?\s?\d[\d,.]{2,}/i.test(l)) // not "$0 deduction"
+          ?.trim() || null,
+      descriptionText: desc.join('\n\n') || null,
+    };
+  }
+
   // Application-form questions: text areas, and long text inputs that ask something.
   const SKIP =
     /\b(name|e-?mail|phone|mobile|address|city|state|zip|postal|country|linkedin|github|website|portfolio|url|salary|compensation|pronoun|gender|race|ethnic|veteran|disability|date|school|degree|gpa|hispanic|latino|ethnicity|sponsorship|authori[sz]ed)\b/i;
