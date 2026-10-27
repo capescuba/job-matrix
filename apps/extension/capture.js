@@ -18,8 +18,8 @@ export async function readTab(tabId, url, onStatus) {
 /** Title/company/… from the template first, then the built-in site readers; blanks dropped. */
 function fieldsOf(page) {
   const out = {};
-  const { site, url, ...glassdoor } = page.siteFields ?? {};
-  for (const src of [page.liFields, glassdoor, page.fields])
+  const { site, url, ...builtIn } = page.siteFields ?? {};
+  for (const src of [page.liFields, builtIn, page.fields])
     for (const [k, v] of Object.entries(src ?? {})) if (v) out[k] = v;
   return out;
 }

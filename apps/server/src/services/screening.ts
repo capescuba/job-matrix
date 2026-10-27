@@ -35,6 +35,8 @@ const TRACKING_PARAM =
  *   a company site's ?gh_jid=<id> keeps just that parameter
  * - Glassdoor ?jl=<id> or a list page's ?jobListingId=<id> → job-listing/index.htm?jl=<id>
  * - Lever /apply, Ashby /application and Workday /apply pages → the job itself
+ * - Tesla: the job page (…/job/<title-slug>-<id>) and its apply page (…/job/apply/<id>)
+ *   → tesla.com/careers/search/job/<id>
  */
 export function normalizeUrl(raw: string): string {
   const u = new URL(raw.trim());
@@ -53,6 +55,11 @@ export function normalizeUrl(raw: string): string {
   );
   if (oracle && (host === 'careers.oracle.com' || host.endsWith('.oraclecloud.com')))
     return `https://${host}${oracle[1]}/job/${oracle[2]}`;
+  // Tesla: the id ends the job page's slug and is all the apply page has (a locale may lead).
+  const tesla =
+    /(^|\.)tesla\.com$/.test(host) &&
+    u.pathname.match(/^(?:\/[a-z]{2}_[a-z]{2})?\/careers\/search\/job\/(?:apply\/)?(?:[^/]*-)?(\d+)\/?$/i);
+  if (tesla) return `https://www.tesla.com/careers/search/job/${tesla[1]}`;
   if (host.endsWith('greenhouse.io')) {
     const embed = u.pathname.startsWith('/embed/')
       ? [u.searchParams.get('for'), u.searchParams.get('token')]
