@@ -299,6 +299,9 @@ function fakeProvider(guess: ClientGuess) {
       calls.prompts.push(req.prompt);
       expect(req.schema).toBe(clientGuessSchema);
       expect(req.webSearch?.maxUses).toBe(5);
+      // It's told to spend the whole budget, angle by angle, before giving up.
+      expect(req.system).toContain('you have 5 searches — use them all');
+      expect(req.system).toContain('only if all 5 searches turned up nothing');
       req.onEvent?.({ type: 'search', query: '"fleet scheduler" "capacity council"' });
       return {
         data: req.schema.parse(guess) as z.infer<S>,

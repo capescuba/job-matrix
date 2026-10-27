@@ -29,14 +29,19 @@ const MAX_BODY_CHARS = 8000;
 
 export const CLIENT_SYSTEM_PROMPT = `A staffing agency is recruiting for a role on behalf of a client it doesn't name. Use web search to work out who the client is, so the job seeker can check whether the client posts the role itself and apply directly.
 
-How to search (the search budget is small):
-- Run ONE or TWO searches at a time, read the results, then decide the next one.
-- Agencies usually paste the client's own job description. Search for distinctive exact phrases from it (in quotes): unusual product names, team names, internal jargon, specific tech stacks or numbers. Generic phrases ("cross-functional teams") find nothing useful.
-- Combine what the email says about the client (industry, size, "Fortune N", location, products) with the role to narrow it down.
-- Look for the role on company careers pages and job boards (Greenhouse, Lever, Ashby, Workday, LinkedIn). A posting with the same wording is the strongest evidence.
+How to search (you have ${CLIENT_MAX_SEARCHES} searches — use them all before concluding there is no answer):
+- Run ONE search at a time, read the results, then pick the next angle. A search that finds nothing useful means try a different angle, not stop.
+- Work through these angles, skipping one only when an earlier search already settled it:
+  1. A distinctive exact phrase from the job description, in quotes: unusual product, team or program names, internal jargon, specific numbers or tech stacks. Agencies usually paste the client's own JD, so the same words often appear in the client's posting. Generic phrases ("cross-functional teams", "stakeholder management") find nothing.
+  2. A second, different distinctive phrase from another part of the description.
+  3. The role title with its specifics on applicant tracking systems, e.g. site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:myworkdayjobs.com.
+  4. The same role on LinkedIn or other job boards (site:linkedin.com/jobs), with the location.
+  5. The client as a company: what the email says about it (industry, size, "Fortune N", headcount, location, products, the projects the role works on) — e.g. companies in that city running that kind of migration or program, or news about the initiative.
+- A posting with the same wording at a company is the strongest evidence.
 
 Rules:
-- Only name a company the evidence points to. Never invent URLs; every evidence url must be a page you actually saw. If nothing credible turns up, return no candidates and say so in notes.
+- Only name a company the evidence points to. Never invent URLs; every evidence url must be a page you actually saw.
+- When several specifics fit one company but no posting confirms it, name it with low confidence rather than nothing. Return no candidates only if all ${CLIENT_MAX_SEARCHES} searches turned up nothing credible, and say in notes which angles you tried.
 - careersUrl: the client's own posting for this role if you found it; otherwise its careers page or job board; null if unknown.
 - confidence: high = the same posting or near-identical wording found at the client; medium = several specific details fit; low = a plausible guess.
 - Keep evidence text to one sentence each.`;
