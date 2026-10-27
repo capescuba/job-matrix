@@ -68,6 +68,15 @@ import { currentEffort, getSettings, updateSettings } from './services/settings.
 import { analyzeApplication } from './services/analyze.ts';
 import { ensureResearch, isStale, latestResearch } from './services/research.ts';
 import { captureJob, findTrackedByUrl } from './services/screening.ts';
+import {
+  AdoptError,
+  addManualClient,
+  adoptDirect,
+  clientState,
+  dismissClient,
+  recheckClient,
+} from './services/client/index.ts';
+import { clientEstimateUsd, findClient, hasAiLookup } from './services/client/lookup.ts';
 import { getStock } from './services/stock.ts';
 import { getStats } from './services/stats.ts';
 import {
@@ -212,7 +221,8 @@ export function buildApp(
     }
     if (err instanceof NotFoundError) return reply.status(404).send({ error: err.message });
     if (err instanceof UpdateStateError) return reply.status(409).send({ error: err.message });
-    if (err instanceof AliasError) return reply.status(400).send({ error: err.message });
+    if (err instanceof AliasError || err instanceof AdoptError)
+      return reply.status(400).send({ error: err.message });
     if (err instanceof NeedsSignIn)
       return reply.status(401).send({ error: err.message, signIn: true });
     if (err instanceof GraphError) return reply.status(502).send({ error: err.message });
@@ -591,6 +601,8 @@ export function buildApp(
         website: z.string().nullable().optional(),
         linkedinUrl: z.string().nullable().optional(),
         notes: z.string().nullable().optional(),
+        /** Staffing agency: true/false is your call, null goes back to the built-in list. */
+        isAgency: z.boolean().nullable().optional(),
       })
       .parse(req.body);
     db.update(companies)
@@ -598,6 +610,58 @@ export function buildApp(
       .where(eq(companies.id, idParam.parse(req.params).id))
       .run();
     return { ok: true };
+  });
+
+  // ----- agency jobs: who is the client, and do they post it themselves? -----
+  const clientView = (applicationId: number) => {
+    const s = clientState(db, applicationId);
+    return {
+      ...s,
+      aiDone: hasAiLookup(db, s.jobId),
+      estimateUsd: clientEstimateUsd(db),
+      model: getSettings().clientModel,
+    };
+  };
+  const clientInput = z.object({
+    company: z.string().trim().min(1),
+    careersUrl: z.string().trim().url().nullable().optional(),
+  });
+  app.get('/api/applications/:id/client', (req) => clientView(idParam.parse(req.params).id));
+  // Paid (web search): runs once per job; ?force=1 searches again.
+  app.post('/api/applications/:id/client/find', async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { force } = z
+      .object({
+        force: z
+          .string()
+          .optional()
+          .transform((v) => v === '1' || v === 'true'),
+      })
+      .parse(req.query);
+    await findClient(db, id, { force, fetchFn: opts.fetchFn });
+    return clientView(id);
+  });
+  app.post('/api/applications/:id/client/manual', async (req) => {
+    const { id } = idParam.parse(req.params);
+    await addManualClient(db, id, clientInput.parse(req.body), opts.fetchFn);
+    return clientView(id);
+  });
+  app.post('/api/applications/:id/client/check', async (req) => {
+    const { id } = idParam.parse(req.params);
+    await recheckClient(db, id, clientInput.parse(req.body), opts.fetchFn);
+    return clientView(id);
+  });
+  app.post('/api/applications/:id/client/dismiss', (req) => {
+    const { id } = idParam.parse(req.params);
+    dismissClient(db, id, z.object({ company: z.string().min(1) }).parse(req.body).company);
+    return clientView(id);
+  });
+  // Apply direct: add the client's posting to Screening and pass the agency's lead.
+  app.post('/api/applications/:id/client/adopt', async (req) => {
+    const body = z
+      .object({ url: z.string().trim().url(), company: z.string().trim().min(1) })
+      .parse(req.body);
+    return adoptDirect(db, idParam.parse(req.params).id, body, opts.fetchFn);
   });
 
   // ----- contacts -----

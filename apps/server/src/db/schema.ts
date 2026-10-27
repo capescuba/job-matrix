@@ -14,6 +14,8 @@ export const companies = sqliteTable(
     website: text('website'),
     linkedinUrl: text('linkedin_url'),
     notes: text('notes'),
+    /** A staffing agency (posts for clients). Null = go by the built-in list; true/false = your call. */
+    isAgency: integer('is_agency', { mode: 'boolean' }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('companies_name_nocase').on(sql`lower(${t.name})`)],
@@ -544,6 +546,29 @@ export const prescreens = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index('prescreens_app').on(t.applicationId)],
+);
+
+/**
+ * Who an agency's job is really for: clues read from the email, a web-search lookup you asked
+ * for, or a name you typed — each candidate with a check of its own job board. Latest per job wins.
+ */
+export const clientLookups = sqliteTable(
+  'client_lookups',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    jobId: integer('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    /** clues | ai | manual */
+    source: text('source').notNull(),
+    /** ClientLookupResult: { clues, candidates } */
+    result: text('result', { mode: 'json' }).notNull(),
+    model: text('model'),
+    usageId: integer('usage_id'),
+    costUsd: real('cost_usd'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('client_lookups_job').on(t.jobId)],
 );
 
 // ---------- interview coach ----------

@@ -595,6 +595,217 @@ export type CompanyResearch = z.infer<typeof companyResearchSchema>;
 /** Research older than this is refreshed the next time a job there is scored. */
 export const RESEARCH_MAX_AGE_DAYS = 14;
 
+// ---------- staffing agencies: who is the job really for? ----------
+
+/** Common staffing firms; any variant (name or email domain word) marks a company as one. */
+export const STAFFING_AGENCIES: { name: string; variants: string[] }[] = [
+  { name: 'TEKsystems', variants: ['teksystems', 'tek systems'] },
+  { name: 'Aerotek', variants: ['aerotek'] },
+  { name: 'Allegis Group', variants: ['allegis', 'allegis group'] },
+  { name: 'Robert Half', variants: ['robert half', 'roberthalf', 'protiviti talent'] },
+  { name: 'Insight Global', variants: ['insight global', 'insightglobal'] },
+  { name: 'Randstad', variants: ['randstad', 'randstadusa'] },
+  { name: 'Kforce', variants: ['kforce'] },
+  { name: 'Apex Systems', variants: ['apex systems', 'apexsystems', 'apexsystemsinc'] },
+  { name: 'Akkodis', variants: ['akkodis', 'modis'] },
+  { name: 'Collabera', variants: ['collabera'] },
+  { name: 'Kelly Services', variants: ['kelly services', 'kellyservices', 'kelly'] },
+  { name: 'Adecco', variants: ['adecco', 'adeccousa'] },
+  { name: 'Motion Recruitment', variants: ['motion recruitment', 'motionrecruitment'] },
+  { name: 'CyberCoders', variants: ['cybercoders', 'cyber coders'] },
+  { name: 'Hays', variants: ['hays'] },
+  { name: 'Diverse Lynx', variants: ['diverse lynx', 'diverselynx'] },
+  { name: 'Judge Group', variants: ['judge group', 'judge'] },
+  { name: 'Beacon Hill', variants: ['beacon hill', 'beaconhill', 'beacon hill staffing'] },
+  { name: 'Experis', variants: ['experis', 'manpowergroup', 'manpower'] },
+  { name: 'Hired by Matrix', variants: ['matrix resources', 'hired by matrix'] },
+  { name: 'ALKU', variants: ['alku'] },
+  { name: 'LanceSoft', variants: ['lancesoft'] },
+  { name: 'Mondo', variants: ['mondo'] },
+  { name: 'Yoh', variants: ['yoh', 'yoh services'] },
+  { name: 'Volt', variants: ['volt', 'volt workforce'] },
+  { name: 'Russell Tobin', variants: ['russell tobin', 'russelltobin'] },
+  { name: 'Vaco', variants: ['vaco'] },
+  { name: 'Creative Circle', variants: ['creative circle'] },
+  { name: 'Jobot', variants: ['jobot'] },
+  { name: 'Harnham', variants: ['harnham'] },
+  { name: 'Synergis', variants: ['synergis'] },
+  { name: 'Pyramid Consulting', variants: ['pyramid consulting', 'pyramidci'] },
+  { name: 'Infojini', variants: ['infojini'] },
+  { name: 'Mindlance', variants: ['mindlance'] },
+  { name: 'Net2Source', variants: ['net2source'] },
+  { name: 'Ampcus', variants: ['ampcus'] },
+  { name: 'Artech', variants: ['artech', 'artech information systems'] },
+  { name: 'Hirequest', variants: ['hirequest'] },
+  { name: 'Dexian', variants: ['dexian', 'signature consultants', 'disys'] },
+  { name: 'Genesis10', variants: ['genesis10'] },
+  { name: 'VDart', variants: ['vdart', 'vdartinc'] },
+  { name: 'Harvey Nash', variants: ['harvey nash', 'harveynash'] },
+  { name: 'Ascendion', variants: ['ascendion'] },
+  { name: 'Kavaliro', variants: ['kavaliro'] },
+  { name: 'Compunnel', variants: ['compunnel'] },
+  { name: 'TalentBridge', variants: ['talentbridge', 'talent bridge'] },
+];
+
+const agencyKey = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\b(inc|llc|ltd|corp|corporation|co|company|group|usa|us|staffing|the)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/** Variants as words ("robert half") and squashed ("roberthalf", as an email domain gives it). */
+const AGENCY_KEYS = STAFFING_AGENCIES.flatMap((a) =>
+  [a.name, ...a.variants].map(agencyKey).filter(Boolean),
+);
+
+/** Names that say what they are: "Bay Area Staffing", "Acme Recruiting". */
+const AGENCY_WORDS =
+  /\b(?:staffing|recruit(?:ing|ment|ers)|talent (?:solutions|partners|acquisition group))\b/i;
+
+/** "TEKsystems", "Teksystems" (from jane@teksystems.com), "Robert Half Technology" → true. */
+export function isListedAgency(name: string | null | undefined): boolean {
+  if (AGENCY_WORDS.test(name ?? '')) return true;
+  const k = agencyKey(name ?? '');
+  if (!k) return false;
+  const squashed = k.replace(/ /g, '');
+  // A longer name only counts when it starts with a distinctive variant ("Kelly" alone is too common).
+  return AGENCY_KEYS.some(
+    (v) => k === v || squashed === v.replace(/ /g, '') || (v.length >= 6 && k.startsWith(`${v} `)),
+  );
+}
+
+/** How staffing vendors write: each pattern is one signal. */
+const AGENCY_EMAIL_SIGNALS = [
+  /\b(?:end|our|my|the|direct) client\b|\bimplementation partner\b|\bprime vendor\b/i,
+  /\b(?:w-?2|c2c|corp[- ]to[- ]corp|1099|c2h|contract[- ]to[- ]hire)\b/i,
+  /\bduration\s*:|\b\d+\+?\s*months?\s+(?:contract|engagement)\b|\blong[- ]term contract\b/i,
+  /\$\s?\d+(?:\.\d+)?\s*(?:\/|per)\s*(?:hr|hour)\b|\bhourly rate\b|\bbill rate\b/i,
+  /\b(?:share|send)\b[^.\n]{0,40}\b(?:profiles?|candidates?|consultants?|resumes?)\b|\bupdated resume\b/i,
+  /\b(?:staffing|consulting|recruiting) (?:firm|company|partner|services)\b|\bstaffing\b/i,
+  /\b(?:visa|h-?1b|gc|green card|usc)\b[^.\n]{0,20}\b(?:status|holders?|only|ead)\b/i,
+];
+
+/** Signals in an email that it's from a staffing vendor ("W2", "end client", "$95/hr", …). */
+export function agencyEmailSignals(text: string | null | undefined): number {
+  return text ? AGENCY_EMAIL_SIGNALS.filter((re) => re.test(text)).length : 0;
+}
+
+/** Two or more signals: a vendor pitching someone else's job. */
+export const AGENCY_EMAIL_MIN_SIGNALS = 2;
+
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/** The company was named after the sender's email domain ("Itech-us" from jo@itech-us.com). */
+export function namedAfterSender(company: string, fromAddr: string | null | undefined): boolean {
+  const labels = fromAddr?.split('@')[1]?.toLowerCase().split('.') ?? [];
+  if (labels.length < 2) return false;
+  let base = labels[labels.length - 2]!;
+  if (/^(?:co|com|org|net|ac)$/.test(base) && labels.length >= 3) base = labels[labels.length - 3]!;
+  return squash(base) !== '' && squash(base) === squash(company);
+}
+
+/** A recruiter email a job came from: its text and who sent it. */
+export interface LeadEmail {
+  text: string | null;
+  fromAddr: string | null;
+}
+
+/**
+ * Your setting wins; with none, the built-in list, then — for a job from a recruiter's email —
+ * how the email reads. Named after the sender plus one vendor signal is enough (an in-house
+ * recruiter's email is named after its sender too, but rarely talks W2 or "end client").
+ */
+export function isAgencyCompany(
+  c: { name: string; isAgency?: boolean | null },
+  lead?: LeadEmail | null,
+): boolean {
+  if (c.isAgency != null) return c.isAgency;
+  if (isListedAgency(c.name)) return true;
+  if (!lead) return false;
+  const signals = agencyEmailSignals(lead.text);
+  return (
+    signals >= AGENCY_EMAIL_MIN_SIGNALS || (signals >= 1 && namedAfterSender(c.name, lead.fromAddr))
+  );
+}
+
+/** A role on the client's own board that looks like the agency's. */
+export interface DirectMatch {
+  title: string;
+  url: string;
+  location: string | null;
+  /** Title words in common, 0–1. */
+  overlap: number;
+  /** Share of the agency email's wording the posting repeats, 0–1 (when the board gives text). */
+  copied?: number;
+  /** Already in your tracker (the application id). */
+  applicationId?: number;
+}
+
+/** Whether the client posts the role itself, where you could apply directly. */
+export interface DirectCheck {
+  checkedAt: string;
+  /** match: a similar role is on their board; none: board read, nothing similar; no_board: no board found. */
+  status: 'match' | 'none' | 'no_board' | 'error';
+  boardUrl: string | null;
+  matches: DirectMatch[];
+  /** Why there's no board / what went wrong. */
+  note?: string;
+}
+
+export interface ClientCandidate {
+  company: string;
+  confidence: 'high' | 'medium' | 'low';
+  /** How it was found: "clues" (your own data), "ai" (web search), "manual" (you). */
+  via: 'clues' | 'ai' | 'manual';
+  evidence: { text: string; url?: string | null }[];
+  /** Careers page or job board, when known. */
+  careersUrl?: string | null;
+  direct?: DirectCheck;
+}
+
+export interface ClientLookupResult {
+  /** Hints about the client read from the email ("Fortune 100", "fintech", "Pleasanton"). */
+  clues: string[];
+  candidates: ClientCandidate[];
+  /** The web-search lookup's own word on how sure it is. */
+  notes?: string;
+}
+
+/** Live runs of the lookup start with this, so the card can tell them from a fit score. */
+export const CLIENT_RUN_LABEL = 'Finding the client';
+
+/** What the paid web-search lookup returns. */
+export const clientGuessSchema = z.object({
+  candidates: z
+    .array(
+      z.object({
+        company: z.string().describe("The end client's name as it brands itself"),
+        confidence: z.enum(['high', 'medium', 'low']),
+        evidence: z
+          .array(
+            z.object({
+              text: z.string().describe('One sentence: what matches, e.g. the same JD wording'),
+              url: z.string().nullable().describe('The page that shows it; null if none'),
+            }),
+          )
+          .describe('1-3 pieces of evidence, strongest first'),
+        careersUrl: z
+          .string()
+          .nullable()
+          .describe(
+            "The client's own posting for this role if found, else its careers page or job board; null if not found",
+          ),
+      }),
+    )
+    .max(3)
+    .describe('Most likely first; empty if nothing credible was found'),
+  notes: z.string().describe('One or two sentences on how sure you are and what you searched'),
+});
+export type ClientGuess = z.infer<typeof clientGuessSchema>;
+
 
 // ---------- interview coach ----------
 

@@ -3,6 +3,8 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import {
   NOT_APPLIED_STATUSES,
   guessSource,
+  isAgencyCompany,
+  type ClientLookupResult,
   quickAddSchema,
   type ActivityInput,
   type Gate,
@@ -154,9 +156,27 @@ export interface ApplicationRow {
   prescreenModel: string | null;
   /** The recruiter email it came from (Outlook link), when it came from the job-leads folder. */
   emailLink: string | null;
+  /** The company is a staffing agency (your setting, else the built-in list). */
+  isAgency: boolean;
+  /** The likeliest client so far, for an agency's job; null before anyone looked. */
+  client: {
+    company: string;
+    confidence: 'high' | 'medium' | 'low';
+    /** match = the client posts a similar role itself. */
+    direct: 'match' | 'none' | 'no_board' | 'error' | null;
+    candidates: number;
+  } | null;
 }
 
-type RawRow = Omit<ApplicationRow, 'fitGateReasons' | 'outreachRecommended' | 'postedApprox'> & {
+type RawRow = Omit<
+  ApplicationRow,
+  'fitGateReasons' | 'outreachRecommended' | 'postedApprox' | 'isAgency' | 'client'
+> & {
+  isAgencySetting: number | null;
+  clientResult: string | null;
+  /** The recruiter email it came from: its text and sender (null when it didn't). */
+  leadText: string | null;
+  leadFrom: string | null;
   fitGateReasons: string | null;
   outreachRecommended: number | null;
   postedApprox: number;
@@ -203,7 +223,14 @@ export function listApplications(db: Db): ApplicationRow[] {
            CASE WHEN ps.id IS NOT NULL THEN ps.reason WHEN l.model IS NOT NULL THEN l.reason END AS prescreenReason,
            COALESCE(ps.model, l.model) AS prescreenModel,
            (SELECT web_link FROM mail_leads ml WHERE ml.application_id = a.id
-            ORDER BY ml.id LIMIT 1) AS emailLink
+            ORDER BY ml.id LIMIT 1) AS emailLink,
+           c.is_agency AS isAgencySetting,
+           CASE WHEN EXISTS (SELECT 1 FROM mail_leads ml WHERE ml.application_id = a.id)
+                THEN j.description_text END AS leadText,
+           (SELECT from_addr FROM mail_leads ml WHERE ml.application_id = a.id
+            ORDER BY ml.id LIMIT 1) AS leadFrom,
+           (SELECT result FROM client_lookups cl WHERE cl.job_id = j.id
+            ORDER BY cl.id DESC LIMIT 1) AS clientResult
     FROM applications a
     JOIN jobs j ON j.id = a.job_id
     JOIN companies c ON c.id = j.company_id
@@ -224,7 +251,8 @@ export function listApplications(db: Db): ApplicationRow[] {
     ORDER BY COALESCE(a.updated_at, a.created_at) DESC
   `);
   const { minBase } = getProfile(db);
-  return rows.map(({ salaryMin, salaryMax, payText, ...r }) => {
+  return rows.map(({ salaryMin, salaryMax, payText, ...row }) => {
+    const { isAgencySetting, clientResult, leadText, leadFrom, ...r } = row;
     const saved = r.fitGateReasons ? (JSON.parse(r.fitGateReasons) as GateReason[]) : null;
     const gate =
       r.fitGate &&
@@ -239,8 +267,40 @@ export function listApplications(db: Db): ApplicationRow[] {
       fitGateReasons: gate ? gate.reasons : null,
       outreachRecommended: Boolean(r.outreachRecommended),
       postedApprox: Boolean(r.postedApprox),
+      isAgency: isAgencyCompany(
+        { name: r.company, isAgency: isAgencySetting == null ? null : Boolean(isAgencySetting) },
+        leadText != null || leadFrom != null ? { text: leadText, fromAddr: leadFrom } : null,
+      ),
+      client: clientSummary(clientResult),
     };
   });
+}
+
+/** The recruiter email an application came from (text and sender), if it came from one. */
+export function leadEmailOf(db: Db, applicationId: number) {
+  const row = db.$client
+    .prepare(
+      `SELECT j.description_text AS text, ml.from_addr AS fromAddr
+       FROM mail_leads ml JOIN applications a ON a.id = ml.application_id
+       JOIN jobs j ON j.id = a.job_id
+       WHERE ml.application_id = ? ORDER BY ml.id LIMIT 1`,
+    )
+    .get(applicationId) as { text: string | null; fromAddr: string | null } | undefined;
+  return row ?? null;
+}
+
+function clientSummary(json: string | null): ApplicationRow['client'] {
+  if (!json) return null;
+  const { candidates } = JSON.parse(json) as ClientLookupResult;
+  const top = candidates[0];
+  return top
+    ? {
+        company: top.company,
+        confidence: top.confidence,
+        direct: top.direct?.status ?? null,
+        candidates: candidates.length,
+      }
+    : null;
 }
 
 export function getApplicationDetail(db: Db, id: number) {

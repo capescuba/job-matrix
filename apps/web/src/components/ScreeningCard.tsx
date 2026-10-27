@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import type { GateReason } from '@jm/shared';
+import { CLIENT_RUN_LABEL, type GateReason } from '@jm/shared';
 import { api, type ApplicationRow } from '../api.ts';
 import { useAiRuns } from '../aiActivity.ts';
 import { formatScore, postedOf } from './badges.tsx';
 import { CompanyInsights } from './CompanyInsights.tsx';
 import { DecisionBody, Verdict, useDecisionData } from './Decision.tsx';
+import { AgencyChip, EndClient } from './EndClient.tsx';
 import { LiveRun } from './LiveRun.tsx';
 import { Button, ErrorText, Input, cx } from './ui.tsx';
 
@@ -43,6 +44,8 @@ export function ScreeningCard({
     (x) =>
       x.applicationId === r.id &&
       x.companyId == null &&
+      // The client lookup shows its own progress, in its panel.
+      !x.label.startsWith(CLIENT_RUN_LABEL) &&
       (!x.finishedAt || x.startedAt >= mountedAt - 1000),
   );
   const researchRuns = useAiRuns().filter(
@@ -132,6 +135,7 @@ export function ScreeningCard({
         {errors}
         {open && (
           <div className="mt-2 space-y-2 border-t border-border pt-2">
+            {showsClient(r) && <EndClient row={r} onChanged={onChanged} />}
             <Description row={r} />
             <Actions row={r} onChanged={onChanged} />
           </div>
@@ -335,9 +339,17 @@ function Title({ row: r, onChanged }: { row: ApplicationRow; onChanged: () => vo
         className="text-ink-2"
         onSave={(v) => api.updateJob(r.jobId, { companyName: v }).then(onChanged)}
       />
+      <AgencyChip row={r} />
     </>
   );
 }
+
+/**
+ * The client panel: on an agency's job, and on a recruiter email with no posting link (is the
+ * company it names hiring directly?).
+ */
+const showsClient = (r: ApplicationRow) =>
+  r.isAgency || (r.descriptionSource === 'Recruiter email' && !r.url);
 
 function Scored({
   row: r,
@@ -424,6 +436,11 @@ function ScoredBody({
         onMore={() => setDetails(true)}
         moreLabel="in details"
       />
+      {showsClient(r) && (
+        <div className="mt-3">
+          <EndClient row={r} onChanged={onChanged} />
+        </div>
+      )}
 
       <div className="mt-3 border-t border-border pt-3">
         <Actions
