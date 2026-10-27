@@ -8,6 +8,7 @@ const EDITABLE = [
   'ANTHROPIC_API_KEY',
   'AI_MODEL',
   'AI_RESEARCH_MODEL',
+  'AI_CLIENT_MODEL',
   'AI_EMAIL_MODEL',
   'AI_EFFORT',
   'AI_COACH_MODEL',
@@ -22,6 +23,8 @@ const EDITABLE = [
 type Key = (typeof EDITABLE)[number];
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
+/** Finding an agency's client is a few searches and a short answer: no need for the top model. */
+export const DEFAULT_CLIENT_MODEL = 'claude-sonnet-5-5';
 /** Reading an unclear email is a small job: the cheapest model is plenty. */
 export const DEFAULT_EMAIL_MODEL = 'claude-haiku-4-5';
 /** Fit scoring doesn't need deep deliberation; low effort is ~3x faster than the model default. */
@@ -61,6 +64,8 @@ export function getSettings() {
     researchModel: process.env.AI_RESEARCH_MODEL || process.env.AI_MODEL || DEFAULT_MODEL,
     /** False when research just follows the fit model. */
     researchModelSet: Boolean(process.env.AI_RESEARCH_MODEL),
+    /** Find client: who an agency's job is really for (web search). */
+    clientModel: process.env.AI_CLIENT_MODEL || DEFAULT_CLIENT_MODEL,
     /** Ask AI on an unclear email (Email page). */
     emailModel: process.env.AI_EMAIL_MODEL || DEFAULT_EMAIL_MODEL,
     effort: currentEffort(),

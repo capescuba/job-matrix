@@ -25,6 +25,7 @@ import type { linkedinSummary } from '../../server/src/services/linkedin.ts';
 import type { analyzeApplication } from '../../server/src/services/analyze.ts';
 import type { ResearchRow } from '../../server/src/services/research.ts';
 import type { CaptureResult } from '../../server/src/services/screening.ts';
+import type { clientState } from '../../server/src/services/client/index.ts';
 import type { StockQuote } from '../../server/src/services/stock.ts';
 import type { getSettings } from '../../server/src/services/settings.ts';
 import type { getStats } from '../../server/src/services/stats.ts';
@@ -110,6 +111,13 @@ export interface MailStatus extends MailConnection {
 export type Usage = ReturnType<typeof getUsageSummary>;
 
 export type { ApplicationRow, FetchedJob, StockQuote };
+
+export type ClientView = ReturnType<typeof clientState> & {
+  /** A paid lookup already ran on this job. */
+  aiDone: boolean;
+  estimateUsd: number;
+  model: string;
+};
 export type ApplicationDetail = ReturnType<typeof getApplicationDetail>;
 export type FitAssessment = Omit<ApplicationDetail['fits'][number], 'result' | 'gateReasons'> & {
   result: FitResult;
@@ -177,7 +185,13 @@ export const api = {
     request<{ ok: true }>('PATCH', `/api/jobs/${id}`, patch),
   updateCompany: (
     id: number,
-    patch: { website?: string | null; linkedinUrl?: string | null; notes?: string | null },
+    patch: {
+      website?: string | null;
+      linkedinUrl?: string | null;
+      notes?: string | null;
+      /** Staffing agency: null = go by the built-in list. */
+      isAgency?: boolean | null;
+    },
   ) => request<{ ok: true }>('PATCH', `/api/companies/${id}`, patch),
   scoreFit: (id: number, force = false) =>
     request<{ assessment: FitAssessment; cached: boolean }>(
@@ -215,6 +229,24 @@ export const api = {
     request<{ verdict: string; score: number | null; reason: string | null; model: string }>(
       'POST',
       `/api/applications/${id}/prescreen`,
+    ),
+  // ----- agency jobs: who is the client? -----
+  getClient: (id: number) => request<ClientView>('GET', `/api/applications/${id}/client`),
+  /** Paid web-search lookup; once per job unless forced. */
+  findClient: (id: number, force = false) =>
+    request<ClientView>('POST', `/api/applications/${id}/client/find${force ? '?force=1' : ''}`),
+  addClient: (id: number, input: { company: string; careersUrl?: string | null }) =>
+    request<ClientView>('POST', `/api/applications/${id}/client/manual`, input),
+  recheckClient: (id: number, input: { company: string; careersUrl?: string | null }) =>
+    request<ClientView>('POST', `/api/applications/${id}/client/check`, input),
+  dismissClient: (id: number, company: string) =>
+    request<ClientView>('POST', `/api/applications/${id}/client/dismiss`, { company }),
+  /** Add the client's own posting to Screening and pass the agency's lead. */
+  adoptClientPosting: (id: number, input: { url: string; company: string }) =>
+    request<{ applicationId: number; existing: boolean; company: string }>(
+      'POST',
+      `/api/applications/${id}/client/adopt`,
+      input,
     ),
   /** Add a job to the Screening inbox from its URL (server-side fetch). */
   screenUrl: (url: string) => request<CaptureResult>('POST', '/api/screen/url', { url }),

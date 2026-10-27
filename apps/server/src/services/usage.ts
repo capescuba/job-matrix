@@ -11,6 +11,7 @@ import { getSettings } from './settings.ts';
 export type Feature =
   | 'fit'
   | 'research'
+  | 'client'
   | 'answer'
   | 'email'
   | 'profile'
