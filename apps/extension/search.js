@@ -180,6 +180,7 @@ export async function readPosting(saved) {
   const SELECTORS = [
     saved,
     '#jobDescriptionText', // Indeed
+    'div:has(> [data-testid="vj-job-description-heading"])', // Indeed's newer layout
     '[class*="JobDetails_jobDescription"]', // Glassdoor
     '[data-test="jobDescriptionContent"]',
     '.job_description', // ZipRecruiter
