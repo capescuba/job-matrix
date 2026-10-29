@@ -7,12 +7,16 @@ import { runSearches } from './search.js';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
+// Chrome keeps the menu item when the extension is reloaded or updated, which also fires
+// onInstalled: clear it first, or creating it again logs "duplicate id".
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: 'jm-add-selection',
-    title: 'Add selection to Job Matrix',
-    contexts: ['selection'],
-  });
+  chrome.contextMenus.removeAll(() =>
+    chrome.contextMenus.create({
+      id: 'jm-add-selection',
+      title: 'Add selection to Job Matrix',
+      contexts: ['selection'],
+    }),
+  );
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
