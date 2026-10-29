@@ -183,6 +183,45 @@ export function readPage(selectors) {
     };
   }
 
+  // Indeed's job pages are built from generated class names with no <h1>, <main> or job data, so
+  // the generic reader finds no heading and nth-of-type templates break between layouts. Its
+  // test ids name the header, the employer's /cmp/ link and the "Full job description" heading.
+  const indeedTitle = /(^|\.)indeed\.com$/.test(location.hostname)
+    ? document.querySelector('[data-testid="vj-job-title"]')
+    : null;
+  if (!siteFields && indeedTitle && text(indeedTitle)) {
+    const header = indeedTitle.closest('[data-testid="desktop-job-header"]') ?? document;
+    const meta = header.querySelector('[data-testid="company-info-metadata"]');
+    const company = text(meta?.querySelector('a[href*="/cmp/"]')).replace(/\s+/g, ' ') || null;
+    // "AllSTEM - Jobs · 3.9 Livermore, CA 94551": the line that isn't the employer or its rating.
+    const place = text(meta)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && l !== company && !/^[·\d.\s]+$/.test(l))
+      .pop();
+    const descHead = document.querySelector('[data-testid="vj-job-description-heading"]');
+    const jk = new URLSearchParams(location.search).get('jk');
+    siteFields = {
+      site: 'Indeed',
+      // Without the ad and tracking parameters an ad link carries.
+      url: /^[\da-f]+$/i.test(jk ?? '') ? `${location.origin}/viewjob?jk=${jk}` : null,
+      title: text(indeedTitle).replace(/\s+/g, ' '),
+      company,
+      location: place || null,
+      salaryText:
+        text(header)
+          .split('\n')
+          .find((l) => /\$\s?\d/.test(l))
+          ?.trim() || null,
+      descriptionText:
+        text(descHead?.parentElement)
+          .replace(/^Full job description\s*/i, '')
+          .trim() ||
+        text(document.querySelector('#jobDescriptionText')) ||
+        null,
+    };
+  }
+
   // Application-form questions: text areas, and long text inputs that ask something.
   const SKIP =
     /\b(name|e-?mail|phone|mobile|address|city|state|zip|postal|country|linkedin|github|website|portfolio|url|salary|compensation|pronoun|gender|race|ethnic|veteran|disability|date|school|degree|gpa|hispanic|latino|ethnicity|sponsorship|authori[sz]ed)\b/i;

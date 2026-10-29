@@ -44,6 +44,36 @@ describe('what the panel sends for a Glassdoor list page', () => {
   });
 });
 
+describe('what the panel sends for an Indeed job opened from an ad', () => {
+  const page = {
+    url: 'https://www.indeed.com/viewjob?jk=28632e15b9dd3020',
+    pageTitle: 'Technical Program Manager - Livermore, CA 94551 - Indeed.com',
+    jsonLd: [],
+    pageText: 'Skip to main content\nHome\nCompany reviews…',
+    siteFields: {
+      site: 'Indeed',
+      url: 'https://www.indeed.com/viewjob?jk=28632e15b9dd3020',
+      title: 'Technical Program Manager',
+      company: 'AllSTEM - Jobs',
+      location: 'Livermore, CA 94551',
+      salaryText: '$150,000 - $170,000 a year',
+      descriptionText: 'Technical Program Manager – Engineering\nJob Type: Full-time…',
+    },
+  };
+
+  it('names the job and employer from the header, labelled as the Indeed reader', () => {
+    const body = captureBody(page, null);
+    expect(body.url).toBe('https://www.indeed.com/viewjob?jk=28632e15b9dd3020');
+    expect(body.fields).toMatchObject({
+      title: 'Technical Program Manager',
+      company: 'AllSTEM - Jobs',
+      location: 'Livermore, CA 94551',
+      salaryText: '$150,000 - $170,000 a year',
+    });
+    expect(body.templateName).toBe('Built-in Indeed');
+  });
+});
+
 describe('what the panel sends for a Tesla job opened from search', () => {
   // The tab title is still the page you came from.
   const page = {
