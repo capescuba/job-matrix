@@ -280,6 +280,27 @@ describe('captureJob', () => {
     expect(row(r.applicationId).src).toBe('Page structured data');
   });
 
+  it("prefers the page's job data to the server's read of the whole page", async () => {
+    const ld = JSON.stringify({
+      '@type': 'JobPosting',
+      title: 'Principal TPM',
+      hiringOrganization: { name: 'Atlassian' },
+      description: `<p>${LONG}</p>`,
+    });
+    // The server reads the careers shell: no job data, a page of marketing text.
+    const f = fakeFetch({
+      'https://careers.atlassian-shell.com/': {
+        body: `<html><body><main>Join our Talent Community. Meet a few Atlassians. ${LONG.repeat(2)}</main></body></html>`,
+      },
+    });
+    const r = await captureJob(
+      db,
+      { url: 'https://careers.atlassian-shell.com/jobs/27781/tpm', jsonLd: [ld] },
+      { fetchFn: f },
+    );
+    expect(row(r.applicationId).src).toBe('Page structured data');
+  });
+
   it('recognises a posting you already track, even with a different tracking link', async () => {
     const first = await captureJob(
       db,

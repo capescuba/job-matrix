@@ -519,6 +519,18 @@ async function walmart(f: FetchFn, u: URL): Promise<FetchedJob | null> {
   });
 }
 
+/**
+ * iCIMS (careers-americas.icims.com/jobs/27781/…): the page is the company's careers shell —
+ * menus, marketing, links to other jobs — and the posting loads in an iframe from the same
+ * address plus ?in_iframe=1, which carries the JobPosting data.
+ */
+async function icims(f: FetchFn, u: URL): Promise<FetchedJob | null> {
+  if (!/^\/jobs\/\d+\//.test(u.pathname)) return null;
+  const inner = new URL(u.pathname, u.origin);
+  inner.searchParams.set('in_iframe', '1');
+  return generic(f, inner);
+}
+
 /** One job as amazon.jobs's search lists it (the fields Job Matrix reads). */
 export interface AmazonJob {
   id_icims?: string;
@@ -856,7 +868,9 @@ export async function fetchJobPosting(url: string, f: FetchFn = fetch): Promise<
                 ? amazonJobs
                 : h.endsWith('.oraclecloud.com')
                   ? oracle
-                  : null;
+                  : h.endsWith('.icims.com')
+                    ? icims
+                    : null;
   if (!specific) {
     // A careers page embedding Ashby/Greenhouse: read the posting from the board, not the shell.
     if (embeddedJobId(u)) {

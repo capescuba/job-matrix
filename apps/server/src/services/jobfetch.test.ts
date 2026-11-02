@@ -113,6 +113,35 @@ describe('fetchJobPosting', () => {
     });
   });
 
+  it('reads iCIMS postings from the frame, not the careers shell around it', async () => {
+    const ld = {
+      '@type': 'JobPosting',
+      title: 'Principal Technical Program Manager',
+      hiringOrganization: { '@type': 'Organization', name: 'Atlassian' },
+      description: `<p>${LONG}</p>`,
+    };
+    const { f, calls } = fakeFetch({
+      'https://careers-americas.icims.com/jobs/27781/principal-tpm/job?in_iframe=1': {
+        body: `<html><script type="application/ld+json">${JSON.stringify(ld)}</script></html>`,
+      },
+      'https://careers-americas.icims.com/': {
+        body: `<html><body><main>Join the Atlassian Talent Community. ${LONG}</main></body></html>`,
+      },
+    });
+    const job = await fetchJobPosting(
+      'https://careers-americas.icims.com/jobs/27781/principal-tpm/job?iis=LinkedIn&mobile=false',
+      f,
+    );
+    expect(calls[0]).toBe(
+      'https://careers-americas.icims.com/jobs/27781/principal-tpm/job?in_iframe=1',
+    );
+    expect(job).toMatchObject({
+      title: 'Principal Technical Program Manager',
+      company: 'Atlassian',
+      via: 'Page structured data',
+    });
+  });
+
   it('ignores placeholder address fields like "UNAVAILABLE"', async () => {
     const ld = {
       '@type': 'JobPosting',
