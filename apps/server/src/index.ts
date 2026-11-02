@@ -34,13 +34,17 @@ if (idleMinutes > 0) {
   app.addHook('onRequest', async () => {
     last = Date.now();
   });
+  let exiting = false;
   setInterval(() => {
     // A call being recorded keeps the server up, whatever the browser does.
     if (activeSessionCount() > 0) last = Date.now();
-    if (Date.now() - last > idleMinutes * 60_000) {
-      logEvent('app.idle-exit', `No activity for ${idleMinutes} min, shutting down`);
-      app.close().finally(() => process.exit(0));
-    }
+    if (exiting || Date.now() - last <= idleMinutes * 60_000) return;
+    exiting = true;
+    logEvent('app.idle-exit', `No activity for ${idleMinutes} min, shutting down`);
+    // If close() hangs (it did on 2026-11-02, leaving a dead process holding the port),
+    // exit anyway: a stuck server is worse than a cut connection.
+    setTimeout(() => process.exit(0), 5_000).unref();
+    app.close().finally(() => process.exit(0));
   }, 30_000).unref();
 }
 

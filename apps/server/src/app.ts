@@ -193,6 +193,8 @@ export function buildApp(
     logger: opts.logger ?? false,
     logController: new LogController({ disableRequestLogging: true }),
     bodyLimit: 5 * 1024 * 1024,
+    // Shutdown must not wait on idle keep-alive or streaming connections (see index.ts idle exit).
+    forceCloseConnections: true,
   });
 
   /** Polled or streamed routes that would drown the log. */
