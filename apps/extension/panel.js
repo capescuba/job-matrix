@@ -19,6 +19,7 @@ const state = {
   notice: null,
   edits: { title: '', company: '' },
   editsUrl: null, // the address the edits were filled in from
+  typed: {}, // the edit fields you typed in (title, company), so a re-read doesn't overwrite them
   busy: null, // 'add' | 'score' | 'save-template'
   useApp: null, // application chosen for the helper when the page only looks similar
   drafts: {}, // question id → { text, basedOn, loading, error }
@@ -219,19 +220,25 @@ async function refresh() {
     if (mine !== seq) return;
     // Keep what you typed if it's still the same page. "Same page" means one this panel has
     // already read: opening the panel reads the tab several times at once, and the read that
-    // wins may see the address an abandoned one set before anything was filled in. A field
-    // left blank takes what the page says.
-    const kept = state.editsUrl === tab.url ? state.edits : {};
+    // wins may see the address an abandoned one set before anything was filled in. Every other
+    // field takes what the page says now: LinkedIn changes the address before it redraws the job
+    // pane, so the first read of a job can see the one before it (Character.ai's title and
+    // company under a Tiger Analytics posting), and a later read has to be able to replace it.
+    // A field you emptied takes what the page says.
+    const same = state.editsUrl === tab.url;
+    const kept = same ? state.edits : {};
+    const typed = same ? state.typed : {};
     Object.assign(state, {
       page,
       template,
       ctx,
       edits: {
         ...kept,
-        title: kept.title || ctx.detected.title || '',
-        company: kept.company || ctx.detected.company || '',
+        title: (typed.title && kept.title) || ctx.detected.title || '',
+        company: (typed.company && kept.company) || ctx.detected.company || '',
       },
       editsUrl: tab.url,
+      typed,
     });
   } catch (e) {
     if (mine !== seq) return;
@@ -1043,7 +1050,10 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('input', (e) => {
   const t = e.target;
-  if (t.dataset.edit) state.edits[t.dataset.edit] = t.value;
+  if (t.dataset.edit) {
+    state.edits[t.dataset.edit] = t.value;
+    state.typed[t.dataset.edit] = true;
+  }
   if (t.dataset.draft && state.drafts[t.dataset.draft])
     state.drafts[t.dataset.draft].text = t.value;
 });
