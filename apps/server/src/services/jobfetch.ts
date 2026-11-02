@@ -901,6 +901,7 @@ export function applyFetchedJob(db: Db, jobId: number, fetched: FetchedJob) {
     .set({
       descriptionText: fetched.descriptionText,
       descriptionHash: sha256(fetched.descriptionText),
+      descriptionSource: fetched.via,
       location: job.location ?? fetched.location,
       remoteType: job.remoteType ?? fetched.remoteType,
       salaryMin: job.salaryMin ?? fetched.salaryMin,

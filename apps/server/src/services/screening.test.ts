@@ -3,6 +3,7 @@ import { buildApp } from '../app.ts';
 import { openDb, type Db } from '../db/client.ts';
 import { createApplication } from './applications.ts';
 import { unscoredApplicationIds } from './fit.ts';
+import { applyFetchedJob, type FetchedJob } from './jobfetch.ts';
 import {
   captureJob,
   companyFromBoardUrl,
@@ -299,6 +300,35 @@ describe('captureJob', () => {
       { fetchFn: f },
     );
     expect(row(r.applicationId).src).toBe('Page structured data');
+  });
+
+  it('says where a refetched description came from', async () => {
+    const id = createApplication(db, {
+      company: 'Atlassian',
+      title: 'Principal TPM',
+      url: 'https://careers.example.com/jobs/1',
+      descriptionText: 'Join our Talent Community.',
+      status: 'Screening',
+    });
+    const jobId = db.$client
+      .prepare('SELECT job_id FROM applications WHERE id = ?')
+      .pluck()
+      .get(id);
+    db.$client.prepare("UPDATE jobs SET description_source = 'Page text' WHERE id = ?").run(jobId);
+    applyFetchedJob(
+      db,
+      jobId as number,
+      {
+        title: 'Principal TPM',
+        location: null,
+        remoteType: null,
+        salaryMin: null,
+        salaryMax: null,
+        descriptionText: LONG,
+        via: 'Page structured data',
+      } as FetchedJob,
+    );
+    expect(row(id)).toMatchObject({ d: LONG, src: 'Page structured data' });
   });
 
   it('recognises a posting you already track, even with a different tracking link', async () => {
