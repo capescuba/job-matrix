@@ -58,7 +58,9 @@ export function normalizeUrl(raw: string): string {
   // Tesla: the id ends the job page's slug and is all the apply page has (a locale may lead).
   const tesla =
     /(^|\.)tesla\.com$/.test(host) &&
-    u.pathname.match(/^(?:\/[a-z]{2}_[a-z]{2})?\/careers\/search\/job\/(?:apply\/)?(?:[^/]*-)?(\d+)\/?$/i);
+    u.pathname.match(
+      /^(?:\/[a-z]{2}_[a-z]{2})?\/careers\/search\/job\/(?:apply\/)?(?:[^/]*-)?(\d+)\/?$/i,
+    );
   if (tesla) return `https://www.tesla.com/careers/search/job/${tesla[1]}`;
   if (host.endsWith('greenhouse.io')) {
     const embed = u.pathname.startsWith('/embed/')
@@ -214,12 +216,16 @@ const clean = (s: string | null | undefined) => {
 /**
  * The description a capture carries, with where it came from: your selection, then the site
  * template, the server's own read of the posting, the page's structured data, the whole page.
+ * The server's read of the whole page comes after the structured data: on a site that shows the
+ * posting in a frame (iCIMS) that's the careers shell around it, and the data is the posting's.
  */
 function descriptionFrom(
   input: CaptureInput,
   fetched: FetchedJob | null,
 ): [string, string | null] | undefined {
   const ld = jobPostingFromJsonLd(input.jsonLd);
+  const served = clean(fetched?.descriptionText);
+  const whole = fetched?.via === 'Page text';
   return (
     [
       [clean(input.selectionText), 'Your selection'],
@@ -227,8 +233,9 @@ function descriptionFrom(
         clean(input.fields?.descriptionText),
         input.templateName ? `${input.templateName} template` : 'Site template',
       ],
-      [clean(fetched?.descriptionText), fetched?.via ?? null],
+      [whole ? null : served, fetched?.via ?? null],
       [ld?.description ? clean(htmlToText(ld.description)) : null, 'Page structured data'],
+      [whole ? served : null, fetched?.via ?? null],
       [clean(input.pageText), 'Page text (whole page)'],
     ] as [string | null, string | null][]
   ).find((d): d is [string, string | null] => !!d[0] && d[0].length >= 40);

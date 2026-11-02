@@ -297,14 +297,22 @@ export function readPage(selectors) {
     .slice(0, 20);
   // The page's main content, skipping widgets that call themselves "main": Amazon's hiring
   // assistant chat is an empty role="main" box, which read as a page with no job on it. With
-  // frames, the document with the most to read.
+  // frames, the document with the posting's job data, else the one with the most to read: the
+  // careers page around Atlassian's iCIMS frame has more marketing text than the posting has.
   const mainOf = (d) =>
     [...d.querySelectorAll('main, [role="main"], article')].find(
       (e) =>
         text(e).length >= 200 &&
         !e.closest('[id*="chat" i], [class*="chat" i], [role="dialog"], [aria-modal="true"]'),
     ) || d.body;
-  const main = docs.map(mainOf).reduce((a, b) => (text(b).length > text(a).length ? b : a));
+  const posting = docs.filter((d) =>
+    [...d.querySelectorAll('script[type="application/ld+json"]')].some((s) =>
+      /JobPosting/.test(s.textContent || ''),
+    ),
+  );
+  const main = (posting.length ? posting : docs)
+    .map(mainOf)
+    .reduce((a, b) => (text(b).length > text(a).length ? b : a));
   // The posting's own header on a site with no template or job data (ZipRecruiter): the heading
   // the tab title repeats is the role, and the first link to a company page after it is the
   // employer ("See more jobs at PG&E Corporation" → /co/PG&E-Corporation).
