@@ -399,8 +399,12 @@ function postingSection() {
       pay: 'Pay',
       upside: 'Upside',
     };
+    // A score made from another description than the job has now (it was fetched again) can be
+    // scored again; otherwise the panel would show the old one for good.
+    const rescore = open && f?.stale;
     const fitBlock = f
       ? `<div class="row">${esc(f.verdict)} ${gateChip(t)}</div>
+         ${rescore ? '<div class="small warn">The job description changed since this score.</div>' : ''}
          <div class="muted">${esc(f.whyNotHigher)}</div>
          <div class="cols">
            <div><div class="small good">Works for you</div><ul class="list">${list(f.strengths, 'good', '✓') || '<li class="faint">—</li>'}</ul></div>
@@ -439,11 +443,11 @@ function postingSection() {
       <div class="row" style="margin-top:8px">
         ${open && t.fitScore == null ? prescreenButton(t) : ''}
         ${
-          open && t.fitScore == null
-            ? `<button class="${early && t.prescreenVerdict ? 'primary' : ''}" data-action="score-fit" data-id="${t.applicationId}" ${scoring ? 'disabled' : ''} title="Fit score only — company research stays separate">${scoring ? 'Scoring…' : `Score fit · ~${money(state.ctx.costs.fit)}`}</button>`
+          open && (t.fitScore == null || rescore)
+            ? `<button class="${early && (t.prescreenVerdict || rescore) ? 'primary' : ''}" data-action="score-fit" data-id="${t.applicationId}" ${scoring ? 'disabled' : ''} title="Fit score only — company research stays separate">${scoring ? 'Scoring…' : `${rescore ? 'Re-score' : 'Score fit'} · ~${money(state.ctx.costs.fit)}`}</button>`
             : ''
         }
-        ${early && open ? `<button class="${t.fitScore != null ? 'primary' : ''}" data-action="mark-applied" ${state.busy === 'applied' ? 'disabled' : ''} title="Move it to Applied, dated today">✓ I applied</button>` : ''}
+        ${early && open ? `<button class="${t.fitScore != null && !rescore ? 'primary' : ''}" data-action="mark-applied" ${state.busy === 'applied' ? 'disabled' : ''} title="Move it to Applied, dated today">✓ I applied</button>` : ''}
         ${open && t.status === 'Screening' && !state.passing ? '<button class="danger" data-action="pass">Pass</button>' : ''}
         <button class="${open && t.fitScore == null && early ? '' : 'primary'}" data-action="open" data-path="/applications/${t.applicationId}">Open in Job Matrix</button>
       </div>

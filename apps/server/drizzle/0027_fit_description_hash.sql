@@ -1,0 +1,1 @@
+ALTER TABLE `fit_assessments` ADD `description_hash` text;

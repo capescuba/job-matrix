@@ -14,7 +14,7 @@ import {
   siteTemplates,
   statusEvents,
 } from '../db/schema.ts';
-import { NotFoundError, listApplications, type ApplicationRow } from './applications.ts';
+import { NotFoundError, listApplications, sha256, type ApplicationRow } from './applications.ts';
 import { latestResearch, isStale } from './research.ts';
 import { getProfile, resumeForTrack } from './resume.ts';
 import { SHARED_HOSTS, findTrackedByUrl, jobPostingFromJsonLd, normalizeUrl } from './screening.ts';
@@ -131,15 +131,29 @@ function decisionOf(db: Db, r: ApplicationRow) {
 /** The latest fit score's short form for the panel: labels, not paragraphs. */
 function fitDetail(db: Db, jobId: number) {
   const row = db
-    .select({ result: fitAssessments.result, createdAt: fitAssessments.createdAt })
+    .select({
+      result: fitAssessments.result,
+      createdAt: fitAssessments.createdAt,
+      descriptionHash: fitAssessments.descriptionHash,
+      description: jobs.descriptionText,
+    })
     .from(fitAssessments)
+    .innerJoin(jobs, eq(jobs.id, fitAssessments.jobId))
     .where(eq(fitAssessments.jobId, jobId))
     .orderBy(desc(fitAssessments.createdAt), desc(fitAssessments.id))
     .get();
   const f = row?.result as FitResult | undefined;
   if (!f?.parts) return null;
+  // Scored from another description than the job has now: it was fetched again (an iCIMS careers
+  // page replaced by the posting). Profile edits don't count: they'd flag half the jobs at once.
+  // Scores from before descriptions were recorded can't tell.
+  const stale =
+    !!row!.descriptionHash &&
+    !!row!.description?.trim() &&
+    sha256(row!.description) !== row!.descriptionHash;
   return {
     scoredAt: row!.createdAt,
+    stale,
     verdict: f.verdict,
     whyNotHigher: f.whyNotHigher,
     strengths: f.strengths.map((s) => s.label ?? s.point).slice(0, 4),

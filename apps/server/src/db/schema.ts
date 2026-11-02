@@ -180,6 +180,8 @@ export const fitAssessments = sqliteTable(
       .references(() => resumeVersions.id, { onDelete: 'cascade' }),
     /** Hash of JD + resume + goals + prompt version — the cache key. */
     inputHash: text('input_hash').notNull(),
+    /** The job's description_hash when it was scored: a refetched description makes it stale. */
+    descriptionHash: text('description_hash'),
     provider: text('provider').notNull(),
     model: text('model').notNull(),
     /** 0–10 weighted total of the parts. */
