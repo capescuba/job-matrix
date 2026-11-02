@@ -379,9 +379,25 @@ describe('fit score in the panel', () => {
       strengths: ['Platform program depth', 'Agentic AI delivery'],
       gaps: ['Five office days'],
       parts: { skills: 8, logistics: 4 },
+      stale: false,
     });
     expect(c.company?.brief).toBeNull();
     expect(c.costs.researchNeeded).toBe(true);
+
+    // A profile edit changes every job's score inputs; it doesn't flag them all.
+    db.$client.prepare("UPDATE profile SET goals = 'Principal TPM, remote'").run();
+    const edited = await pageContext(db, { url: 'https://initech.com/jobs/7' });
+    expect(edited.tracked?.fit).toMatchObject({ stale: false });
+
+    // The description is fetched again (the posting, not the careers page around it): the score
+    // was made from the old text, so the panel offers to score it again.
+    db.$client
+      .prepare(
+        'UPDATE jobs SET description_text = ? WHERE id = (SELECT job_id FROM applications WHERE id = ?)',
+      )
+      .run('Lead LLM inference programs.', id);
+    const later = await pageContext(db, { url: 'https://initech.com/jobs/7' });
+    expect(later.tracked?.fit).toMatchObject({ verdict: 'Good fit', stale: true });
   });
 });
 

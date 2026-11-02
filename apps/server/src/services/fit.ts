@@ -440,6 +440,7 @@ export async function assessFit(
         jobId: row.job.id,
         resumeVersionId: resume.id,
         inputHash,
+        descriptionHash: sha256(row.job.descriptionText!),
         provider: res.provider,
         model: res.model,
         overallScore: total,
