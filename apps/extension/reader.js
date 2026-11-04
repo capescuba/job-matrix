@@ -227,6 +227,16 @@ export function readPage(selectors) {
     /\b(name|e-?mail|phone|mobile|address|city|state|zip|postal|country|linkedin|github|website|portfolio|url|salary|compensation|pronoun|gender|race|ethnic|veteran|disability|date|school|degree|gpa|hispanic|latino|ethnicity|sponsorship|authori[sz]ed)\b/i;
   const ASK =
     /\?|why|describe|tell us|explain|what (excites|interests|draws)|cover letter|additional information|anything else/i;
+  // The label in the field's wrapper, but only a wrapper that holds just this one field. A class
+  // like Greenhouse's "application--questions" wraps the whole form, and its first label belongs
+  // to some other question.
+  const ownLabel = (el) => {
+    const box = el.closest(
+      '.field, .application-question, .form-group, [class*="question"], [class*="Question"]',
+    );
+    if (!box || box.querySelectorAll('label, legend').length > 1) return null;
+    return box.querySelector('label, legend, [class*="label"], [class*="Label"]');
+  };
   const labelOf = (el) => {
     const byFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
     const labelled = el.getAttribute('aria-labelledby');
@@ -240,13 +250,7 @@ export function readPage(selectors) {
       el.getAttribute('aria-label'),
       text(el.closest('label')),
       text(el.closest('fieldset')?.querySelector('legend')),
-      text(
-        el
-          .closest(
-            '.field, .application-question, .form-group, [class*="question"], [class*="Question"]',
-          )
-          ?.querySelector('label, legend, [class*="label"], [class*="Label"]'),
-      ),
+      text(ownLabel(el)),
       el.placeholder,
     ];
     return (candidates.find((c) => c && c.trim()) || '')
@@ -263,6 +267,9 @@ export function readPage(selectors) {
     if (!visible(el) || el.disabled || el.readOnly) continue;
     // Dropdowns built from text inputs (yes/no, visa, EEO questions) aren't written answers.
     if (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete')) continue;
+    // Hidden helper inputs, like the invisible one a react-select dropdown keeps beside itself so
+    // the browser enforces "required", aren't questions either.
+    if (el.closest('[aria-hidden="true"]') || (el.tabIndex < 0 && !el.isContentEditable)) continue;
     // A site's chat assistant or search box ("Chat message input") isn't an application question.
     if (el.closest('[role="dialog"][aria-label*="chat" i], [class*="chat" i], [id*="chat" i]'))
       continue;
