@@ -151,8 +151,9 @@ describe('title/company without AI', () => {
     [
       'Sr. Staff Technical Program Manager, Core AI (Mountain View, CA | New York, NY) | LinkedIn | LinkedIn',
       'Sr. Staff Technical Program Manager, Core AI (Mountain View, CA | New York, NY)',
-      null,
+      'LinkedIn',
     ],
+    ['Jobs | LinkedIn', 'Jobs', null],
     ['Careers page', 'Careers page', null],
     [
       'Product Owner, Expert job in Oakland, California, United States at ZipRecruiter | Ziprecruiter',
