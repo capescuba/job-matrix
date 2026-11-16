@@ -71,8 +71,17 @@ export function readPage(selectors) {
       '.jobs-unified-top-card__primary-description',
     );
     // LinkedIn's newer jobs pages have scrambled class names. A few hooks remain in the details
-    // column: "About the job" under a componentkey, a "Company, X." label, and a link to the job.
-    const about = document.querySelector('[componentkey^="JobDetails_AboutTheJob_"]');
+    // column: "About the job" (under a componentkey, or since Nov 2026 a bare heading), a
+    // "Company, X." label, and a link to the job.
+    let about = document.querySelector('[componentkey^="JobDetails_AboutTheJob_"]');
+    if (!about) {
+      // The heading's widest wrapper that is still the section: its text starts "About the job".
+      const heading = [...document.querySelectorAll('h2, h3')].find((h) =>
+        /^\s*about the job\s*$/i.test(text(h)),
+      );
+      for (let el = heading; el && /^\s*about the job/i.test(text(el)); el = el.parentElement)
+        about = el;
+    }
     const details = about?.closest('[data-testid="lazy-column"]') ?? about?.parentElement;
     if (details) {
       const titleLink = [...details.querySelectorAll('a')].find(

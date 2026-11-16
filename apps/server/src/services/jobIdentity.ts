@@ -54,7 +54,9 @@ export function parsePageTitle(pageTitle: string | null | undefined): {
   if (m) return { title: m[1].trim(), company: m[2].trim() };
   m = t.match(/^(.+?)\s+[|–—-]\s+(.+?)\s+(?:Careers?|Jobs)$/i); // "TPM - Walmart Careers"
   if (m) return { title: m[1].trim(), company: m[2].trim() };
-  // LinkedIn sometimes says it twice: "TPM | LinkedIn | LinkedIn".
+  // LinkedIn's titles are "Title | Company | LinkedIn", so twice means LinkedIn's own job.
+  m = t.match(/^(.+?)\s+\|\s+LinkedIn\s+\|\s+LinkedIn$/i);
+  if (m) return { title: m[1].trim(), company: 'LinkedIn' };
   while (SITE_SUFFIX.test(t)) t = t.replace(SITE_SUFFIX, '').trim();
   m = t.match(/^(.+?) jobs? in .+? at (.+)$/i); // ZipRecruiter: "TPM job in Oakland, California at Acme"
   if (m) return { title: m[1].trim(), company: m[2].trim() };
