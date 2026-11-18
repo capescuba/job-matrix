@@ -2,7 +2,32 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ACTIVITY_KINDS, STATUSES, type ActivityKind, type Status } from '@jm/shared';
 import { api, type ApplicationDetail } from '../api.ts';
+import { ReadEmailButton } from './EmailReader.tsx';
 import { Button, Card, ErrorText, Input, Select, cx } from './ui.tsx';
+
+/** An Outlook on the web link in a note (recruiter-email activities end with one). */
+const OUTLOOK_LINK =
+  /https:\/\/outlook\.(?:live|office|office365)\.com\/[^\s]+|https:\/\/outlook\.cloud\.microsoft\/[^\s]+/g;
+
+/** A note's text, with any Outlook link shown as "Read email" (opens it here) instead. */
+function Summary({ text }: { text: string }) {
+  const parts = text.split(OUTLOOK_LINK);
+  const links = text.match(OUTLOOK_LINK) ?? [];
+  return (
+    <>
+      {parts.map((p, i) => (
+        <span key={i}>
+          {links[i] ? p.replace(/\s*·\s*$/, ' · ') : p}
+          {links[i] && (
+            <ReadEmailButton link={links[i]} className="text-accent hover:underline">
+              Read email
+            </ReadEmailButton>
+          )}
+        </span>
+      ))}
+    </>
+  );
+}
 
 const kindTone: Record<ActivityKind, string> = {
   Applied: 'text-accent',
@@ -146,7 +171,12 @@ export function ActivityLog({
                 {e.type === 'activity' ? (
                   <>
                     <span className={cx('font-medium', kindTone[e.kind])}>{e.kind}</span>
-                    {e.summary && <span className="text-ink-2"> · {e.summary}</span>}
+                    {e.summary && (
+                      <span className="text-ink-2">
+                        {' · '}
+                        <Summary text={e.summary} />
+                      </span>
+                    )}
                   </>
                 ) : (
                   <span className="text-ink-3">

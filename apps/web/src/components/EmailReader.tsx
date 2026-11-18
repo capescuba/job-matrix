@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type MailReading } from '../api.ts';
 import { Button, ErrorText } from './ui.tsx';
@@ -31,24 +31,30 @@ function emailDoc(html: string, images: boolean) {
 </head><body>${html}</body></html>`;
 }
 
+/** The email an Outlook link names, read in a drawer on the right. */
 export function EmailReader({
-  updateId,
+  link,
   subject,
-  webLink,
   onClose,
 }: {
-  updateId: number;
-  subject: string;
-  webLink: string | null;
+  link: string;
+  /** Shown while the email loads. */
+  subject?: string | null;
   onClose: () => void;
 }) {
   const [images, setImages] = useState(false);
+  const queryClient = useQueryClient();
   const { data, error, isLoading } = useQuery({
-    queryKey: ['email-update-email', updateId],
-    queryFn: () => api.emailUpdateEmail(updateId),
+    queryKey: ['email', link],
+    queryFn: () => api.readEmail(link),
     staleTime: 5 * 60_000,
     retry: false,
   });
+  // Found again after Outlook moved it: the pages behind still hold its old link.
+  const moved = !!data?.webLink && data.webLink !== link;
+  useEffect(() => {
+    if (moved) void queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'email' });
+  }, [moved, queryClient]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -57,7 +63,7 @@ export function EmailReader({
 
   const html = data?.body.type === 'html' ? data.body.content : null;
   const hasRemote = useMemo(() => (html ? REMOTE.test(html) : false), [html]);
-  const link = data?.webLink ?? webLink;
+  const outlook = data?.webLink ?? link;
 
   // A portal: the drawer sits on the page, not inside the card that opened it.
   return createPortal(
@@ -103,9 +109,9 @@ export function EmailReader({
                 {images ? 'Hide web images' : 'Show web images'}
               </button>
             )}
-            {link && (
+            {outlook && (
               <a
-                href={link}
+                href={outlook}
                 target="_blank"
                 rel="noreferrer"
                 className="text-ink-3 hover:text-accent"
@@ -146,5 +152,34 @@ export function EmailReader({
       </aside>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * A link-style button that opens the email in the reader: for the Outlook links on the Email,
+ * Screening and job pages.
+ */
+export function ReadEmailButton({
+  link,
+  subject,
+  children = 'Read email',
+  className = 'text-ink-3 hover:text-accent',
+  title,
+}: {
+  link: string;
+  subject?: string | null;
+  children?: ReactNode;
+  className?: string;
+  title?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <>
+      <button type="button" className={className} title={title} onClick={() => setOpen(true)}>
+        {children}
+      </button>
+      {open && <EmailReader link={link} subject={subject} onClose={close} />}
+    </>
   );
 }

@@ -17,6 +17,7 @@ import { InterviewSessions } from '../components/InterviewSessions.tsx';
 import { ApplicationAnswers } from '../components/ApplicationAnswers.tsx';
 import { CompanyAliases } from '../components/CompanyAliases.tsx';
 import { CompanyInsights } from '../components/CompanyInsights.tsx';
+import { ReadEmailButton } from '../components/EmailReader.tsx';
 import { useDecisionData } from '../components/Decision.tsx';
 import { FitDetails, FitSummary, InterviewPrep } from '../components/FitPanel.tsx';
 import { Button, Card, ErrorText, Field, Input, Select, Textarea, cx } from '../components/ui.tsx';
@@ -103,14 +104,9 @@ function Detail({ data }: { data: ApplicationDetail }) {
             </a>
           )}
           {data.emailLink && (
-            <a
-              href={data.emailLink}
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent hover:underline"
-            >
-              Open recruiter email ↗
-            </a>
+            <ReadEmailButton link={data.emailLink} className="text-accent hover:underline">
+              Read recruiter email
+            </ReadEmailButton>
           )}
           {posted && (
             <span
