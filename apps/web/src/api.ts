@@ -34,7 +34,7 @@ import type { listAnswers } from '../../server/src/services/extension.ts';
 import type { EmailUpdateRow } from '../../server/src/services/mail/updates.ts';
 import type { EmailKind } from '../../server/src/services/mail/rules.ts';
 import type { LogEntry, listLogs } from '../../server/src/services/logs.ts';
-import type { MailStatus as MailConnection } from '@jm/mail';
+import type { MailReading, MailStatus as MailConnection } from '@jm/mail';
 import type { CrawlProgress, SearchProgress } from '../../server/src/services/crawl/run.ts';
 import type { LeadRow, SearchRow, SourceRow } from '../../server/src/services/crawl/watchlist.ts';
 
@@ -82,7 +82,7 @@ export interface CrawlStatus {
 }
 
 export type Settings = ReturnType<typeof getSettings>;
-export type { EmailKind, EmailUpdateRow, LogEntry };
+export type { EmailKind, EmailUpdateRow, LogEntry, MailReading };
 export type LogFile = ReturnType<typeof listLogs>[number];
 export interface MailStatus extends MailConnection {
   enabled: boolean;
@@ -343,6 +343,7 @@ export const api = {
       rememberAlias?: string | null;
     } = {},
   ) => request('POST', `/api/email-updates/${id}/apply`, body),
+  emailUpdateEmail: (id: number) => request<MailReading>('GET', `/api/email-updates/${id}/email`),
   dismissEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/dismiss`),
   restoreEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/restore`),
   relabelEmailUpdate: (

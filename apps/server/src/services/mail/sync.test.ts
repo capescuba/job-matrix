@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { LLMProvider, StructuredRequest } from '@jm/ai';
-import type { MailClient, MailMeta } from '@jm/mail';
+import { GraphError, type MailClient, type MailMeta } from '@jm/mail';
 import { openDb, type Db } from '../../db/client.ts';
 import { activities, aiUsage, applications, emailUpdates, statusEvents } from '../../db/schema.ts';
 import { createApplication, getApplicationDetail } from '../applications.ts';
@@ -19,6 +19,7 @@ import {
   classifyWithAi,
   dismissUpdate,
   listUpdates,
+  readUpdateEmail,
   relabelUpdate,
   restoreUpdate,
   trackFromUpdate,
@@ -372,6 +373,44 @@ describe('the review queue', () => {
     restoreUpdate(db, u.id);
     const r = relabelUpdate(db, u.id, { kind: 'rejection' });
     expect(r).toMatchObject({ kind: 'rejection', suggestedStatus: 'Rejected', applicationId: dd });
+  });
+
+  it('reads the whole email, finding it again after Outlook moved it (a new id)', async () => {
+    const u = pendingFor('dd-reject');
+    const read: string[] = [];
+    const moved = mail('dd-reject-moved', u.receivedAt, u.subject, '');
+    const reader = {
+      async messageForReading(id: string) {
+        read.push(id);
+        if (id !== moved.id) throw new GraphError(404, 'Outlook error 404');
+        return {
+          ...moved,
+          to: [],
+          cc: [],
+          body: { type: 'html', content: '<p>x</p>' },
+          attachments: [],
+        };
+      },
+      async *messagesSince(since: string) {
+        expect(since).toBe(u.receivedAt);
+        yield [mail('other', u.receivedAt, 'Something else', ''), moved];
+      },
+    } as unknown as MailClient;
+    const r = await readUpdateEmail(db, reader, u.id);
+    expect(r.body.content).toBe('<p>x</p>');
+    expect(read).toEqual(['dd-reject', 'dd-reject-moved']);
+    const row = db.select().from(emailUpdates).where(eq(emailUpdates.id, u.id)).get()!;
+    expect(row).toMatchObject({ messageId: 'dd-reject-moved', webLink: moved.webLink });
+
+    const gone = {
+      messageForReading: async () => {
+        throw new GraphError(404, 'Outlook error 404');
+      },
+      async *messagesSince() {
+        yield [];
+      },
+    } as unknown as MailClient;
+    await expect(readUpdateEmail(db, gone, u.id)).rejects.toThrow(/no longer in your mailbox/);
   });
 
   it('Ask AI: one call on the email model, recorded under Email updates', async () => {

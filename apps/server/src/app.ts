@@ -118,6 +118,7 @@ import {
   classifyWithAi,
   dismissUpdate,
   listUpdates,
+  readUpdateEmail,
   relabelSchema,
   relabelUpdate,
   restoreUpdate,
@@ -943,6 +944,9 @@ export function buildApp(
   );
   app.post('/api/email-updates/:id/track', (req) =>
     trackFromUpdate(db, idParam.parse(req.params).id, trackSchema.parse(req.body)),
+  );
+  app.get('/api/email-updates/:id/email', (req) =>
+    readUpdateEmail(db, mail, idParam.parse(req.params).id),
   );
   app.post('/api/email-updates/:id/classify', (req) =>
     classifyWithAi(db, mail, idParam.parse(req.params).id),

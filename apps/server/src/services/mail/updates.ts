@@ -2,7 +2,7 @@
 import { desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProvider, type LLMProvider } from '@jm/ai';
-import type { MailClient } from '@jm/mail';
+import { GraphError, type MailClient, type MailReading } from '@jm/mail';
 import { STATUSES, estimateCostUsd, type Status } from '@jm/shared';
 import type { Db } from '../../db/client.ts';
 import { aiUsage, applications, companies, emailUpdates, jobs } from '../../db/schema.ts';
@@ -387,6 +387,38 @@ export const emailAiSchema = z.object({
   evidence: z.string().nullable().describe('The sentence that shows the kind'),
   nextAction: z.string().nullable().describe('Short next step if the email asks for one'),
 });
+
+/**
+ * The whole email behind an update, for reading it in the app. Outlook gives an email a new id
+ * when it moves folders, so a stale id falls back to the email received at the same moment with
+ * the same subject, and the stored id and link are brought up to date.
+ */
+export async function readUpdateEmail(
+  db: Db,
+  client: MailClient,
+  id: number,
+): Promise<MailReading> {
+  const u = getUpdate(db, id);
+  try {
+    return await client.messageForReading(u.messageId);
+  } catch (e) {
+    if (!(e instanceof GraphError) || e.status !== 404) throw e;
+  }
+  let found: string | null = null;
+  for await (const page of client.messagesSince(u.receivedAt, 25)) {
+    const hit = page.find((m) => m.receivedAt === u.receivedAt && m.subject === u.subject);
+    if (hit) found = hit.id;
+    break; // oldest first from that moment: the first page is enough
+  }
+  if (!found)
+    throw new NotFoundError('This email is no longer in your mailbox (deleted, or moved to Sent).');
+  const msg = await client.messageForReading(found);
+  db.update(emailUpdates)
+    .set({ messageId: msg.id, webLink: msg.webLink })
+    .where(eq(emailUpdates.id, id))
+    .run();
+  return msg;
+}
 
 /** One cheap AI read of an unclear email; the cost is recorded under "Email updates". */
 export async function classifyWithAi(

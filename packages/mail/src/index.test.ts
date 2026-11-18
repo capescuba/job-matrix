@@ -167,6 +167,51 @@ describe('mail client reading', () => {
     );
   });
 
+  it('reads an HTML body for the reader, with inline images as data: URLs', async () => {
+    const dir = await tmp();
+    await signedIn(dir);
+    const fetchFn = fakeFetch((u) => {
+      if (u.pathname.endsWith('/attachments'))
+        return {
+          value: [
+            { id: 'logo', name: 'logo.png', contentType: 'image/png', size: 10, isInline: true },
+            { id: 'cv', name: 'Offer.pdf', contentType: 'application/pdf', size: 2048 },
+          ],
+        };
+      if (u.pathname.endsWith('/attachments/logo'))
+        return { id: 'logo', contentId: '<img1@x>', contentBytes: 'QUJD' };
+      return {
+        ...msg('m1', 'INBOX', '2026-09-01T00:00:00Z'),
+        toRecipients: [{ emailAddress: { name: 'Me', address: 'Me@x.com' } }],
+        hasAttachments: true,
+        body: { contentType: 'html', content: '<p>Hi</p><img src="cid:img1@x">' },
+      };
+    });
+    const c = createMailClient({ dir, clientId: 'app', fetchFn });
+    const r = await c.messageForReading('m1');
+    expect(r.body).toEqual({
+      type: 'html',
+      content: '<p>Hi</p><img src="data:image/png;base64,QUJD">',
+    });
+    expect(r.to).toEqual([{ name: 'Me', address: 'me@x.com' }]);
+    expect(r.attachments).toEqual([{ name: 'Offer.pdf', size: 2048 }]);
+    // HTML, not the plain-text Prefer header; the PDF's bytes are never fetched.
+    expect((fetchFn.calls[0]!.init!.headers as Record<string, string>).Prefer).toBeUndefined();
+    expect(fetchFn.calls.some((c) => c.url.pathname.endsWith('/attachments/cv'))).toBe(false);
+  });
+
+  it('reads a plain-text body for the reader without listing attachments', async () => {
+    const dir = await tmp();
+    await signedIn(dir);
+    const fetchFn = fakeFetch(() => ({
+      ...msg('m1', 'INBOX', '2026-09-01T00:00:00Z'),
+      body: { contentType: 'text', content: 'Hello' },
+    }));
+    const c = createMailClient({ dir, clientId: 'app', fetchFn });
+    expect((await c.messageForReading('m1')).body).toEqual({ type: 'text', content: 'Hello' });
+    expect(fetchFn.calls).toHaveLength(1);
+  });
+
   it('finds a folder by name at the top level, else inside the Inbox, and remembers it', async () => {
     const dir = await tmp();
     await signedIn(dir);
