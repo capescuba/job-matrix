@@ -109,6 +109,11 @@ describe('normalizeUrl', () => {
       'https://www.tesla.com/en_GB/careers/search/job/284122?source=x',
       'https://www.tesla.com/careers/search/job/284122',
     ],
+    // MyGreenhouse's own address for a job is its posting on the company's board.
+    [
+      'https://my.greenhouse.io/jobs/agilityrobotics/6239021004?query=Technical+Program+Manager&lat=37.7',
+      'https://job-boards.greenhouse.io/agilityrobotics/jobs/6239021004',
+    ],
   ])('%s', (input, expected) => expect(normalizeUrl(input)).toBe(expected));
 });
 
