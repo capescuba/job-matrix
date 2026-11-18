@@ -60,6 +60,16 @@ export interface MailMessage extends MailMeta {
   bodyText: string;
 }
 
+/** One email as Outlook shows it: its formatted body, recipients and attachments. */
+export interface MailReading extends MailMeta {
+  to: MailAddress[];
+  cc: MailAddress[];
+  /** HTML with inline images already turned into data: URLs, or plain text. */
+  body: { type: 'html' | 'text'; content: string };
+  /** Attachments to download in Outlook (not the images shown inside the email). */
+  attachments: { name: string; size: number }[];
+}
+
 export interface SignInCode {
   userCode: string;
   verificationUri: string;
@@ -97,8 +107,24 @@ type GraphMessage = {
   webLink?: string;
   conversationId?: string;
   internetMessageId?: string;
-  body?: { content?: string };
+  body?: { content?: string; contentType?: string };
+  toRecipients?: GraphAddress[];
+  ccRecipients?: GraphAddress[];
+  hasAttachments?: boolean;
 };
+
+type GraphAttachment = {
+  id: string;
+  name?: string | null;
+  contentType?: string | null;
+  size?: number;
+  isInline?: boolean;
+  contentId?: string | null;
+  contentBytes?: string | null;
+};
+
+/** Inline images over this size stay out of the reader (they'd bloat the page). */
+const INLINE_IMAGE_MAX = 2_000_000;
 
 export function defaultMailDir() {
   return process.env.EMAIL_MCP_DIR || path.join(os.homedir(), '.email-mcp');
@@ -440,6 +466,52 @@ export function createMailClient(opts: MailClientOptions = {}) {
     return { ...toMeta(m), bodyText: (m.body?.content ?? '').trim() };
   }
 
+  /**
+   * One message for reading in the app: its HTML body with the images Outlook shows inside it
+   * (cid: references) swapped for data: URLs, and the names of its other attachments.
+   */
+  async function messageForReading(id: string): Promise<MailReading> {
+    const base = `/me/messages/${encodeURIComponent(id)}`;
+    const m = await get<GraphMessage>(
+      `${base}?$select=${META_FIELDS},body,toRecipients,ccRecipients,hasAttachments`,
+    );
+    let content = m.body?.content ?? '';
+    const type = m.body?.contentType?.toLowerCase() === 'html' ? 'html' : 'text';
+    const attachments: MailReading['attachments'] = [];
+    // hasAttachments is false when the only attachments are inline images, so look whenever
+    // the HTML refers to one.
+    if (m.hasAttachments || (type === 'html' && /cid:/i.test(content))) {
+      const list = await get<{ value: GraphAttachment[] }>(
+        `${base}/attachments?$select=id,name,contentType,size,isInline`,
+      );
+      for (const a of list.value) {
+        const image = a.contentType?.toLowerCase().startsWith('image/');
+        const refersToCid = type === 'html' && /cid:/i.test(content);
+        if (image && refersToCid && (a.size ?? 0) <= INLINE_IMAGE_MAX) {
+          // contentId and contentBytes come only with the single attachment.
+          const full = await get<GraphAttachment>(
+            `${base}/attachments/${encodeURIComponent(a.id)}`,
+          );
+          const cid = full.contentId?.replace(/^<|>$/g, '');
+          if (cid && full.contentBytes && content.includes(`cid:${cid}`)) {
+            content = content
+              .split(`cid:${cid}`)
+              .join(`data:${a.contentType};base64,${full.contentBytes}`);
+            continue;
+          }
+        }
+        if (!a.isInline) attachments.push({ name: a.name ?? 'attachment', size: a.size ?? 0 });
+      }
+    }
+    return {
+      ...toMeta(m),
+      to: (m.toRecipients ?? []).map(address),
+      cc: (m.ccRecipients ?? []).map(address),
+      body: { type, content },
+      attachments,
+    };
+  }
+
   return {
     accessToken,
     startSignIn,
@@ -449,6 +521,7 @@ export function createMailClient(opts: MailClientOptions = {}) {
     messagesIn,
     messagesInConversation,
     message,
+    messageForReading,
     tokenPath,
   };
 }
