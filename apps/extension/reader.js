@@ -580,3 +580,31 @@ export function startPicker(field) {
   document.addEventListener('keydown', key, true);
   window.__jmPicker = { stop };
 }
+
+/**
+ * Tells the side panel when the job on show changes but the address and title don't:
+ * MyGreenhouse opens each job in a pop-up over the search results. Watches what `selector`
+ * finds (its link address, else its text) and sends "jm-job-changed" when that appears, changes
+ * or goes. Once per page load.
+ */
+export function watchJob(selector) {
+  if (window.__jmWatchJob) return;
+  window.__jmWatchJob = true;
+  const key = () => {
+    const el = document.querySelector(selector);
+    return el ? el.href || (el.textContent ?? '').trim() : '';
+  };
+  let last = key();
+  let timer = null;
+  new MutationObserver(() => {
+    if (timer) return; // at most one look per 300 ms, however busy the page is
+    timer = setTimeout(() => {
+      timer = null;
+      const now = key();
+      if (now === last) return;
+      last = now;
+      // Rejected when the panel is closed: nothing to tell.
+      chrome.runtime.sendMessage({ type: 'jm-job-changed' }).catch(() => {});
+    }, 300);
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+}
