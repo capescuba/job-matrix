@@ -360,6 +360,32 @@ function linkedinProfileSection() {
   </section>`;
 }
 
+// ---------- your LinkedIn address, for application forms ----------
+
+/** Kept from the last read, so a click copies at once (the clipboard needs the click's moment). */
+let myLinkedIn;
+
+async function loadMyLinkedIn() {
+  myLinkedIn = (await api('/api/linkedin')).url ?? null;
+  return myLinkedIn;
+}
+
+async function copyMyLinkedIn(button) {
+  try {
+    const url = myLinkedIn ?? (await loadMyLinkedIn());
+    if (!url) {
+      status('No LinkedIn address saved yet: add it on Job Matrix’s Profile page.');
+      return;
+    }
+    await navigator.clipboard.writeText(url);
+    button.textContent = 'Copied ✓';
+    setTimeout(() => (button.textContent = 'LinkedIn URL'), 1500);
+    loadMyLinkedIn().catch(() => {}); // picks up a change made on the Profile page since
+  } catch (e) {
+    status(`Couldn’t copy your LinkedIn address: ${e.message || e}`);
+  }
+}
+
 async function importMyLinkedIn() {
   state.busy = 'linkedin';
   state.notice = null;
@@ -1010,6 +1036,7 @@ document.addEventListener('click', async (e) => {
   } else if (a === 'score-fit') scoreFit(Number(el.dataset.id));
   else if (a === 'mark-applied') markApplied();
   else if (a === 'import-linkedin') importMyLinkedIn();
+  else if (a === 'copy-linkedin') copyMyLinkedIn(el);
   else if (a === 'pass') {
     state.passing = true;
     render();
@@ -1120,4 +1147,5 @@ chrome.storage.session.onChanged.addListener((changes) => {
   render();
 });
 
+loadMyLinkedIn().catch(() => {}); // a click loads it if Job Matrix isn't up yet
 refresh();
