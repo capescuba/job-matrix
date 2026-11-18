@@ -103,3 +103,35 @@ describe('what the panel sends for a Tesla job opened from search', () => {
     expect(body.templateName).toBe('Built-in Tesla');
   });
 });
+
+describe('what the panel sends for a MyGreenhouse job open over the search results', () => {
+  // The tab is the search; the job is in a pop-up that links to the company's board.
+  const page = {
+    url: 'https://job-boards.greenhouse.io/formic/jobs/4730086006',
+    pageTitle: 'MyGreenhouse',
+    jsonLd: [],
+    pageText: 'Jobs that match your search\nTechnical Program Manager\nFormic…',
+    siteFields: {
+      site: 'MyGreenhouse',
+      url: 'https://job-boards.greenhouse.io/formic/jobs/4730086006',
+      title: 'Technical Program Manager',
+      company: 'Formic',
+      location: 'Hybrid · Oakland, CA · San Francisco, CA',
+      salaryText: '$135,000 - $175,000',
+      descriptionText: 'Who we are:\n\nFormic is on a mission to reshape American manufacturing…',
+    },
+  };
+
+  it('sends the board address and the pop-up’s job, not "MyGreenhouse"', () => {
+    expect(contextBody(page)).toMatchObject({
+      url: 'https://job-boards.greenhouse.io/formic/jobs/4730086006',
+      fields: { title: 'Technical Program Manager', company: 'Formic' },
+    });
+    const body = captureBody(page, null);
+    expect(body.fields).toMatchObject({
+      location: 'Hybrid · Oakland, CA · San Francisco, CA',
+      salaryText: '$135,000 - $175,000',
+    });
+    expect(body.templateName).toBe('Built-in MyGreenhouse');
+  });
+});

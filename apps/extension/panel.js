@@ -2,7 +2,7 @@
 import { api, openInApp } from './api.js';
 import { captureBody, contextBody, readTab } from './capture.js';
 import { looksLikeJob } from './jobpage.js';
-import { fillField, readFields, startPicker } from './reader.js';
+import { fillField, readFields, startPicker, watchJob } from './reader.js';
 import { connectLive, isRunning, renderLive, toggleStream } from './live.js';
 import { RUN_KEY } from './search.js';
 
@@ -191,7 +191,11 @@ async function refresh() {
   if (mine !== seq) return;
   followZoom(tab?.id);
   // Same page as before (e.g. the panel just got focus back): keep drafts, teaching and notices.
-  const samePage = !!tab && state.tab?.id === tab.id && state.tab?.url === tab.url;
+  // Not when the page said another job is on show at the same address (MyGreenhouse's pop-up).
+  const jobChanged = state.jobChanged;
+  state.jobChanged = false;
+  const samePage =
+    !jobChanged && !!tab && state.tab?.id === tab.id && state.tab?.url === tab.url;
   Object.assign(state, {
     tab: tab ? { id: tab.id, url: tab.url } : null,
     error: null,
@@ -212,6 +216,7 @@ async function refresh() {
   try {
     const { page, template } = await readTab(tab.id, tab.url, status);
     if (mine !== seq) return;
+    watchTab(tab);
     const ctx = await api('/api/ext/context', {
       method: 'POST',
       body: contextBody(page),
@@ -225,7 +230,7 @@ async function refresh() {
     // pane, so the first read of a job can see the one before it (Character.ai's title and
     // company under a Tiger Analytics posting), and a later read has to be able to replace it.
     // A field you emptied takes what the page says.
-    const same = state.editsUrl === tab.url;
+    const same = !jobChanged && state.editsUrl === tab.url;
     const kept = same ? state.edits : {};
     const typed = same ? state.typed : {};
     Object.assign(state, {
@@ -246,6 +251,22 @@ async function refresh() {
   }
   status('');
   render();
+}
+
+/** Sites that show another job without changing the address or title: what names the job. */
+const JOB_WATCH = [
+  // MyGreenhouse: the pop-up's title links to the posting on the company's board.
+  [/(^|\.)my\.greenhouse\.io$/, '[role="dialog"] a:has(> h2.application-form-header--title)'],
+];
+
+/** On those sites, asks the page to say when the job changes ("jm-job-changed"). */
+function watchTab(tab) {
+  const host = new URL(tab.url).hostname;
+  const selector = JOB_WATCH.find(([re]) => re.test(host))?.[1];
+  if (!selector) return;
+  chrome.scripting
+    .executeScript({ target: { tabId: tab.id }, func: watchJob, args: [selector] })
+    .catch(() => {}); // the page went away: the next read tries again
 }
 
 // ---------- rendering ----------
@@ -1083,6 +1104,13 @@ document.addEventListener('input', (e) => {
   }
   if (t.dataset.draft && state.drafts[t.dataset.draft])
     state.drafts[t.dataset.draft].text = t.value;
+});
+
+// Another job on show at the same address: read it as a new page.
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg?.type !== 'jm-job-changed' || sender.tab?.id !== state.tab?.id) return;
+  state.jobChanged = true;
+  soon();
 });
 
 chrome.runtime.onMessage.addListener((msg) => {
