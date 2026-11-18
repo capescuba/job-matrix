@@ -3,7 +3,14 @@ import { eq } from 'drizzle-orm';
 import type { LLMProvider, StructuredRequest } from '@jm/ai';
 import { GraphError, type MailClient, type MailMeta } from '@jm/mail';
 import { openDb, type Db } from '../../db/client.ts';
-import { activities, aiUsage, applications, emailUpdates, statusEvents } from '../../db/schema.ts';
+import {
+  activities,
+  aiUsage,
+  applications,
+  emailUpdates,
+  mailLeads,
+  statusEvents,
+} from '../../db/schema.ts';
 import { createApplication, getApplicationDetail } from '../applications.ts';
 import {
   historyStart,
@@ -19,11 +26,11 @@ import {
   classifyWithAi,
   dismissUpdate,
   listUpdates,
-  readUpdateEmail,
   relabelUpdate,
   restoreUpdate,
   trackFromUpdate,
 } from './updates.ts';
+import { readEmail } from './reader.ts';
 
 type Mail = MailMeta & { body: string };
 const mail = (
@@ -396,9 +403,10 @@ describe('the review queue', () => {
         yield [mail('other', u.receivedAt, 'Something else', ''), moved];
       },
     } as unknown as MailClient;
-    const r = await readUpdateEmail(db, reader, u.id);
+    const r = await readEmail(db, reader, u.webLink!);
     expect(r.body.content).toBe('<p>x</p>');
-    expect(read).toEqual(['dd-reject', 'dd-reject-moved']);
+    // Both spellings of the old id (Graph's, then Outlook's), then the email found again.
+    expect(read).toEqual(['dd-reject', 'dd/reject', 'dd-reject-moved']);
     const row = db.select().from(emailUpdates).where(eq(emailUpdates.id, u.id)).get()!;
     expect(row).toMatchObject({ messageId: 'dd-reject-moved', webLink: moved.webLink });
 
@@ -410,7 +418,46 @@ describe('the review queue', () => {
         yield [];
       },
     } as unknown as MailClient;
-    await expect(readUpdateEmail(db, gone, u.id)).rejects.toThrow(/no longer in your mailbox/);
+    await expect(readEmail(db, gone, moved.webLink!)).rejects.toThrow(/no longer in your mailbox/);
+    await expect(readEmail(db, gone, 'https://example.com/x')).rejects.toThrow(/isn’t a link/);
+  });
+
+  it('reads a job lead’s email after it moved, matching its Message-ID header', async () => {
+    db.insert(mailLeads)
+      .values({
+        internetMessageId: '<lead@x>',
+        messageId: 'lead-old',
+        receivedAt: '2026-09-20T09:00:00Z',
+        subject: 'TPM role',
+        webLink: 'https://outlook.live.com/owa/?ItemID=lead-old',
+      })
+      .run();
+    const same = (id: string, header: string) => ({
+      ...mail(id, '2026-09-20T09:00:00Z', 'TPM role', ''),
+      internetMessageId: header,
+    });
+    const reader = {
+      async messageForReading(id: string) {
+        if (id !== 'lead-new') throw new GraphError(404, 'Outlook error 404');
+        return {
+          ...same('lead-new', '<lead@x>'),
+          to: [],
+          cc: [],
+          body: { type: 'text', content: 'hi' },
+          attachments: [],
+        };
+      },
+      async *messagesSince() {
+        // Another email with the same time and subject, but not the same email.
+        yield [same('twin', '<twin@x>'), same('lead-new', '<lead@x>')];
+      },
+    } as unknown as MailClient;
+    const r = await readEmail(db, reader, 'https://outlook.live.com/owa/?ItemID=lead-old');
+    expect(r.id).toBe('lead-new');
+    expect(db.select().from(mailLeads).get()).toMatchObject({
+      messageId: 'lead-new',
+      webLink: 'https://outlook.live.com/owa/?ItemID=lead-new',
+    });
   });
 
   it('Ask AI: one call on the email model, recorded under Email updates', async () => {

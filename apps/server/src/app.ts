@@ -118,7 +118,6 @@ import {
   classifyWithAi,
   dismissUpdate,
   listUpdates,
-  readUpdateEmail,
   relabelSchema,
   relabelUpdate,
   restoreUpdate,
@@ -126,6 +125,7 @@ import {
   trackSchema,
 } from './services/mail/updates.ts';
 import { addEmailLead } from './services/mail/outlookPage.ts';
+import { readEmail } from './services/mail/reader.ts';
 import {
   addLead,
   crawlProgress,
@@ -945,9 +945,11 @@ export function buildApp(
   app.post('/api/email-updates/:id/track', (req) =>
     trackFromUpdate(db, idParam.parse(req.params).id, trackSchema.parse(req.body)),
   );
-  app.get('/api/email-updates/:id/email', (req) =>
-    readUpdateEmail(db, mail, idParam.parse(req.params).id),
-  );
+  // Any email by its Outlook link, for reading it in the app (Email, Screening, job pages).
+  app.get('/api/mail/email', (req) => {
+    const { link } = z.object({ link: z.string().url().max(4000) }).parse(req.query);
+    return readEmail(db, mail, link);
+  });
   app.post('/api/email-updates/:id/classify', (req) =>
     classifyWithAi(db, mail, idParam.parse(req.params).id),
   );

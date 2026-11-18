@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { STATUSES, type Status } from '@jm/shared';
 import { api, type EmailKind, type EmailUpdateRow, type MailStatus } from '../api.ts';
 import { StatusBadge } from '../components/badges.tsx';
-import { EmailReader } from '../components/EmailReader.tsx';
+import { ReadEmailButton } from '../components/EmailReader.tsx';
 import { Button, Card, ErrorText, Input, Select, cx } from '../components/ui.tsx';
 
 const KIND: Record<EmailKind, { label: string; tone: string }> = {
@@ -413,8 +413,6 @@ function KindChip({ kind }: { kind: string }) {
 
 function EmailHeader({ row, children }: { row: EmailUpdateRow; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const [reading, setReading] = useState(false);
-  const closeReader = useCallback(() => setReading(false), []);
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-2">
@@ -434,9 +432,7 @@ function EmailHeader({ row, children }: { row: EmailUpdateRow; children?: ReactN
             {open ? 'Hide email text' : 'Show email text'}
           </button>
         )}
-        <button className="text-ink-3 hover:text-accent" onClick={() => setReading(true)}>
-          Read email
-        </button>
+        {row.webLink && <ReadEmailButton link={row.webLink} subject={row.subject} />}
         {row.webLink && (
           <a
             href={row.webLink}
@@ -453,14 +449,6 @@ function EmailHeader({ row, children }: { row: EmailUpdateRow; children?: ReactN
         <p className="rounded-md bg-surface-2 p-2 text-xs whitespace-pre-wrap text-ink-2">
           {row.excerpt}…
         </p>
-      )}
-      {reading && (
-        <EmailReader
-          updateId={row.id}
-          subject={row.subject}
-          webLink={row.webLink}
-          onClose={closeReader}
-        />
       )}
     </div>
   );

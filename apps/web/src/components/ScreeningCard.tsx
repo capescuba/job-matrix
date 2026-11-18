@@ -6,6 +6,7 @@ import { api, type ApplicationRow } from '../api.ts';
 import { useAiRuns } from '../aiActivity.ts';
 import { formatScore, postedOf } from './badges.tsx';
 import { CompanyInsights } from './CompanyInsights.tsx';
+import { ReadEmailButton } from './EmailReader.tsx';
 import { DecisionBody, Verdict, useDecisionData } from './Decision.tsx';
 import { AgencyChip, EndClient } from './EndClient.tsx';
 import { LiveRun } from './LiveRun.tsx';
@@ -306,15 +307,13 @@ function JobLinks({ row: r }: { row: ApplicationRow }) {
         </a>
       )}
       {r.emailLink && (
-        <a
-          href={r.emailLink}
-          target="_blank"
-          rel="noreferrer"
+        <ReadEmailButton
+          link={r.emailLink}
           className="text-accent hover:underline"
-          title="The recruiter's email, in Outlook"
+          title="Read the recruiter's email here"
         >
-          email ↗
-        </a>
+          email
+        </ReadEmailButton>
       )}
       <Link to={`/applications/${r.id}`} className="text-accent hover:underline">
         job page

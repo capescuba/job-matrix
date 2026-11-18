@@ -343,7 +343,8 @@ export const api = {
       rememberAlias?: string | null;
     } = {},
   ) => request('POST', `/api/email-updates/${id}/apply`, body),
-  emailUpdateEmail: (id: number) => request<MailReading>('GET', `/api/email-updates/${id}/email`),
+  readEmail: (link: string) =>
+    request<MailReading>('GET', `/api/mail/email?link=${encodeURIComponent(link)}`),
   dismissEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/dismiss`),
   restoreEmailUpdate: (id: number) => request('POST', `/api/email-updates/${id}/restore`),
   relabelEmailUpdate: (

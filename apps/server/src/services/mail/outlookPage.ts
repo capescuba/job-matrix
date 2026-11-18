@@ -39,7 +39,7 @@ export function outlookMessageId(url: string): string | null {
  * The same id as Graph spells it (URL-safe base64: "-" and "_") first, then as Outlook's
  * deep links do ("/" and "+").
  */
-const spellings = (id: string) => [
+export const spellings = (id: string) => [
   ...new Set([
     id.replace(/\//g, '-').replace(/\+/g, '_'),
     id,
