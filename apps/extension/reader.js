@@ -231,6 +231,52 @@ export function readPage(selectors) {
     };
   }
 
+  // MyGreenhouse (my.greenhouse.io): a job opens in a pop-up over the search results, the tab
+  // title is always "MyGreenhouse", and the address stays the search's (or /jobs/<board>/<id>,
+  // which isn't a board address). The pop-up links to the posting on the company's Greenhouse
+  // board, which Job Matrix reads by address; the page text is the search list behind it.
+  const ghTitle = /(^|\.)my\.greenhouse\.io$/.test(location.hostname)
+    ? document.querySelector('[role="dialog"] h2.application-form-header--title')
+    : null;
+  if (!siteFields && ghTitle && text(ghTitle)) {
+    const box = ghTitle.closest('[role="dialog"]');
+    const title = text(ghTitle).replace(/\s+/g, ' ');
+    const company =
+      text(box.querySelector('.application-form-header--company-name')).replace(/\s+/g, ' ') ||
+      null;
+    const board = [...box.querySelectorAll('a[href]')]
+      .map((a) => {
+        try {
+          return new URL(a.href);
+        } catch {
+          return null;
+        }
+      })
+      .find(
+        (u) =>
+          u &&
+          /(^|\.)greenhouse\.io$/.test(u.hostname) &&
+          u.hostname !== location.hostname &&
+          /^\/[^/]+\/jobs\/\d+/.test(u.pathname),
+      );
+    const desc = box.querySelector('.application-description');
+    // The header above the description: title, company, "Apply", work type, places, pay, "Posted".
+    const header = [...(desc?.parentElement?.children ?? [])].find((e) => e.contains(ghTitle));
+    const facts = text(header)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && l !== title && l !== company && !/^(apply|posted\b)/i.test(l));
+    siteFields = {
+      site: 'MyGreenhouse',
+      url: board ? `${board.origin}${board.pathname.match(/^\/[^/]+\/jobs\/\d+/)[0]}` : null,
+      title,
+      company,
+      location: facts.filter((l) => !/\$\s?\d/.test(l)).join(' · ') || null,
+      salaryText: facts.find((l) => /\$\s?\d/.test(l)) ?? null,
+      descriptionText: text(desc) || null,
+    };
+  }
+
   // Application-form questions: text areas, and long text inputs that ask something.
   const SKIP =
     /\b(name|e-?mail|phone|mobile|address|city|state|zip|postal|country|linkedin|github|website|portfolio|url|salary|compensation|pronoun|gender|race|ethnic|veteran|disability|date|school|degree|gpa|hispanic|latino|ethnicity|sponsorship|authori[sz]ed)\b/i;
