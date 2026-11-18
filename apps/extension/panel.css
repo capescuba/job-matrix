@@ -465,6 +465,11 @@ pre.stream.mono {
   border-left-color: var(--ink-2);
   background: color-mix(in srgb, var(--ink-2) 16%, transparent);
 }
+button.copy-linkedin {
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
 button.text-size {
   font-size: 0.8rem;
   font-weight: 600;
