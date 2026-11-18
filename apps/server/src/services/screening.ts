@@ -62,6 +62,9 @@ export function normalizeUrl(raw: string): string {
       /^(?:\/[a-z]{2}_[a-z]{2})?\/careers\/search\/job\/(?:apply\/)?(?:[^/]*-)?(\d+)\/?$/i,
     );
   if (tesla) return `https://www.tesla.com/careers/search/job/${tesla[1]}`;
+  // MyGreenhouse (my.greenhouse.io/jobs/<board>/<id>): the posting on <board>'s Greenhouse board.
+  const mine = host === 'my.greenhouse.io' && u.pathname.match(/^\/jobs\/([^/]+)\/(\d+)\/?$/);
+  if (mine) return `https://job-boards.greenhouse.io/${mine[1].toLowerCase()}/jobs/${mine[2]}`;
   if (host.endsWith('greenhouse.io')) {
     const embed = u.pathname.startsWith('/embed/')
       ? [u.searchParams.get('for'), u.searchParams.get('token')]

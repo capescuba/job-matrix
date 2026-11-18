@@ -233,8 +233,12 @@ export function readPage(selectors) {
 
   // MyGreenhouse (my.greenhouse.io): a job opens in a pop-up over the search results, the tab
   // title is always "MyGreenhouse", and the address stays the search's (or /jobs/<board>/<id>,
-  // which isn't a board address). The pop-up links to the posting on the company's Greenhouse
-  // board, which Job Matrix reads by address; the page text is the search list behind it.
+  // which isn't a board address); the page text is the search list behind it. The job's address
+  // is its posting on the company's Greenhouse board, which Job Matrix reads through Greenhouse's
+  // API. The pop-up's title links either there (job-boards.greenhouse.io/<board>/jobs/<id>) or
+  // to the company's own careers page (?gh_jid=<id>), which doesn't name the board; then the
+  // board comes from the job's MyGreenhouse address (/jobs/<board>/<id>), in the tab's address
+  // or the search result's link.
   const ghTitle = /(^|\.)my\.greenhouse\.io$/.test(location.hostname)
     ? document.querySelector('[role="dialog"] h2.application-form-header--title')
     : null;
@@ -244,21 +248,37 @@ export function readPage(selectors) {
     const company =
       text(box.querySelector('.application-form-header--company-name')).replace(/\s+/g, ' ') ||
       null;
-    const board = [...box.querySelectorAll('a[href]')]
-      .map((a) => {
-        try {
-          return new URL(a.href);
-        } catch {
-          return null;
-        }
-      })
-      .find(
-        (u) =>
-          u &&
-          /(^|\.)greenhouse\.io$/.test(u.hostname) &&
-          u.hostname !== location.hostname &&
-          /^\/[^/]+\/jobs\/\d+/.test(u.pathname),
-      );
+    const toUrl = (href) => {
+      try {
+        return new URL(href, location.href);
+      } catch {
+        return null;
+      }
+    };
+    const link = toUrl(ghTitle.closest('a[href]')?.href);
+    const onBoard =
+      link && /(^|\.)greenhouse\.io$/.test(link.hostname) && link.hostname !== location.hostname
+        ? link.pathname.match(/^\/([^/]+)\/jobs\/(\d+)/)
+        : null;
+    const id = onBoard?.[2] ?? link?.searchParams.get('gh_jid') ?? null;
+    // "/jobs/<board>/<id>" on MyGreenhouse: the tab's own address, else the search result's link.
+    const mine = (path) => path.match(/^\/jobs\/([^/]+)\/(\d+)\/?$/);
+    const here = mine(location.pathname);
+    const card = id
+      ? [...document.querySelectorAll('a[href]')]
+          .map((a) => toUrl(a.getAttribute('href')))
+          .find((u) => u?.hostname === location.hostname && mine(u.pathname)?.[2] === id)
+      : null;
+    const board =
+      onBoard?.[1] ??
+      (here && (!id || here[2] === id) ? here[1] : null) ??
+      (card ? mine(card.pathname)[1] : null);
+    const jobId = id ?? here?.[2] ?? null;
+    const url =
+      board && jobId
+        ? `https://job-boards.greenhouse.io/${board}/jobs/${jobId}`
+        : // The company's page with ?gh_jid=: Job Matrix finds the board it embeds.
+          (link?.href ?? null);
     const desc = box.querySelector('.application-description');
     // The header above the description: title, company, "Apply", work type, places, pay, "Posted".
     const header = [...(desc?.parentElement?.children ?? [])].find((e) => e.contains(ghTitle));
@@ -268,7 +288,7 @@ export function readPage(selectors) {
       .filter((l) => l && l !== title && l !== company && !/^(apply|posted\b)/i.test(l));
     siteFields = {
       site: 'MyGreenhouse',
-      url: board ? `${board.origin}${board.pathname.match(/^\/[^/]+\/jobs\/\d+/)[0]}` : null,
+      url,
       title,
       company,
       location: facts.filter((l) => !/\$\s?\d/.test(l)).join(' · ') || null,
